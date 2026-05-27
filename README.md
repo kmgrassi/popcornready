@@ -1,0 +1,85 @@
+# aividi — AI-native video editor (MVP)
+
+An MVP of the "core timeline loop" from the AI-native video editing architecture:
+
+> Upload clips → give a goal/script → Claude generates an editable **timeline**
+> → a critic loop improves it → revise it conversationally → preview in the
+> browser → export an MP4.
+
+The guiding principle from the architecture: **the AI never touches raw video.**
+It only plans and edits a structured **timeline** (`src/lib/types.ts`). Rendering
+is deterministic from that timeline via Remotion.
+
+## How it works
+
+```
+goal + clips
+   │
+   ▼
+planEdit()      goal → beats              (Claude, structured JSON)
+   ▼
+selectClips()   beats + clips → timeline  (Claude, structured JSON)
+   ▼
+critique()      timeline → scores + patches → applied  (Claude)
+   ▼
+revise()        chat message → patches → applied        (Claude)
+   ▼
+Remotion        timeline → <Player> preview + MP4 export
+```
+
+- **Agents** live in `src/lib/agent/`. Each is one structured Claude call using
+  `output_config.format` (JSON schema) on `claude-opus-4-7`, with the stable
+  instructions + clip catalog placed in a cached system block.
+- **Timeline patches** (`src/lib/timeline.ts`) are validated and clamped before
+  they touch the timeline, so a bad suggestion can't break rendering.
+- **Rendering** (`src/remotion/`) is shared between the live `@remotion/player`
+  preview and the server-side `renderMedia` MP4 export.
+- **Storage** is an MVP single-project JSON file in `data/`; uploaded clips go
+  to `public/uploads/`.
+
+## Setup
+
+```bash
+cp .env.local.example .env.local   # add your ANTHROPIC_API_KEY
+npm install
+npm run dev
+```
+
+Open http://localhost:3000
+
+1. Upload a handful of clips. Add a short description for each — in this MVP the
+   AI reasons over the **filename + your description + duration** (real
+   transcription/vision analysis is the documented next step, not in this slice).
+2. Write a creative goal, set length/aspect/style, and **Generate rough cut**.
+3. Inspect the plan, timeline, and critic scores; preview plays in the browser.
+4. **Revise (chat)**: "make it punchier", "shorten to 15s", "add captions",
+   "use less talking head". Each message is turned into timeline patches.
+5. **Export MP4**: renders the real cut of your clips via Remotion. The first
+   export downloads a headless browser, so it takes a bit longer.
+
+## Scope / limitations (deliberate, for the MVP)
+
+- Clip understanding is description-based — no FFmpeg proxies, Whisper
+  transcription, vision tagging, or embeddings yet (those are the "real
+  analysis" extension from the architecture doc).
+- Single project, file-based store (no Postgres/pgvector, no auth, no queue).
+- Critic runs one pass on generate; the full critique→re-render loop and
+  multiple rough-cut variants are future work.
+- MP4 export requires the dev server running (Remotion fetches the uploaded
+  clips over `http://localhost:3000`).
+
+## Project layout
+
+```
+src/
+  app/                Next.js App Router (page + API routes)
+    api/{project,upload,generate,revise,export}/route.ts
+  components/         Editor (UI) + Preview (Remotion Player)
+  lib/
+    agent/            planEdit / selectClips / critique / revise + JSON schemas
+    anthropic.ts      Claude client + structured JSON call helper
+    timeline.ts       patch engine + prompt formatting
+    types.ts          Timeline / Plan / Patch / Clip types
+    store.ts          JSON-file project store
+  remotion/           VideoComposition + registered root for render/preview
+```

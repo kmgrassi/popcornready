@@ -1,0 +1,122 @@
+// Core domain types. The whole product revolves around the Timeline — the AI
+// never touches raw video, it only edits this structured representation.
+
+export type AspectRatio = "9:16" | "16:9" | "1:1";
+
+export interface Clip {
+  id: string;
+  filename: string;
+  url: string; // served path, e.g. /uploads/abc.mp4
+  durationSec: number;
+  description: string; // user-provided hint the agent reasons over
+}
+
+export interface Beat {
+  name: string; // e.g. "hook", "problem", "solution", "proof", "cta"
+  durationSec: number;
+  intent: string;
+}
+
+export interface EditPlan {
+  targetLengthSec: number;
+  style: string;
+  aspectRatio: AspectRatio;
+  beats: Beat[];
+}
+
+export interface TimelineSegment {
+  id: string;
+  clipId: string;
+  sourceInSec: number;
+  sourceOutSec: number;
+  role: string; // which beat this serves
+  reason: string;
+  caption?: string;
+}
+
+export interface Timeline {
+  aspectRatio: AspectRatio;
+  fps: number;
+  segments: TimelineSegment[];
+}
+
+export interface CriticScores {
+  hook_score: number;
+  clarity_score: number;
+  pacing_score: number;
+  visual_variety: number;
+  script_coverage: number;
+  emotional_arc: number;
+  repetition_penalty: number;
+}
+
+export interface CriticReport {
+  scores: CriticScores;
+  summary: string;
+}
+
+export type Patch =
+  | {
+      op: "replace_clip";
+      segmentId: string;
+      newClipId: string;
+      sourceInSec: number;
+      sourceOutSec: number;
+      reason: string;
+    }
+  | {
+      op: "set_trim";
+      segmentId: string;
+      sourceInSec: number;
+      sourceOutSec: number;
+      reason: string;
+    }
+  | { op: "remove_segment"; segmentId: string; reason: string }
+  | { op: "reorder"; segmentIdsInOrder: string[]; reason: string }
+  | {
+      op: "add_segment";
+      clipId: string;
+      sourceInSec: number;
+      sourceOutSec: number;
+      role: string;
+      afterSegmentId: string | null;
+      reason: string;
+    }
+  | { op: "set_caption"; segmentId: string; caption: string; reason: string };
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface Project {
+  id: string;
+  goal: string;
+  plan: EditPlan | null;
+  timeline: Timeline | null;
+  clips: Clip[];
+  critic: CriticReport | null;
+  chat: ChatMessage[];
+  updatedAt: string;
+}
+
+export function dims(ar: AspectRatio): { width: number; height: number } {
+  switch (ar) {
+    case "16:9":
+      return { width: 1920, height: 1080 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    case "9:16":
+    default:
+      return { width: 1080, height: 1920 };
+  }
+}
+
+export function segmentDurationSec(s: TimelineSegment): number {
+  return Math.max(0, s.sourceOutSec - s.sourceInSec);
+}
+
+export function timelineDurationSec(t: Timeline | null): number {
+  if (!t) return 0;
+  return t.segments.reduce((sum, s) => sum + segmentDurationSec(s), 0);
+}

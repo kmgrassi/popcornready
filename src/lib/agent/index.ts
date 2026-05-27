@@ -1,0 +1,172 @@
+import { structuredCall } from "../anthropic";
+import {
+  Clip,
+  CriticReport,
+  EditPlan,
+  Patch,
+  Timeline,
+  TimelineSegment,
+} from "../types";
+import { clipCatalog, timelineForPrompt } from "../timeline";
+import {
+  criticSchema,
+  planSchema,
+  reviseSchema,
+  timelineSchema,
+} from "./schemas";
+
+// Shared, stable preamble. Goes in the cached system block so the four agent
+// calls in one generation reuse the same cached prefix.
+const PREAMBLE = `You are the editorial brain of an AI-native video editor.
+You never touch raw video — you only produce and edit a structured timeline.
+The timeline is a list of segments; each segment plays one clip trimmed to a
+[sourceInSec, sourceOutSec] window. Segments play back-to-back in order.
+
+Hard rules:
+- Only ever reference clips by the exact ids in the provided catalog.
+- sourceInSec/sourceOutSec must lie within that clip's duration.
+- Keep segments at least ~1s long and prefer punchy cuts (1.5–4s) for social pacing.
+- Maximize visual variety; avoid reusing the same clip back-to-back.
+- Match clips to beats using the clip descriptions and filenames as your only
+  signal about content.`;
+
+function planText(p: EditPlan): string {
+  return [
+    `target length: ${p.targetLengthSec}s`,
+    `style: ${p.style}`,
+    `aspect ratio: ${p.aspectRatio}`,
+    "beats:",
+    ...p.beats.map(
+      (b) => `  - ${b.name} (~${b.durationSec}s): ${b.intent}`
+    ),
+  ].join("\n");
+}
+
+export async function planEdit(input: {
+  goal: string;
+  targetLengthSec: number;
+  style: string;
+  aspectRatio: string;
+}): Promise<EditPlan> {
+  const sys = `${PREAMBLE}
+
+TASK: Convert the user's creative goal into a beat-by-beat edit plan. Choose
+beats appropriate to the goal and style (e.g. hook / problem / solution / proof
+/ cta for an ad). Beat durations should roughly sum to the target length.`;
+
+  const user = `Creative goal: ${input.goal}
+Target length: ${input.targetLengthSec}s
+Style: ${input.style}
+Aspect ratio: ${input.aspectRatio}
+
+Produce the edit plan.`;
+
+  const plan = await structuredCall<EditPlan>({
+    cachedSystem: sys,
+    user,
+    schema: planSchema,
+    maxTokens: 2000,
+  });
+  // Honor the user's explicit aspect ratio choice.
+  plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
+  return plan;
+}
+
+export async function selectClips(input: {
+  plan: EditPlan;
+  clips: Clip[];
+}): Promise<Timeline> {
+  const sys = `${PREAMBLE}
+
+CLIP CATALOG:
+${clipCatalog(input.clips)}
+
+TASK: Build the first rough cut. For each beat, pick the best-matching clip(s)
+and choose tight in/out points. Cover every beat; you may use multiple
+segments per beat. Order segments to flow as a finished edit.`;
+
+  const user = `Edit plan:
+${planText(input.plan)}
+
+Produce the timeline segments now.`;
+
+  const raw = await structuredCall<{ segments: Omit<TimelineSegment, "id">[] }>({
+    cachedSystem: sys,
+    user,
+    schema: timelineSchema,
+    maxTokens: 8000,
+  });
+
+  return {
+    aspectRatio: input.plan.aspectRatio,
+    fps: 30,
+    segments: raw.segments as TimelineSegment[],
+  };
+}
+
+export async function critique(input: {
+  plan: EditPlan;
+  timeline: Timeline;
+  clips: Clip[];
+}): Promise<{ report: CriticReport; patches: Patch[] }> {
+  const sys = `${PREAMBLE}
+
+CLIP CATALOG:
+${clipCatalog(input.clips)}
+
+TASK: You are the critic. Score the current cut 0–10 on each rubric dimension
+(repetition_penalty is 0=none, 10=severe). Then output concrete timeline
+patches that would improve the weakest areas. Only patch what helps; an empty
+patch list is fine if the cut is already strong. Reference real segmentIds and
+clipIds.`;
+
+  const user = `Edit plan:
+${planText(input.plan)}
+
+Current timeline:
+${timelineForPrompt(input.timeline, input.clips)}
+
+Score it and propose improvement patches.`;
+
+  const out = await structuredCall<{
+    scores: CriticReport["scores"];
+    summary: string;
+    patches: Patch[];
+  }>({ cachedSystem: sys, user, schema: criticSchema, maxTokens: 6000 });
+
+  return {
+    report: { scores: out.scores, summary: out.summary },
+    patches: out.patches,
+  };
+}
+
+export async function revise(input: {
+  message: string;
+  plan: EditPlan | null;
+  timeline: Timeline;
+  clips: Clip[];
+}): Promise<{ summary: string; patches: Patch[] }> {
+  const sys = `${PREAMBLE}
+
+CLIP CATALOG:
+${clipCatalog(input.clips)}
+
+TASK: The user wants to revise the current cut conversationally. Translate
+their request into concrete timeline patches. Make the smallest set of changes
+that satisfies the request. Reference real segmentIds and clipIds. Briefly
+summarize what you changed.`;
+
+  const user = `${input.plan ? `Edit plan:\n${planText(input.plan)}\n\n` : ""}Current timeline:
+${timelineForPrompt(input.timeline, input.clips)}
+
+User request: "${input.message}"
+
+Produce patches and a summary.`;
+
+  return structuredCall<{ summary: string; patches: Patch[] }>({
+    cachedSystem: sys,
+    user,
+    schema: reviseSchema,
+    maxTokens: 6000,
+  });
+}
