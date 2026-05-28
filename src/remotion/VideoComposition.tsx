@@ -9,6 +9,25 @@ export interface VideoProps {
   includeAudio?: boolean;
 }
 
+function audioVolume(clip: Clip): number {
+  const text = `${clip.filename} ${clip.description} ${
+    clip.generatedBy?.model || ""
+  } ${clip.generatedBy?.prompt || ""}`.toLowerCase();
+
+  if (
+    text.includes("music") ||
+    text.includes("soundtrack") ||
+    text.includes("score") ||
+    text.includes("background")
+  ) {
+    return 0.18;
+  }
+  if (text.includes("sound effect") || text.includes("ambience")) {
+    return 0.55;
+  }
+  return 1;
+}
+
 // Renders the structured timeline to actual frames. Each segment is one
 // trimmed clip placed sequentially. This same component powers both the
 // in-browser <Player> preview and the server-side MP4 render.
@@ -35,7 +54,7 @@ export const VideoComposition: React.FC<VideoProps> = ({
         const src = clip.url.startsWith("http")
           ? clip.url
           : `${baseUrl}${clip.url}`;
-        return <Audio key={clip.id} src={src} />;
+        return <Audio key={clip.id} src={src} volume={audioVolume(clip)} />;
       })}
       {timeline.segments.map((seg) => {
         const clip = byId[seg.clipId];
