@@ -1,0 +1,32 @@
+# Revise an existing cut. The worker runs the editorial agent and produces a
+# sibling timeline. AUTH_MODE=local must be set on the server.
+
+### Create a revision job
+POST http://localhost:3000/api/v1/projects/proj_local/timelines/tl_current/revisions
+Content-Type: application/json
+Idempotency-Key: revise-tighten-intro-001
+
+{
+  "message": "Tighten the intro and add a caption on the hook."
+}
+
+# 201 Created
+# {
+#   "job": {
+#     "id": "job_ab12cd34",
+#     "type": "revision",
+#     "status": "succeeded",
+#     "projectId": "proj_local",
+#     "createdAt": "2026-05-28T12:00:00.000Z",
+#     "updatedAt": "2026-05-28T12:00:02.000Z",
+#     "result": {
+#       "summary": "Trimmed the first beat and captioned the hook.",
+#       "appliedPatches": 2,
+#       "patches": [ /* ... */ ],
+#       "timeline": { "aspectRatio": "9:16", "fps": 30, "segments": [ /* sibling cut */ ] }
+#     }
+#   }
+# }
+
+### Poll the revision job
+GET http://localhost:3000/api/v1/projects/proj_local/timelines/tl_current/revisions/job_ab12cd34
