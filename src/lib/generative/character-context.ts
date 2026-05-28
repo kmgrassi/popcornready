@@ -1,90 +1,93 @@
-import {
+import { createHash } from "crypto";
+import path from "path";
+import type {
   CharacterConsistencyMode,
   CharacterProfile,
   CharacterReference,
-  GeneratedAssetCharacterBinding,
+  Clip,
   Project,
-  ShotDelta,
 } from "@/lib/types";
+import {
+  CharacterGenerationContext,
+  CharacterReferenceInput,
+  GenerativeAssetKind,
+  GenerativeProviderName,
+  ShotDelta,
+} from "./types";
 
-export const CHARACTER_PROMPT_INVARIANT_VERSION = "character-invariants-v1";
-
-const SUPPORTED_CONSISTENCY_MODES: CharacterConsistencyMode[] = [
+export const CHARACTER_CONSISTENCY_MODES: CharacterConsistencyMode[] = [
   "prompt_only",
   "reference_pack",
   "hero_frame",
   "first_frame_video",
+  "fine_tuned",
 ];
 
-export interface CharacterGenerationFields {
-  characterProfileIds: string[];
-  characterReferenceIds: string[];
-  consistencyMode?: CharacterConsistencyMode;
-  shotDelta?: ShotDelta;
+const SUPPORTED_MODES: Record<
+  GenerativeProviderName,
+  Partial<Record<GenerativeAssetKind, CharacterConsistencyMode[]>>
+> = {
+  openai: {
+    image: ["prompt_only", "reference_pack", "hero_frame"],
+    video: ["prompt_only", "hero_frame", "first_frame_video"],
+  },
+  gemini: {
+    video: ["prompt_only", "hero_frame", "first_frame_video"],
+  },
+  mock: {
+    image: ["prompt_only", "reference_pack", "hero_frame", "first_frame_video"],
+    video: ["prompt_only", "reference_pack", "hero_frame", "first_frame_video"],
+  },
+  elevenlabs: {
+    audio: ["prompt_only"],
+  },
+  nanobanano: {},
+};
+
+export function parseConsistencyMode(value: unknown): CharacterConsistencyMode {
+  const mode = String(value || "prompt_only");
+  if (!CHARACTER_CONSISTENCY_MODES.includes(mode as CharacterConsistencyMode)) {
+    throw new Error(`Unsupported consistencyMode: ${mode}.`);
+  }
+  return mode as CharacterConsistencyMode;
 }
 
-export interface ResolvedCharacterContext {
-  profiles: CharacterProfile[];
-  references: CharacterReference[];
-  consistencyMode: CharacterConsistencyMode;
-  shotDelta?: ShotDelta;
-  promptInvariantVersion: string;
-  invariantPrompt: string;
-}
-
-export class CharacterContextValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CharacterContextValidationError";
+export function ensureProviderSupportsCharacterMode(
+  provider: GenerativeProviderName,
+  kind: GenerativeAssetKind,
+  mode: CharacterConsistencyMode
+) {
+  const supported = SUPPORTED_MODES[provider]?.[kind] || [];
+  if (!supported.includes(mode)) {
+    throw new Error(
+      `${provider} ${kind} generation does not support consistencyMode=${mode}.`
+    );
   }
 }
 
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(String).map((item) => item.trim()).filter(Boolean);
+export function promptInvariantVersion(profiles: CharacterProfile[]): string {
+  const payload = profiles
+    .map((profile) => ({
+      id: profile.id,
+      identityInvariants: profile.identityInvariants,
+      styleInvariants: profile.styleInvariants || "",
+      wardrobeInvariants: profile.wardrobeInvariants || "",
+      negativePrompt: profile.negativePrompt || "",
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex")
+    .slice(0, 12);
 }
 
-export function parseCharacterGenerationFields(
-  body: Record<string, unknown>
-): CharacterGenerationFields {
-  const mode = body.consistencyMode
-    ? (String(body.consistencyMode) as CharacterConsistencyMode)
-    : undefined;
-  const shotDelta =
-    body.shotDelta && typeof body.shotDelta === "object" && !Array.isArray(body.shotDelta)
-      ? Object.fromEntries(
-          Object.entries(body.shotDelta as Record<string, unknown>)
-            .map(([key, value]) => [key, String(value || "").trim()])
-            .filter(([, value]) => Boolean(value))
-        )
-      : undefined;
-
-  return {
-    characterProfileIds: asStringArray(body.characterProfileIds),
-    characterReferenceIds: asStringArray(body.characterReferenceIds),
-    consistencyMode: mode,
-    shotDelta,
-  };
-}
-
-export function hasCharacterGenerationFields(
-  fields: CharacterGenerationFields
-): boolean {
-  return Boolean(
-    fields.characterProfileIds.length ||
-      fields.characterReferenceIds.length ||
-      fields.consistencyMode ||
-      fields.shotDelta
-  );
-}
-
-export function buildCharacterInvariantPrompt(
-  profiles: CharacterProfile[],
-  shotPrompt: string,
-  shotDelta?: ShotDelta
-): string {
-  const blocks = profiles.map((profile) => {
-    const lines = [
+export function buildCharacterPrompt(input: {
+  profiles: CharacterProfile[];
+  prompt: string;
+  shotDelta?: ShotDelta;
+}): string {
+  const invariantBlocks = input.profiles.map((profile) =>
+    [
       `Character: ${profile.name}`,
       profile.description ? `Description: ${profile.description}` : "",
       `Identity invariants: ${profile.identityInvariants}`,
@@ -92,111 +95,149 @@ export function buildCharacterInvariantPrompt(
       profile.wardrobeInvariants
         ? `Wardrobe invariants: ${profile.wardrobeInvariants}`
         : "",
+      "Do not redesign the character. Preserve the same face, body, age, proportions, and recognizable identity unless the shot delta explicitly says otherwise.",
       profile.negativePrompt ? `Avoid: ${profile.negativePrompt}` : "",
-    ].filter(Boolean);
-    return lines.join("\n");
-  });
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
 
-  const shotDeltaLines = shotDelta
-    ? Object.entries(shotDelta)
-        .filter(([, value]) => Boolean(value))
-        .map(([key, value]) => `${key}: ${value}`)
-    : [];
+  const shotDeltaLines = [
+    input.shotDelta?.prompt || input.prompt,
+    input.shotDelta?.action ? `Action: ${input.shotDelta.action}` : "",
+    input.shotDelta?.camera ? `Camera: ${input.shotDelta.camera}` : "",
+    input.shotDelta?.setting ? `Setting: ${input.shotDelta.setting}` : "",
+    input.shotDelta?.emotion ? `Emotion: ${input.shotDelta.emotion}` : "",
+  ].filter(Boolean);
 
   return [
-    ...blocks,
-    shotDeltaLines.length ? `Shot delta:\n${shotDeltaLines.join("\n")}` : "",
-    shotPrompt ? `Prompt:\n${shotPrompt}` : "",
+    invariantBlocks.length > 0 ? "[character identity invariants]" : "",
+    ...invariantBlocks,
+    "[shot delta prompt]",
+    ...shotDeltaLines,
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export function resolveCharacterContext(
-  project: Project,
-  fields: CharacterGenerationFields,
-  shotPrompt: string
-): ResolvedCharacterContext | null {
-  if (!hasCharacterGenerationFields(fields)) return null;
+export function assertLocalPublicPath(url: string, publicRoot: string): string {
+  if (!url.startsWith("/uploads/") && !url.startsWith("/generated/")) {
+    throw new Error(`Character reference asset must be local: ${url}.`);
+  }
+  const filePath = path.normalize(path.join(publicRoot, url));
+  if (!filePath.startsWith(publicRoot)) {
+    throw new Error(`Character reference asset path escapes public root: ${url}.`);
+  }
+  return filePath;
+}
 
-  const consistencyMode = fields.consistencyMode || "prompt_only";
-  if (!SUPPORTED_CONSISTENCY_MODES.includes(consistencyMode)) {
-    throw new CharacterContextValidationError(
-      `Unsupported consistencyMode: ${consistencyMode}`
-    );
+export function resolveCharacterGenerationContext(input: {
+  project: Project;
+  provider: GenerativeProviderName;
+  kind: GenerativeAssetKind;
+  prompt: string;
+  publicRoot: string;
+  characterProfileIds: string[];
+  characterReferenceIds?: string[];
+  consistencyMode: CharacterConsistencyMode;
+  shotDelta?: ShotDelta;
+}): CharacterGenerationContext | undefined {
+  if (input.characterProfileIds.length === 0 && !input.characterReferenceIds?.length) {
+    return undefined;
   }
 
-  const profiles = fields.characterProfileIds.map((id) => {
-    const profile = project.characterProfiles?.find((candidate) => candidate.id === id);
-    if (!profile) throw new CharacterContextValidationError(`Character profile not found: ${id}`);
+  ensureProviderSupportsCharacterMode(
+    input.provider,
+    input.kind,
+    input.consistencyMode
+  );
+
+  const profiles = input.characterProfileIds.map((id) => {
+    const profile = input.project.characterProfiles?.find((item) => item.id === id);
+    if (!profile) throw new Error(`Unknown character profile: ${id}.`);
     if (profile.status === "archived") {
-      throw new CharacterContextValidationError(`Character profile is archived: ${id}`);
+      throw new Error(`Character profile is archived: ${id}.`);
     }
     if (!profile.identityInvariants.trim()) {
-      throw new CharacterContextValidationError(
-        `Character profile identityInvariants are blank: ${id}`
-      );
+      throw new Error(`Character profile identityInvariants are blank: ${id}.`);
     }
     return profile;
   });
 
-  if (fields.characterReferenceIds.length && profiles.length === 0) {
-    throw new CharacterContextValidationError(
-      "characterProfileIds are required when characterReferenceIds are provided."
-    );
-  }
-
   const profileIds = new Set(profiles.map((profile) => profile.id));
-  const references = fields.characterReferenceIds.map((id) => {
-    const reference = project.characterReferences?.find((candidate) => candidate.id === id);
-    if (!reference) {
-      throw new CharacterContextValidationError(`Character reference not found: ${id}`);
-    }
-    if (!profileIds.has(reference.characterProfileId)) {
-      throw new CharacterContextValidationError(
-        `Character reference does not belong to a selected profile: ${id}`
-      );
-    }
-    if (reference.quality === "rejected") {
-      throw new CharacterContextValidationError(`Character reference is rejected: ${id}`);
-    }
-    if (!project.clips.some((clip) => clip.id === reference.assetId)) {
-      throw new CharacterContextValidationError(
-        `Character reference asset not found: ${reference.assetId}`
-      );
-    }
-    return reference;
-  });
+  const allReferences = input.project.characterReferences || [];
+  const requestedReferenceIds = input.characterReferenceIds || [];
+  const references =
+    requestedReferenceIds.length > 0
+      ? requestedReferenceIds.map((id) => {
+          const reference = allReferences.find((item) => item.id === id);
+          if (!reference) throw new Error(`Unknown character reference: ${id}.`);
+          return reference;
+        })
+      : allReferences.filter(
+          (reference) =>
+            profileIds.has(reference.characterProfileId) &&
+            reference.quality === "approved"
+        );
 
-  if (
-    consistencyMode !== "prompt_only" &&
-    fields.characterReferenceIds.length === 0
-  ) {
-    throw new CharacterContextValidationError(
-      `consistencyMode=${consistencyMode} requires at least one characterReferenceId.`
+  for (const reference of references) {
+    if (!profileIds.has(reference.characterProfileId)) {
+      throw new Error(
+        `Character reference ${reference.id} does not belong to a selected profile.`
+      );
+    }
+    if (reference.quality !== "approved") {
+      throw new Error(`Character reference ${reference.id} is not approved.`);
+    }
+  }
+
+  const selectedReferences =
+    input.consistencyMode === "prompt_only"
+      ? []
+      : input.consistencyMode === "hero_frame" ||
+          input.consistencyMode === "first_frame_video"
+      ? preferHeroReference(references).slice(0, 1)
+      : references;
+
+  if (input.consistencyMode !== "prompt_only" && selectedReferences.length === 0) {
+    throw new Error(
+      `consistencyMode=${input.consistencyMode} requires at least one approved character reference.`
     );
   }
+
+  const clipsById = new Map(input.project.clips.map((clip: Clip) => [clip.id, clip]));
+  const referenceInputs: CharacterReferenceInput[] = selectedReferences.map(
+    (reference: CharacterReference) => {
+      const clip = clipsById.get(reference.assetId);
+      if (!clip) {
+        throw new Error(`Character reference ${reference.id} points to a missing asset.`);
+      }
+      if ((clip.kind || "video") !== "image") {
+        throw new Error(`Character reference ${reference.id} must point to an image.`);
+      }
+      return {
+        reference,
+        assetId: clip.id,
+        path: assertLocalPublicPath(clip.url, input.publicRoot),
+        url: clip.url,
+      };
+    }
+  );
 
   return {
     profiles,
-    references,
-    consistencyMode,
-    shotDelta: fields.shotDelta,
-    promptInvariantVersion: CHARACTER_PROMPT_INVARIANT_VERSION,
-    invariantPrompt: buildCharacterInvariantPrompt(profiles, shotPrompt, fields.shotDelta),
+    references: referenceInputs,
+    consistencyMode: input.consistencyMode,
+    promptInvariantVersion: promptInvariantVersion(profiles),
+    originalPrompt: input.prompt,
+    shotDelta: input.shotDelta,
   };
 }
 
-export function characterBindingForAsset(
-  assetId: string,
-  context: ResolvedCharacterContext
-): GeneratedAssetCharacterBinding {
-  return {
-    assetId,
-    characterProfileIds: context.profiles.map((profile) => profile.id),
-    referenceIds: context.references.map((reference) => reference.id),
-    consistencyMode: context.consistencyMode,
-    shotDelta: context.shotDelta,
-    promptInvariantVersion: context.promptInvariantVersion,
-  };
+function preferHeroReference(references: CharacterReference[]): CharacterReference[] {
+  return [...references].sort((a, b) => {
+    if (a.role === "hero_frame" && b.role !== "hero_frame") return -1;
+    if (b.role === "hero_frame" && a.role !== "hero_frame") return 1;
+    return a.id.localeCompare(b.id);
+  });
 }

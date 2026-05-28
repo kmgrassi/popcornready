@@ -6,22 +6,23 @@ import { Clip } from "@/lib/types";
 import { providerFor } from "@/lib/generative/providers";
 import { preflightGenerationContent } from "@/lib/generative/preflight";
 import {
-  characterBindingForAsset,
-  CharacterContextValidationError,
-  parseCharacterGenerationFields,
-  resolveCharacterContext,
+  buildCharacterPrompt,
+  parseConsistencyMode,
+  resolveCharacterGenerationContext,
 } from "@/lib/generative/character-context";
 import {
   AudioGenerationMode,
   DialogueInput,
   GenerativeAssetKind,
   GenerativeProviderName,
+  ShotDelta,
 } from "@/lib/generative/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
+const PUBLIC_DIR = path.join(process.cwd(), "public");
 const AUDIO_MODES = new Set(["speech", "dialogue", "sound_effect", "music"]);
 
 function newId(prefix: string): string {
@@ -41,6 +42,41 @@ function localPublicPath(url: string): string | null {
 function parseAudioMode(value: unknown): AudioGenerationMode | undefined {
   const mode = String(value || "");
   return AUDIO_MODES.has(mode) ? (mode as AudioGenerationMode) : undefined;
+}
+
+function parseStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function parseShotDelta(value: unknown): ShotDelta | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Record<string, unknown>;
+  return {
+    action: source.action ? String(source.action) : undefined,
+    camera: source.camera ? String(source.camera) : undefined,
+    setting: source.setting ? String(source.setting) : undefined,
+    emotion: source.emotion ? String(source.emotion) : undefined,
+    prompt: source.prompt ? String(source.prompt) : undefined,
+  };
+}
+
+function statusForError(message: string): number {
+  const badRequestMarkers = [
+    "Unsupported consistencyMode",
+    "does not support consistencyMode",
+    "Unknown character profile",
+    "Unknown character reference",
+    "Unknown generated asset",
+    "is archived",
+    "is not approved",
+    "does not belong",
+    "requires at least one",
+    "points to a missing asset",
+    "must point to an image",
+    "must be local",
+    "path escapes public root",
+  ];
+  return badRequestMarkers.some((marker) => message.includes(marker)) ? 400 : 500;
 }
 
 function normalizeProviderName(
@@ -81,7 +117,28 @@ export async function POST(req: NextRequest) {
     const kind = String(body.kind || "image") as GenerativeAssetKind;
     const providerName = normalizeProviderName(body.provider, kind);
     const audioMode = parseAudioMode(body.audioMode);
-    const prompt = String(body.prompt || "").trim();
+    const regenerateFromClipId = body.regenerateFromClipId
+      ? String(body.regenerateFromClipId)
+      : undefined;
+    const project = await getProject();
+    const regenerateFromClip = regenerateFromClipId
+      ? project.clips.find((clip: Clip) => clip.id === regenerateFromClipId)
+      : undefined;
+    if (regenerateFromClipId && !regenerateFromClip) {
+      return NextResponse.json(
+        { error: `Unknown generated asset: ${regenerateFromClipId}.` },
+        { status: 400 }
+      );
+    }
+
+    const previousBinding = regenerateFromClip?.generatedBy?.characterBinding;
+    const prompt = String(
+      body.prompt ||
+        body.shotDelta?.prompt ||
+        previousBinding?.originalPrompt ||
+        regenerateFromClip?.generatedBy?.prompt ||
+        ""
+    ).trim();
     const dialogueInputs: DialogueInput[] | undefined = Array.isArray(body.dialogueInputs)
       ? body.dialogueInputs.map((line: any) => ({
           text: String(line.text || ""),
@@ -100,10 +157,20 @@ export async function POST(req: NextRequest) {
     const seconds = body.seconds ? Number(body.seconds) : undefined;
     const durationSec =
       Number(body.durationSec) || (kind === "image" ? 4 : seconds || 8);
-    const referenceClipIds = Array.isArray(body.referenceClipIds)
-      ? body.referenceClipIds.map(String)
-      : [];
-    const characterFields = parseCharacterGenerationFields(body);
+    const referenceClipIds = parseStringArray(body.referenceClipIds);
+    const characterProfileIds =
+      parseStringArray(body.characterProfileIds).length > 0
+        ? parseStringArray(body.characterProfileIds)
+        : previousBinding?.characterProfileIds || [];
+    const characterReferenceIds =
+      parseStringArray(body.characterReferenceIds).length > 0
+        ? parseStringArray(body.characterReferenceIds)
+        : previousBinding?.referenceIds || [];
+    const consistencyMode = body.consistencyMode
+      ? parseConsistencyMode(body.consistencyMode)
+      : previousBinding?.consistencyMode ||
+        (characterProfileIds.length > 0 ? "reference_pack" : "prompt_only");
+    const shotDelta = parseShotDelta(body.shotDelta);
 
     if (kind !== "image" && kind !== "video" && kind !== "audio") {
       return NextResponse.json(
@@ -134,7 +201,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const project = await getProject();
     const preflightPrompt =
       prompt ||
       dialogueInputs?.map((line: DialogueInput) => line.text).join("\n") ||
@@ -153,11 +219,6 @@ export async function POST(req: NextRequest) {
       plan: project.plan,
       clips: project.clips,
     });
-    const characterContext = resolveCharacterContext(
-      project,
-      characterFields,
-      preflight.finalPrompt
-    );
     const referencePaths = referenceClipIds
       .map((id: string) =>
         project.clips.find((clip: Clip) => clip.id === id)
@@ -169,11 +230,33 @@ export async function POST(req: NextRequest) {
       );
 
     const provider = providerFor(providerName);
-    const result = await provider.generateAsset({
+    const characterContext = resolveCharacterGenerationContext({
+      project,
       provider: provider.name,
       kind,
       prompt: preflight.finalPrompt,
-      referencePaths,
+      publicRoot: PUBLIC_DIR,
+      characterProfileIds,
+      characterReferenceIds,
+      consistencyMode,
+      shotDelta,
+    });
+    const characterReferencePaths =
+      characterContext?.references.map((reference) => reference.path) || [];
+    const providerPrompt = characterContext
+      ? buildCharacterPrompt({
+          profiles: characterContext.profiles,
+          prompt: preflight.finalPrompt,
+          shotDelta,
+        })
+      : preflight.finalPrompt;
+
+    const result = await provider.generateAsset({
+      provider: provider.name,
+      kind,
+      prompt: providerPrompt,
+      referencePaths: [...characterReferencePaths, ...referencePaths],
+      characterContext,
       model: body.model ? String(body.model) : undefined,
       size: body.size ? String(body.size) : undefined,
       quality: body.quality,
@@ -195,11 +278,6 @@ export async function POST(req: NextRequest) {
         typeof body.forceInstrumental === "boolean"
           ? body.forceInstrumental
           : undefined,
-      characterProfileIds: characterFields.characterProfileIds,
-      characterReferenceIds: characterFields.characterReferenceIds,
-      consistencyMode: characterContext?.consistencyMode,
-      shotDelta: characterContext?.shotDelta,
-      promptInvariantVersion: characterContext?.promptInvariantVersion,
     });
 
     await fs.mkdir(GENERATED_DIR, { recursive: true });
@@ -218,30 +296,56 @@ export async function POST(req: NextRequest) {
       generatedBy: {
         provider: result.provider,
         model: result.model,
-        prompt: result.prompt,
+        prompt: preflight.finalPrompt,
+        providerPrompt: result.prompt,
         originalPrompt:
-          preflight.originalPrompt === result.prompt
+          preflight.originalPrompt === preflight.finalPrompt
             ? undefined
             : preflight.originalPrompt,
         preflight:
           preflight.completedIterations > 0
             ? preflight
             : undefined,
+        ...(characterContext
+          ? {
+              characterBinding: {
+                assetId: id,
+                characterProfileIds: characterContext.profiles.map(
+                  (profile) => profile.id
+                ),
+                referenceIds: characterContext.references.map(
+                  ({ reference }) => reference.id
+                ),
+                consistencyMode: characterContext.consistencyMode,
+                originalPrompt: preflight.originalPrompt,
+                promptInvariantVersion:
+                  characterContext.promptInvariantVersion,
+                providerSettings: {
+                  provider: result.provider,
+                  model: result.model,
+                  references: characterContext.references.map(
+                    ({ reference }) => reference.id
+                  ),
+                  mode: characterContext.consistencyMode,
+                  durationSec,
+                  aspectRatio: body.size ? String(body.size) : undefined,
+                  promptInvariantVersion:
+                    characterContext.promptInvariantVersion,
+                  ...result.providerSettings,
+                },
+              },
+            }
+          : {}),
       },
-      characterBinding: characterContext
-        ? characterBindingForAsset(id, characterContext)
-        : undefined,
     };
 
     const updated = await addClip(clip);
     return NextResponse.json({ clip, project: updated });
   } catch (err: any) {
-    if (err instanceof CharacterContextValidationError) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
-    }
+    const message = err?.message || "Asset generation failed";
     return NextResponse.json(
-      { error: err?.message || "Asset generation failed" },
-      { status: 500 }
+      { error: message },
+      { status: statusForError(message) }
     );
   }
 }

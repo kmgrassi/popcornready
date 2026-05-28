@@ -1,4 +1,8 @@
-import { CharacterConsistencyMode, ShotDelta } from "@/lib/types";
+import type {
+  CharacterConsistencyMode,
+  CharacterProfile,
+  CharacterReference,
+} from "@/lib/types";
 
 export type GenerativeProviderName =
   | "openai"
@@ -15,11 +19,36 @@ export interface DialogueInput {
   voiceId: string;
 }
 
+export interface ShotDelta {
+  action?: string;
+  camera?: string;
+  setting?: string;
+  emotion?: string;
+  prompt?: string;
+}
+
+export interface CharacterReferenceInput {
+  reference: CharacterReference;
+  assetId: string;
+  path: string;
+  url: string;
+}
+
+export interface CharacterGenerationContext {
+  profiles: CharacterProfile[];
+  references: CharacterReferenceInput[];
+  consistencyMode: CharacterConsistencyMode;
+  promptInvariantVersion: string;
+  originalPrompt: string;
+  shotDelta?: ShotDelta;
+}
+
 export interface GenerateAssetRequest {
   provider: GenerativeProviderName;
   kind: GenerativeAssetKind;
   prompt: string;
   referencePaths?: string[];
+  characterContext?: CharacterGenerationContext;
   model?: string;
   size?: string;
   quality?: "low" | "medium" | "high" | "auto";
@@ -32,11 +61,6 @@ export interface GenerateAssetRequest {
   loop?: boolean;
   promptInfluence?: number;
   forceInstrumental?: boolean;
-  characterProfileIds?: string[];
-  characterReferenceIds?: string[];
-  consistencyMode?: CharacterConsistencyMode;
-  shotDelta?: ShotDelta;
-  promptInvariantVersion?: string;
 }
 
 export interface GeneratedAssetResult {
@@ -47,6 +71,14 @@ export interface GeneratedAssetResult {
   provider: GenerativeProviderName;
   model?: string;
   prompt: string;
+  providerSettings?: {
+    references: string[];
+    mode: CharacterConsistencyMode;
+    seed?: number;
+    durationSec?: number;
+    aspectRatio?: string;
+    promptInvariantVersion: string;
+  };
 }
 
 export interface GenerativeProvider {

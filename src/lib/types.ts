@@ -3,24 +3,6 @@
 
 export type AspectRatio = "9:16" | "16:9" | "1:1";
 
-export interface Clip {
-  id: string;
-  filename: string;
-  url: string; // served path, e.g. /uploads/abc.mp4
-  kind?: "video" | "image" | "audio";
-  durationSec: number;
-  description: string; // user-provided hint the agent reasons over
-  source?: "upload" | "generated";
-  generatedBy?: {
-    provider: string;
-    model?: string;
-    prompt: string;
-    originalPrompt?: string;
-    preflight?: GenerationPreflightResult;
-  };
-  characterBinding?: GeneratedAssetCharacterBinding;
-}
-
 export type CharacterReferenceRole =
   | "front_portrait"
   | "three_quarter"
@@ -38,15 +20,8 @@ export type CharacterConsistencyMode =
   | "prompt_only"
   | "reference_pack"
   | "hero_frame"
-  | "first_frame_video";
-
-export interface ShotDelta {
-  action?: string;
-  camera?: string;
-  setting?: string;
-  emotion?: string;
-  [key: string]: string | undefined;
-}
+  | "first_frame_video"
+  | "fine_tuned";
 
 export interface CharacterProfile {
   id: string;
@@ -84,9 +59,38 @@ export interface GeneratedAssetCharacterBinding {
   characterProfileIds: string[];
   referenceIds: string[];
   consistencyMode: CharacterConsistencyMode;
-  shotDelta?: ShotDelta;
+  originalPrompt: string;
   promptInvariantVersion: string;
+  providerSettings?: {
+    provider: string;
+    model?: string;
+    references: string[];
+    mode: CharacterConsistencyMode;
+    seed?: number;
+    durationSec?: number;
+    aspectRatio?: string;
+    promptInvariantVersion: string;
+  };
   consistencyReview?: CharacterConsistencyReview;
+}
+
+export interface Clip {
+  id: string;
+  filename: string;
+  url: string; // served path, e.g. /uploads/abc.mp4
+  kind?: "video" | "image" | "audio";
+  durationSec: number;
+  description: string; // user-provided hint the agent reasons over
+  source?: "upload" | "generated";
+  generatedBy?: {
+    provider: string;
+    model?: string;
+    prompt: string;
+    providerPrompt?: string;
+    characterBinding?: GeneratedAssetCharacterBinding;
+    originalPrompt?: string;
+    preflight?: GenerationPreflightResult;
+  };
 }
 
 export interface Beat {

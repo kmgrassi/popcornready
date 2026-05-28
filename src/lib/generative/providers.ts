@@ -50,6 +50,19 @@ function geminiAspectRatio(size?: string): string {
   return width / height < 1 ? "9:16" : "16:9";
 }
 
+function characterProviderSettings(input: GenerateAssetRequest) {
+  if (!input.characterContext) return undefined;
+  return {
+    references: input.characterContext.references.map(
+      ({ reference }) => reference.id
+    ),
+    mode: input.characterContext.consistencyMode,
+    durationSec: input.seconds,
+    aspectRatio: input.size,
+    promptInvariantVersion: input.characterContext.promptInvariantVersion,
+  };
+}
+
 async function openaiFetch(
   pathName: string,
   init: RequestInit
@@ -105,6 +118,7 @@ async function generateOpenAIImage(
       provider: "openai",
       model,
       prompt,
+      providerSettings: characterProviderSettings(input),
     };
   }
 
@@ -129,6 +143,7 @@ async function generateOpenAIImage(
     provider: "openai",
     model,
     prompt,
+    providerSettings: characterProviderSettings(input),
   };
 }
 
@@ -186,6 +201,7 @@ async function generateOpenAIVideo(
     provider: "openai",
     model,
     prompt,
+    providerSettings: characterProviderSettings(input),
   };
 }
 
@@ -223,6 +239,15 @@ async function generateGeminiVideo(
   const model = input.model || GEMINI_DEFAULT_VIDEO_MODEL;
   const ai = new GoogleGenAI({ apiKey: key });
   const firstReference = input.referencePaths?.[0];
+  if (
+    input.characterContext &&
+    input.characterContext.consistencyMode === "reference_pack" &&
+    input.characterContext.references.length > 1
+  ) {
+    throw new Error(
+      "Gemini video generation supports hero_frame or first_frame_video character references, not multi-image reference_pack."
+    );
+  }
 
   let operation = await ai.models.generateVideos({
     model,
@@ -259,6 +284,7 @@ async function generateGeminiVideo(
     provider: "gemini",
     model,
     prompt,
+    providerSettings: characterProviderSettings(input),
   };
 }
 
@@ -297,9 +323,23 @@ const mockProvider: GenerativeProvider = {
   name: "mock",
   async generateAsset(input) {
     const prompt = requirePrompt(input.prompt);
+    const characterSummary = input.characterContext
+      ? [
+          `Characters: ${input.characterContext.profiles
+            .map((profile) => profile.id)
+            .join(", ")}`,
+          `References: ${input.characterContext.references
+            .map(({ reference }) => reference.id)
+            .join(", ")}`,
+          `Mode: ${input.characterContext.consistencyMode}`,
+          `Invariant: ${input.characterContext.promptInvariantVersion}`,
+        ].join(" | ")
+      : "Characters: none";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="100%" height="100%" fill="#111827"/><text x="64" y="120" fill="#f9fafb" font-size="48" font-family="Arial">Generated placeholder</text><text x="64" y="200" fill="#cbd5e1" font-size="28" font-family="Arial">${prompt
       .replace(/[<>&]/g, "")
-      .slice(0, 90)}</text></svg>`;
+      .slice(0, 90)}</text><text x="64" y="260" fill="#94a3b8" font-size="22" font-family="Arial">${characterSummary
+      .replace(/[<>&]/g, "")
+      .slice(0, 120)}</text></svg>`;
     return {
       kind: "image",
       bytes: Buffer.from(svg),
@@ -308,6 +348,7 @@ const mockProvider: GenerativeProvider = {
       provider: "mock",
       model: "mock-svg",
       prompt,
+      providerSettings: characterProviderSettings(input),
     };
   },
 };

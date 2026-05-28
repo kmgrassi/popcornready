@@ -18,6 +18,10 @@ const Preview = dynamic(() => import("./Preview"), { ssr: false });
 const DEFAULT_IMAGE_SIZE = "1024x1536";
 const DEFAULT_VIDEO_SIZE = "720x1280";
 
+function defaultConsistencyModeForKind(kind: "image" | "video") {
+  return kind === "video" ? "hero_frame" : "reference_pack";
+}
+
 interface ExportResult {
   url: string;
   silentUrl?: string;
@@ -71,6 +75,9 @@ export function Editor() {
   const [assetSeconds, setAssetSeconds] = useState(8);
   const [preflightReviewIterations, setPreflightReviewIterations] = useState(1);
   const [referenceClipIds, setReferenceClipIds] = useState<string[]>([]);
+  const [characterProfileIds, setCharacterProfileIds] = useState<string[]>([]);
+  const [consistencyMode, setConsistencyMode] = useState("prompt_only");
+  const [shotDeltaPrompt, setShotDeltaPrompt] = useState("");
 
   // chat
   const [message, setMessage] = useState("");
@@ -176,6 +183,11 @@ export function Editor() {
           seconds: assetSeconds,
           durationSec: assetKind === "image" ? 4 : assetSeconds,
           referenceClipIds,
+          characterProfileIds,
+          consistencyMode,
+          shotDelta: shotDeltaPrompt.trim()
+            ? { prompt: shotDeltaPrompt.trim() }
+            : undefined,
           preflightReviewIterations,
           script: goal,
           storyContext,
@@ -187,6 +199,7 @@ export function Editor() {
       setAssetPrompt("");
       setAssetDesc("");
       setReferenceClipIds([]);
+      setShotDeltaPrompt("");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -240,11 +253,64 @@ export function Editor() {
 
   const clipById = Object.fromEntries(clips.map((c) => [c.id, c]));
   const imageClips = clips.filter((c) => (c.kind || "video") === "image");
+  const characterProfiles = project?.characterProfiles ?? [];
 
   function toggleReferenceClip(id: string) {
     setReferenceClipIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+  }
+
+  function toggleCharacterProfile(id: string) {
+    setCharacterProfileIds((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id];
+      if (next.length > 0 && consistencyMode === "prompt_only") {
+        setConsistencyMode(defaultConsistencyModeForKind(assetKind));
+      }
+      return next;
+    });
+  }
+
+  async function handleRegenerateAsset(clip: Clip, newShotDelta: boolean) {
+    const binding = clip.generatedBy?.characterBinding;
+    if (!binding) return;
+    const nextPrompt = newShotDelta
+      ? window.prompt("New shot delta", binding.originalPrompt || clip.description)
+      : undefined;
+    if (newShotDelta && !nextPrompt?.trim()) return;
+
+    setError(null);
+    setBusy("Regenerating with character references...");
+    try {
+      const res = await fetch("/api/generate-assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: clip.generatedBy?.provider || assetProvider,
+          kind: clip.kind || "image",
+          regenerateFromClipId: clip.id,
+          prompt: newShotDelta ? nextPrompt : undefined,
+          description: newShotDelta ? nextPrompt : clip.description,
+          model: clip.generatedBy?.model,
+          size: binding.providerSettings?.aspectRatio,
+          seconds: clip.durationSec,
+          durationSec: clip.durationSec,
+          consistencyMode: binding.consistencyMode,
+          characterProfileIds: binding.characterProfileIds,
+          characterReferenceIds: binding.referenceIds,
+          shotDelta: newShotDelta && nextPrompt ? { prompt: nextPrompt } : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Regeneration failed");
+      setProject(data.project);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
   }
 
   function setStoryField<K extends keyof StoryContext>(
@@ -302,6 +368,13 @@ export function Editor() {
                 setAssetSize(
                   nextKind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_IMAGE_SIZE
                 );
+                if (
+                  characterProfileIds.length > 0 &&
+                  (consistencyMode === "prompt_only" ||
+                    (nextKind === "video" && consistencyMode === "reference_pack"))
+                ) {
+                  setConsistencyMode(defaultConsistencyModeForKind(nextKind));
+                }
               }}
             >
               <option value="image">Image</option>
@@ -374,6 +447,41 @@ export function Editor() {
             </div>
           </div>
         )}
+        {characterProfiles.length > 0 && (
+          <div>
+            <label>Characters</label>
+            <div className="reference-list">
+              {characterProfiles
+                .filter((profile) => profile.status !== "archived")
+                .map((profile) => (
+                  <label className="check-row" key={profile.id}>
+                    <input
+                      type="checkbox"
+                      checked={characterProfileIds.includes(profile.id)}
+                      onChange={() => toggleCharacterProfile(profile.id)}
+                    />
+                    <span>{profile.name}</span>
+                  </label>
+                ))}
+            </div>
+            <label>Consistency mode</label>
+            <select
+              value={consistencyMode}
+              onChange={(e) => setConsistencyMode(e.target.value)}
+            >
+              <option value="prompt_only">Prompt only</option>
+              <option value="reference_pack">Reference pack</option>
+              <option value="hero_frame">Hero frame</option>
+              <option value="first_frame_video">First frame video</option>
+            </select>
+            <label>Shot delta</label>
+            <input
+              value={shotDeltaPrompt}
+              onChange={(e) => setShotDeltaPrompt(e.target.value)}
+              placeholder="Optional per-shot change while preserving identity"
+            />
+          </div>
+        )}
         <div style={{ marginTop: 8 }}>
           <button
             onClick={handleGenerateAsset}
@@ -420,6 +528,30 @@ export function Editor() {
                       Preflight: {c.generatedBy.preflight.passes[0].summary}
                     </div>
                   )}
+                </>
+              )}
+              {c.generatedBy?.characterBinding && (
+                <>
+                  <div className="muted">
+                    Characters:{" "}
+                    {c.generatedBy.characterBinding.characterProfileIds.join(", ")}
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button
+                      className="secondary"
+                      onClick={() => handleRegenerateAsset(c, false)}
+                      disabled={!!busy}
+                    >
+                      Regenerate same character
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => handleRegenerateAsset(c, true)}
+                      disabled={!!busy}
+                    >
+                      New shot delta
+                    </button>
+                  </div>
                 </>
               )}
             </div>
