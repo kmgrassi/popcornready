@@ -7,6 +7,28 @@ it, preview it, and export a deterministic MP4. Productionization should keep
 that architecture: agents plan and patch structured data; rendering remains
 deterministic and inspectable.
 
+## North Star
+
+Aividi should become the AI-native production studio where users and agents turn
+raw or generated media into finished cinematic videos through structured intent,
+editable timelines, and deterministic rendering.
+
+The product should act as the system of record and control plane for
+AI-assisted video production. External APIs can generate, analyze, or transform
+media, but Aividi owns the project model, creative brief, asset context,
+timeline structure, revision history, validation, rendering, exports, feedback,
+and operational reliability.
+
+The durable product principle is:
+
+> AI plans and patches structured timelines; Aividi validates, versions,
+> renders, learns from feedback, and stores the result.
+
+The first production target is a reliable workflow where a browser user or
+external agent can produce a finished short video from mixed uploaded and
+generated assets, revise it without losing prior work, export it, and use
+review feedback to improve future generations.
+
 ## Product Goals
 
 - Make video upload, context entry, timeline generation, review, revision, and
