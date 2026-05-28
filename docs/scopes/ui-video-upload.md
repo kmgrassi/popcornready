@@ -24,6 +24,9 @@ clip catalog before generation.
   readable video streams.
 - Server-side duration extraction; clients should not submit authoritative
   duration values.
+- Local-path assets provided by local agents are copied into managed local media
+  storage before processing, so source files are never mutated or depended on in
+  place.
 - Upload cancellation and retry.
 - Duplicate detection by checksum or asset fingerprint.
 - Thumbnail generation for quick visual review.

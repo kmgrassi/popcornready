@@ -130,6 +130,10 @@ Users self-create their first workspace after Supabase sign-up. In
 - `PATCH /api/v1/projects/:projectId`
 - `DELETE /api/v1/projects/:projectId`
 
+Project deletion is soft-delete only in v1. Deleted projects should disappear
+from normal list/read calls but remain available for audit, recovery, and
+artifact retention policies.
+
 Project create request:
 
 ```json
@@ -193,7 +197,9 @@ type AssetSource =
 ```
 
 `local_path` is useful for local agents running on the same machine. It must be
-disabled in hosted environments.
+disabled in hosted environments. Local path assets should be copied into
+`.local/media/uploads/{workspaceId}/{projectId}/` before ingest so subsequent
+operations never mutate or depend on the original source file.
 
 ### Jobs
 
@@ -238,6 +244,9 @@ Generation request:
 }
 ```
 
+`variantCount` defaults to `1` in v1. Multi-variant generation can be added
+later, but the default workflow should create one timeline per generation job.
+
 Generation response:
 
 ```json
@@ -267,6 +276,11 @@ the same validation path as model-generated patches.
 - `POST /api/v1/projects/:projectId/timelines/:timelineId/revisions`
 - `GET /api/v1/projects/:projectId/timelines/:timelineId/revisions/:jobId`
 
+Revisions are modeled as jobs that produce a new timeline version. V1 should not
+attempt destructive in-place media editing. The system should apply the requested
+edits to the structured timeline, validate the result, and restitch/render from
+the original copied source assets.
+
 Revision request:
 
 ```json
@@ -284,6 +298,10 @@ Future mode:
   "patches": []
 }
 ```
+
+Structured patch mode should remain internal or trusted-only for v1. The
+external v1 API should expose natural-language revisions first; validated
+structured patches can be added later when there is a clear client need.
 
 ### Exports
 
@@ -333,6 +351,8 @@ In `AUTH_MODE=local`:
 - `dev_workspace` exists automatically.
 - Agent API keys are not required.
 - `local_path` asset registration is allowed.
+- Local path assets are copied into managed `.local/media/uploads` storage before
+  processing.
 - Data persists under `.local/`.
 - Rate limits may be disabled.
 
@@ -340,14 +360,21 @@ The contract should otherwise match hosted behavior.
 
 ## Open Assumptions
 
-- Should project deletion be soft-delete only in v1?
-- Should `local_path` asset registration copy files into `.local/media/uploads`
-  or reference them in place?
-- Should generation create only one timeline by default, or should the UI always
-  request multiple variants?
-- Do we need webhook callbacks in v1, or is polling enough?
-- Should direct structured timeline patching be exposed in v1, or only natural
-  language revisions?
+- Exact retention policy for soft-deleted projects and copied local assets.
+- Whether revision jobs should always create a new `timelineVersionId` under the
+  same timeline, or create a new sibling `timelineId` for each revised cut.
+- Whether export jobs should render automatically after a successful revision or
+  require an explicit export request.
+
+## V1 Decisions
+
+- Project deletion is soft-delete only.
+- Local agent `local_path` assets are copied into managed local media storage.
+- Generation defaults to one timeline.
+- Webhook callbacks are out of scope for v1; clients poll jobs.
+- External v1 revisions are natural-language edit requests that generate a new
+  validated timeline cut and restitch from copied source assets.
+- Direct structured timeline patching is deferred for external clients.
 
 ## Acceptance Criteria
 

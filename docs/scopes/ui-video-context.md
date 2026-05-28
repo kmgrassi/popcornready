@@ -43,6 +43,10 @@ should be editable, reusable, validated, and visible in the UI.
 - Revision notes.
 - Human approvals and rejected suggestions.
 
+Revisions should produce a new validated timeline cut from the original copied
+source assets. V1 should not edit rendered media in place; it should update the
+structured timeline and restitch on preview/export.
+
 ## UI Features
 
 - Project brief panel with structured fields and a freeform notes area.
@@ -108,3 +112,5 @@ interface ClipMoment {
 - Required and do-not-use constraints are enforced by validation, not just
   requested in a prompt.
 - Every generation stores the exact context snapshot used for traceability.
+- Edit requests create traceable revision jobs and preserve the previous valid
+  timeline.

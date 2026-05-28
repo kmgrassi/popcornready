@@ -12,7 +12,8 @@ observable.
 - `asset_analysis`: optional transcript, scene detection, vision tags, quality
   scoring, embeddings.
 - `generation`: plan beats, select clips, critique, create timeline variants.
-- `revision`: apply conversational or structured edits to a timeline.
+- `revision`: apply conversational edits to the structured timeline and produce
+  a new validated cut.
 - `export`: render a timeline to an artifact.
 
 ## Job States
@@ -55,6 +56,9 @@ and operation simple while the app is still early.
 - Generation and export should still be modeled as jobs even when execution is
   local, so the API contract does not change if a separate worker is introduced
   later.
+- Revision should also be modeled as a job. V1 revisions should restitch from
+  copied source assets using the updated structured timeline rather than trying
+  to edit rendered media in place.
 - A separate worker process is explicitly deferred until adoption or workload
   requires it.
 
@@ -69,7 +73,7 @@ and operation simple while the app is still early.
 
 - Job creation endpoints return `202 Accepted` and a job object.
 - Polling endpoints return current state and result pointers.
-- Optional webhooks can notify external agents when jobs finish.
+- Webhooks are out of scope for v1; clients poll job status.
 - Terminal job states are immutable.
 
 ## Acceptance Criteria
@@ -79,5 +83,7 @@ and operation simple while the app is still early.
 - V1 can execute jobs locally in the API process while preserving the same job
   polling API that a future worker process would use.
 - A render failure does not corrupt the timeline or delete previous artifacts.
+- A revision job creates a new validated timeline cut and preserves the previous
+  valid cut.
 - A client can recover from network loss by polling a known job ID.
 - Operators can diagnose failed jobs from logs without exposing customer secrets.
