@@ -46,7 +46,23 @@ export async function POST(req: NextRequest) {
       clips: project.clips,
       baseUrl: origin,
     };
-    const audioClips = project.clips.filter((clip) => clip.kind === "audio");
+    const body = await req.json().catch(() => ({}));
+    const selectedAudioClipId =
+      typeof body.selectedAudioClipId === "string"
+        ? body.selectedAudioClipId
+        : null;
+    const selectedAudioClip = selectedAudioClipId
+      ? project.clips.find((clip) => clip.id === selectedAudioClipId)
+      : null;
+
+    if (selectedAudioClipId && selectedAudioClip?.kind !== "audio") {
+      return NextResponse.json(
+        { error: "Selected audio clip is not available for export." },
+        { status: 400 }
+      );
+    }
+
+    const audioClips = selectedAudioClip ? [selectedAudioClip] : [];
 
     const entry = path.join(process.cwd(), "src", "remotion", "index.ts");
     const serveUrl = await bundle({ entryPoint: entry });
@@ -95,7 +111,11 @@ export async function POST(req: NextRequest) {
 
       const overlayName = `export_${exportId}_overlay.mp4`;
       const overlayOutputLocation = path.join(EXPORT_DIR, overlayName);
-      const overlayInputProps = { ...baseInputProps, includeAudio: true };
+      const overlayInputProps = {
+        ...baseInputProps,
+        includeAudio: true,
+        audioClipIds: audioClips.map((clip) => clip.id),
+      };
       const overlayComposition = await selectComposition({
         serveUrl,
         id: "main",

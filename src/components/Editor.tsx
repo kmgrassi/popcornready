@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   AspectRatio,
@@ -73,6 +73,7 @@ export function Editor() {
 
   // chat
   const [message, setMessage] = useState("");
+  const [selectedAudioClipId, setSelectedAudioClipId] = useState("");
 
   useEffect(() => {
     fetch("/api/project")
@@ -86,6 +87,19 @@ export function Editor() {
 
   const clips = project?.clips ?? [];
   const timeline = project?.timeline ?? null;
+  const audioClips = useMemo(
+    () => clips.filter((c) => c.kind === "audio"),
+    [clips]
+  );
+
+  useEffect(() => {
+    setSelectedAudioClipId((current) => {
+      if (current && audioClips.some((clip) => clip.id === current)) {
+        return current;
+      }
+      return audioClips.length === 1 ? audioClips[0].id : "";
+    });
+  }, [audioClips]);
 
   async function handleUpload() {
     const file = fileRef.current?.files?.[0];
@@ -203,7 +217,13 @@ export function Editor() {
     setError(null);
     setBusy("Rendering MP4 with Remotion (first run downloads a browser)…");
     try {
-      const res = await fetch("/api/export", { method: "POST" });
+      const res = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedAudioClipId: selectedAudioClipId || null,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Export failed");
       setExportResult(data);
@@ -494,6 +514,22 @@ export function Editor() {
               {timeline.segments.length} segments ·{" "}
               {timelineDurationSec(timeline).toFixed(1)}s · {timeline.aspectRatio}
             </div>
+            {audioClips.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ textAlign: "left" }}>Audio overlay</label>
+                <select
+                  value={selectedAudioClipId}
+                  onChange={(e) => setSelectedAudioClipId(e.target.value)}
+                >
+                  <option value="">None</option>
+                  {audioClips.map((clip) => (
+                    <option key={clip.id} value={clip.id}>
+                      {clip.filename}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button className="secondary" onClick={handleExport} disabled={!!busy}>
               Export MP4
             </button>

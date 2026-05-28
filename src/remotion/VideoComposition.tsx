@@ -7,6 +7,7 @@ export interface VideoProps {
   clips: Clip[];
   baseUrl: string;
   includeAudio?: boolean;
+  audioClipIds?: string[];
 }
 
 function audioVolume(clip: Clip): number {
@@ -36,6 +37,7 @@ export const VideoComposition: React.FC<VideoProps> = ({
   clips,
   baseUrl,
   includeAudio = false,
+  audioClipIds = [],
 }) => {
   if (!timeline || timeline.segments.length === 0) {
     return <AbsoluteFill style={{ backgroundColor: "#000" }} />;
@@ -43,8 +45,11 @@ export const VideoComposition: React.FC<VideoProps> = ({
 
   const fps = timeline.fps || 30;
   const byId = Object.fromEntries(clips.map((c) => [c.id, c]));
+  const selectedAudioIds = new Set(audioClipIds);
   const audioClips = includeAudio
-    ? clips.filter((clip) => clip.kind === "audio")
+    ? clips.filter(
+        (clip) => clip.kind === "audio" && selectedAudioIds.has(clip.id)
+      )
     : [];
   let cursor = 0;
 
