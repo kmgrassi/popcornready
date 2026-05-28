@@ -3,6 +3,75 @@
 
 export type AspectRatio = "9:16" | "16:9" | "1:1";
 
+export type CharacterReferenceRole =
+  | "front_portrait"
+  | "three_quarter"
+  | "profile"
+  | "full_body"
+  | "style"
+  | "wardrobe"
+  | "hero_frame";
+
+export type CharacterReferenceQuality = "candidate" | "approved" | "rejected";
+
+export type CharacterConsistencyMode =
+  | "prompt_only"
+  | "reference_pack"
+  | "hero_frame"
+  | "first_frame_video"
+  | "fine_tuned";
+
+export interface CharacterProfile {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  identityInvariants: string;
+  styleInvariants?: string;
+  wardrobeInvariants?: string;
+  negativePrompt?: string;
+  status: "draft" | "ready" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CharacterReference {
+  id: string;
+  characterProfileId: string;
+  assetId: string;
+  role: CharacterReferenceRole;
+  quality: CharacterReferenceQuality;
+  notes?: string;
+}
+
+export interface CharacterConsistencyReview {
+  identity: "pass" | "needs_review" | "fail";
+  wardrobe: "pass" | "needs_review" | "fail";
+  style: "pass" | "needs_review" | "fail";
+  temporal?: "pass" | "needs_review" | "fail";
+  notes?: string;
+}
+
+export interface GeneratedAssetCharacterBinding {
+  assetId: string;
+  characterProfileIds: string[];
+  referenceIds: string[];
+  consistencyMode: CharacterConsistencyMode;
+  originalPrompt: string;
+  promptInvariantVersion: string;
+  providerSettings?: {
+    provider: string;
+    model?: string;
+    references: string[];
+    mode: CharacterConsistencyMode;
+    seed?: number;
+    durationSec?: number;
+    aspectRatio?: string;
+    promptInvariantVersion: string;
+  };
+  consistencyReview?: CharacterConsistencyReview;
+}
+
 export interface Clip {
   id: string;
   filename: string;
@@ -15,6 +84,8 @@ export interface Clip {
     provider: string;
     model?: string;
     prompt: string;
+    providerPrompt?: string;
+    characterBinding?: GeneratedAssetCharacterBinding;
     originalPrompt?: string;
     preflight?: GenerationPreflightResult;
   };
@@ -161,6 +232,8 @@ export interface Project {
   clips: Clip[];
   critic: CriticReport | null;
   chat: ChatMessage[];
+  characterProfiles?: CharacterProfile[];
+  characterReferences?: CharacterReference[];
   updatedAt: string;
 }
 
