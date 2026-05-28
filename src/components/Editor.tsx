@@ -15,6 +15,8 @@ import { DEFAULT_STORY_CONTEXT } from "@/lib/story-context";
 
 // Player relies on browser APIs — never SSR it.
 const Preview = dynamic(() => import("./Preview"), { ssr: false });
+const DEFAULT_IMAGE_SIZE = "1024x1536";
+const DEFAULT_VIDEO_SIZE = "720x1280";
 
 async function readDuration(file: File): Promise<number> {
   if (file.type.startsWith("image/")) return 4;
@@ -58,7 +60,7 @@ export function Editor() {
   const [assetKind, setAssetKind] = useState<"image" | "video">("image");
   const [assetPrompt, setAssetPrompt] = useState("");
   const [assetDesc, setAssetDesc] = useState("");
-  const [assetSize, setAssetSize] = useState("1024x1536");
+  const [assetSize, setAssetSize] = useState(DEFAULT_IMAGE_SIZE);
   const [assetSeconds, setAssetSeconds] = useState(8);
   const [referenceClipIds, setReferenceClipIds] = useState<string[]>([]);
 
@@ -145,7 +147,10 @@ export function Editor() {
           kind: assetKind,
           prompt: assetPrompt,
           description: assetDesc || assetPrompt,
-          size: assetSize,
+          size:
+            assetKind === "video" && assetSize === DEFAULT_IMAGE_SIZE
+              ? DEFAULT_VIDEO_SIZE
+              : assetSize,
           seconds: assetSeconds,
           durationSec: assetKind === "image" ? 4 : assetSeconds,
           referenceClipIds,
@@ -260,7 +265,13 @@ export function Editor() {
             <label>Kind</label>
             <select
               value={assetKind}
-              onChange={(e) => setAssetKind(e.target.value as "image" | "video")}
+              onChange={(e) => {
+                const nextKind = e.target.value as "image" | "video";
+                setAssetKind(nextKind);
+                setAssetSize(
+                  nextKind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_IMAGE_SIZE
+                );
+              }}
             >
               <option value="image">Image</option>
               <option value="video">Video</option>
@@ -285,7 +296,9 @@ export function Editor() {
             <input
               value={assetSize}
               onChange={(e) => setAssetSize(e.target.value)}
-              placeholder="1024x1536"
+              placeholder={
+                assetKind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_IMAGE_SIZE
+              }
             />
           </div>
           {assetKind === "video" && (

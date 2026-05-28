@@ -76,7 +76,7 @@ async function generateOpenAIImage(
   input: GenerateAssetRequest
 ): Promise<GeneratedAssetResult> {
   const prompt = requirePrompt(input.prompt);
-  const model = input.model || "gpt-image-2";
+  const model = input.model || "gpt-image-1.5";
   const referencePaths = input.referencePaths || [];
 
   if (referencePaths.length > 0) {
