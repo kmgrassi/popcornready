@@ -129,3 +129,18 @@ test("resolveCharacterContext rejects missing profiles and rejected references",
     /Character reference is rejected/
   );
 });
+
+test("resolveCharacterContext rejects profiles with blank identity invariants", () => {
+  const project = projectFixture();
+  project.characterProfiles![0].identityInvariants = "   ";
+
+  assert.throws(
+    () =>
+      resolveCharacterContext(
+        project,
+        parseCharacterGenerationFields({ characterProfileIds: ["char_ada"] }),
+        "Generate."
+      ),
+    /identityInvariants are blank/
+  );
+});

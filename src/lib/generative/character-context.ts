@@ -132,6 +132,11 @@ export function resolveCharacterContext(
     if (profile.status === "archived") {
       throw new CharacterContextValidationError(`Character profile is archived: ${id}`);
     }
+    if (!profile.identityInvariants.trim()) {
+      throw new CharacterContextValidationError(
+        `Character profile identityInvariants are blank: ${id}`
+      );
+    }
     return profile;
   });
 

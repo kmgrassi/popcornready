@@ -42,6 +42,12 @@ function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
 }
 
+function requireNonBlank(value: string, fieldName: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${fieldName} cannot be blank.`);
+  return trimmed;
+}
+
 function emptyProject(): Project {
   return {
     id: "default",
@@ -95,9 +101,12 @@ export async function createCharacterProfile(
   const character: CharacterProfile = {
     id: newId("char"),
     projectId: p.id,
-    name: input.name.trim(),
+    name: requireNonBlank(input.name, "name"),
     description: (input.description || "").trim(),
-    identityInvariants: input.identityInvariants.trim(),
+    identityInvariants: requireNonBlank(
+      input.identityInvariants,
+      "identityInvariants"
+    ),
     styleInvariants: input.styleInvariants?.trim() || undefined,
     wardrobeInvariants: input.wardrobeInvariants?.trim() || undefined,
     negativePrompt: input.negativePrompt?.trim() || undefined,
@@ -119,12 +128,17 @@ export async function updateCharacterProfile(
   const character = p.characterProfiles!.find((c) => c.id === characterId);
   if (!character) throw new Error(`Character profile not found: ${characterId}`);
 
-  if (input.name !== undefined) character.name = input.name.trim();
+  if (input.name !== undefined) {
+    character.name = requireNonBlank(input.name, "name");
+  }
   if (input.description !== undefined) {
     character.description = input.description.trim();
   }
   if (input.identityInvariants !== undefined) {
-    character.identityInvariants = input.identityInvariants.trim();
+    character.identityInvariants = requireNonBlank(
+      input.identityInvariants,
+      "identityInvariants"
+    );
   }
   if (input.styleInvariants !== undefined) {
     character.styleInvariants = input.styleInvariants?.trim() || undefined;

@@ -49,6 +49,15 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    if (
+      body.identityInvariants !== undefined &&
+      !String(body.identityInvariants).trim()
+    ) {
+      return NextResponse.json(
+        { error: "identityInvariants are required." },
+        { status: 400 }
+      );
+    }
     const result = await updateCharacterProfile(params.characterId, {
       name: body.name !== undefined ? String(body.name) : undefined,
       description:
