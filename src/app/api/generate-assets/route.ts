@@ -4,6 +4,7 @@ import path from "path";
 import { addClip, getProject } from "@/lib/store";
 import { Clip } from "@/lib/types";
 import { providerFor } from "@/lib/generative/providers";
+import { measureAudioDurationSec } from "@/lib/generative/audio-duration";
 import { preflightGenerationContent } from "@/lib/generative/preflight";
 import {
   buildCharacterPrompt,
@@ -285,12 +286,22 @@ export async function POST(req: NextRequest) {
     const filename = `${id}.${result.extension}`;
     await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
 
+    const measuredDurationSec =
+      result.kind === "audio"
+        ? measureAudioDurationSec(result.bytes, result.extension) ?? undefined
+        : undefined;
+    const effectiveDurationSec =
+      measuredDurationSec && measuredDurationSec > 0
+        ? measuredDurationSec
+        : durationSec;
+
     const clip: Clip = {
       id,
       filename,
       url: `/generated/${filename}`,
       kind: result.kind,
-      durationSec,
+      durationSec: effectiveDurationSec,
+      ...(measuredDurationSec ? { measuredDurationSec } : {}),
       description: preflight.finalDescription,
       source: "generated",
       generatedBy: {

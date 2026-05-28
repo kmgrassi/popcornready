@@ -18,6 +18,11 @@ import {
   timelineDurationSec,
 } from "@/lib/types";
 import { DEFAULT_STORY_CONTEXT } from "@/lib/story-context";
+import {
+  DEFAULT_DURATION_POLICY,
+  DURATION_POLICIES,
+  DurationPolicy,
+} from "@/lib/audio-alignment";
 
 // Player relies on browser APIs — never SSR it.
 const Preview = dynamic(() => import("./Preview"), { ssr: false });
@@ -62,12 +67,31 @@ function defaultConsistencyModeForKind(kind: "image" | "video") {
   return kind === "video" ? "hero_frame" : "reference_pack";
 }
 
+interface ExportAlignment {
+  policy: DurationPolicy;
+  exportDurationSec: number;
+  truncatesAudio: boolean;
+  warning?: string;
+  comparison: {
+    timelineDurationSec: number;
+    audioDurationSec: number;
+    deltaSec: number;
+  };
+}
+
 interface ExportResult {
   url: string;
   silentUrl?: string;
   overlayUrl?: string | null;
   audioUrls?: string[];
+  alignment?: ExportAlignment;
 }
+
+const DURATION_POLICY_LABELS: Record<DurationPolicy, string> = {
+  timeline_only: "Timeline only (may cut audio)",
+  match_longest_media: "Match longest media (keep audio whole)",
+  fail_on_mismatch: "Fail on mismatch (require alignment)",
+};
 
 async function readDuration(file: File): Promise<number> {
   if (file.type.startsWith("image/")) return 4;
@@ -137,6 +161,9 @@ export function Editor() {
   // chat
   const [message, setMessage] = useState("");
   const [selectedAudioClipId, setSelectedAudioClipId] = useState("");
+  const [durationPolicy, setDurationPolicy] = useState<DurationPolicy>(
+    DEFAULT_DURATION_POLICY
+  );
 
   useEffect(() => {
     fetch("/api/project")
@@ -307,12 +334,42 @@ export function Editor() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          selectedAudioClipId: selectedAudioClipId || null,
+          audioAssetIds: selectedAudioClipId ? [selectedAudioClipId] : [],
+          durationPolicy,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Export failed");
       setExportResult(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleAlignAudio(
+    strategy: "rewrite_script" | "extend_timeline"
+  ) {
+    if (!selectedAudioClipId) {
+      setError("Select an audio overlay to align.");
+      return;
+    }
+    setError(null);
+    setBusy(
+      strategy === "rewrite_script"
+        ? "Rewriting narration to fit the timeline…"
+        : "Extending the timeline to fit the narration…"
+    );
+    try {
+      const res = await fetch("/api/align-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy, audioClipId: selectedAudioClipId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Alignment failed");
+      if (data.project) setProject(data.project);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -1307,6 +1364,48 @@ export function Editor() {
                 </select>
               </div>
             )}
+            {audioClips.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ textAlign: "left" }}>Audio duration policy</label>
+                <select
+                  value={durationPolicy}
+                  onChange={(e) =>
+                    setDurationPolicy(e.target.value as DurationPolicy)
+                  }
+                >
+                  {DURATION_POLICIES.map((policy) => (
+                    <option key={policy} value={policy}>
+                      {DURATION_POLICY_LABELS[policy]}
+                    </option>
+                  ))}
+                </select>
+                {selectedAudioClipId && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      display: "flex",
+                      gap: 8,
+                      justifyContent: "center",
+                    }}
+                  >
+                    <button
+                      className="secondary"
+                      onClick={() => handleAlignAudio("rewrite_script")}
+                      disabled={!!busy}
+                    >
+                      Align: rewrite narration
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => handleAlignAudio("extend_timeline")}
+                      disabled={!!busy}
+                    >
+                      Align: extend timeline
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <button className="secondary" onClick={handleExport} disabled={!!busy}>
               Export MP4
             </button>
@@ -1334,6 +1433,21 @@ export function Editor() {
                     </a>
                   </div>
                 )}
+                {exportResult.alignment &&
+                  exportResult.alignment.comparison.audioDurationSec > 0 && (
+                    <div className="muted" style={{ marginTop: 8 }}>
+                      {exportResult.alignment.policy} · export{" "}
+                      {exportResult.alignment.exportDurationSec.toFixed(1)}s · audio{" "}
+                      {exportResult.alignment.comparison.audioDurationSec.toFixed(1)}s
+                      {" · Δ"}
+                      {exportResult.alignment.comparison.deltaSec.toFixed(1)}s
+                      {exportResult.alignment.warning && (
+                        <div style={{ color: "#b45309", marginTop: 4 }}>
+                          {exportResult.alignment.warning}
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
             )}
           </div>

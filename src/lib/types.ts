@@ -80,6 +80,9 @@ export interface Clip {
   url: string; // served path, e.g. /uploads/abc.mp4
   kind?: "video" | "image" | "audio";
   durationSec: number;
+  // For audio clips, the duration decoded from the actual media bytes (vs the
+  // requested/estimated durationSec). Drives audio/timeline alignment.
+  measuredDurationSec?: number;
   description: string; // user-provided hint the agent reasons over
   source?: "upload" | "generated";
   generatedBy?: {

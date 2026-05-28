@@ -168,3 +168,14 @@ export const reviseSchema = {
   },
   required: ["summary", "patches"],
 };
+
+export const narrationRewriteSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    script: str,
+    estimatedDurationSec: num,
+    summary: str,
+  },
+  required: ["script", "estimatedDurationSec", "summary"],
+};
