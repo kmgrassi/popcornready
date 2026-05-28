@@ -7,8 +7,15 @@ export interface Clip {
   id: string;
   filename: string;
   url: string; // served path, e.g. /uploads/abc.mp4
+  kind?: "video" | "image";
   durationSec: number;
   description: string; // user-provided hint the agent reasons over
+  source?: "upload" | "generated";
+  generatedBy?: {
+    provider: string;
+    model?: string;
+    prompt: string;
+  };
 }
 
 export interface Beat {
@@ -22,6 +29,27 @@ export interface EditPlan {
   style: string;
   aspectRatio: AspectRatio;
   beats: Beat[];
+}
+
+export interface StoryContext {
+  audience?: string;
+  platform?: "youtube" | "tiktok" | "reels" | "facebook" | "vimeo" | "general";
+  format?:
+    | "mystery_to_model"
+    | "visual_reveal"
+    | "challenge"
+    | "misconception"
+    | "animated_explainer"
+    | "classroom_demo"
+    | "aesthetic_montage";
+  hookQuestion?: string;
+  strongestVisual?: string;
+  emotionalPull?: string;
+  oneBigIdea?: string;
+  simpleModel?: string;
+  caveat?: string;
+  payoff?: string;
+  callToAction?: string;
 }
 
 export interface TimelineSegment {
@@ -92,6 +120,7 @@ export interface ChatMessage {
 export interface Project {
   id: string;
   goal: string;
+  storyContext?: StoryContext;
   plan: EditPlan | null;
   timeline: Timeline | null;
   clips: Clip[];

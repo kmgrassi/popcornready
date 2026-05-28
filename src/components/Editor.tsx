@@ -6,15 +6,20 @@ import {
   AspectRatio,
   Clip,
   Project,
+  StoryContext,
   Timeline,
   segmentDurationSec,
   timelineDurationSec,
 } from "@/lib/types";
+import { DEFAULT_STORY_CONTEXT } from "@/lib/story-context";
 
 // Player relies on browser APIs — never SSR it.
 const Preview = dynamic(() => import("./Preview"), { ssr: false });
+const DEFAULT_IMAGE_SIZE = "1024x1536";
+const DEFAULT_VIDEO_SIZE = "720x1280";
 
 async function readDuration(file: File): Promise<number> {
+  if (file.type.startsWith("image/")) return 4;
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const v = document.createElement("video");
@@ -42,10 +47,22 @@ export function Editor() {
   const [targetLength, setTargetLength] = useState(30);
   const [style, setStyle] = useState("fast-paced social ad");
   const [aspect, setAspect] = useState<AspectRatio>("9:16");
+  const [storyContext, setStoryContext] = useState<StoryContext>(
+    DEFAULT_STORY_CONTEXT
+  );
 
   // upload form
   const [desc, setDesc] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // generative fill form
+  const [assetProvider, setAssetProvider] = useState("openai");
+  const [assetKind, setAssetKind] = useState<"image" | "video">("image");
+  const [assetPrompt, setAssetPrompt] = useState("");
+  const [assetDesc, setAssetDesc] = useState("");
+  const [assetSize, setAssetSize] = useState(DEFAULT_IMAGE_SIZE);
+  const [assetSeconds, setAssetSeconds] = useState(8);
+  const [referenceClipIds, setReferenceClipIds] = useState<string[]>([]);
 
   // chat
   const [message, setMessage] = useState("");
@@ -53,7 +70,10 @@ export function Editor() {
   useEffect(() => {
     fetch("/api/project")
       .then((r) => r.json())
-      .then((d) => setProject(d.project))
+      .then((d) => {
+        setProject(d.project);
+        if (d.project?.storyContext) setStoryContext(d.project.storyContext);
+      })
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -97,11 +117,51 @@ export function Editor() {
           targetLengthSec: targetLength,
           style,
           aspectRatio: aspect,
+          storyContext,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setProject(data.project);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleGenerateAsset() {
+    if (!assetPrompt.trim()) return;
+    setError(null);
+    setBusy(
+      assetKind === "video"
+        ? "Generating video asset…"
+        : "Generating image asset…"
+    );
+    try {
+      const res = await fetch("/api/generate-assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: assetProvider,
+          kind: assetKind,
+          prompt: assetPrompt,
+          description: assetDesc || assetPrompt,
+          size:
+            assetKind === "video" && assetSize === DEFAULT_IMAGE_SIZE
+              ? DEFAULT_VIDEO_SIZE
+              : assetSize,
+          seconds: assetSeconds,
+          durationSec: assetKind === "image" ? 4 : assetSeconds,
+          referenceClipIds,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Asset generation failed");
+      setProject(data.project);
+      setAssetPrompt("");
+      setAssetDesc("");
+      setReferenceClipIds([]);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -148,6 +208,20 @@ export function Editor() {
   }
 
   const clipById = Object.fromEntries(clips.map((c) => [c.id, c]));
+  const imageClips = clips.filter((c) => (c.kind || "video") === "image");
+
+  function toggleReferenceClip(id: string) {
+    setReferenceClipIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function setStoryField<K extends keyof StoryContext>(
+    key: K,
+    value: StoryContext[K]
+  ) {
+    setStoryContext((prev) => ({ ...prev, [key]: value }));
+  }
 
   return (
     <div className="app">
@@ -159,9 +233,9 @@ export function Editor() {
         {error && <div className="error">{error}</div>}
         {busy && <div className="spinner">⏳ {busy}</div>}
 
-        <h2>1 · Upload clips</h2>
-        <input ref={fileRef} type="file" accept="video/*" />
-        <label>Description (what's in this clip — helps the AI choose)</label>
+        <h2>1 · Upload media</h2>
+        <input ref={fileRef} type="file" accept="video/*,image/*" />
+        <label>Description (what's in this asset — helps the AI choose)</label>
         <input
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
@@ -169,7 +243,99 @@ export function Editor() {
         />
         <div style={{ marginTop: 8 }}>
           <button onClick={handleUpload} disabled={!!busy}>
-            Add clip
+            Add asset
+          </button>
+        </div>
+
+        <h2>1b · Generate missing asset</h2>
+        <div className="row" style={{ marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label>Provider</label>
+            <select
+              value={assetProvider}
+              onChange={(e) => setAssetProvider(e.target.value)}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Gemini</option>
+              <option value="nanobanano">NanoBanano</option>
+              <option value="mock">Mock</option>
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Kind</label>
+            <select
+              value={assetKind}
+              onChange={(e) => {
+                const nextKind = e.target.value as "image" | "video";
+                setAssetKind(nextKind);
+                setAssetSize(
+                  nextKind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_IMAGE_SIZE
+                );
+              }}
+            >
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+        </div>
+        <label>Prompt</label>
+        <textarea
+          value={assetPrompt}
+          onChange={(e) => setAssetPrompt(e.target.value)}
+          placeholder="Describe the missing visual, e.g. clean product hero shot on a white clinical desk."
+        />
+        <label>Library description</label>
+        <input
+          value={assetDesc}
+          onChange={(e) => setAssetDesc(e.target.value)}
+          placeholder="e.g. generated product hero shot for CTA"
+        />
+        <div className="row" style={{ marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label>Size</label>
+            <input
+              value={assetSize}
+              onChange={(e) => setAssetSize(e.target.value)}
+              placeholder={
+                assetKind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_IMAGE_SIZE
+              }
+            />
+          </div>
+          {assetKind === "video" && (
+            <div style={{ flex: 1 }}>
+              <label>Seconds</label>
+              <input
+                type="number"
+                value={assetSeconds}
+                onChange={(e) => setAssetSeconds(Number(e.target.value))}
+              />
+            </div>
+          )}
+        </div>
+        {imageClips.length > 0 && (
+          <div>
+            <label>Reference images</label>
+            <div className="reference-list">
+              {imageClips.map((c) => (
+                <label className="check-row" key={c.id}>
+                  <input
+                    type="checkbox"
+                    checked={referenceClipIds.includes(c.id)}
+                    onChange={() => toggleReferenceClip(c.id)}
+                  />
+                  <span>{c.filename}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div style={{ marginTop: 8 }}>
+          <button
+            onClick={handleGenerateAsset}
+            disabled={!!busy || !assetPrompt.trim()}
+            className="secondary"
+          >
+            Generate asset
           </button>
         </div>
 
@@ -179,11 +345,24 @@ export function Editor() {
         )}
         {clips.map((c: Clip) => (
           <div className="card clip" key={c.id}>
-            <video src={c.url} muted preload="metadata" />
+            {(c.kind || "video") === "image" ? (
+              <img src={c.url} alt="" />
+            ) : (
+              <video src={c.url} muted preload="metadata" />
+            )}
             <div className="meta">
               <div className="fn">{c.filename}</div>
-              <div className="muted">{c.durationSec.toFixed(1)}s</div>
+              <div className="muted">
+                {c.kind || "video"} · {c.source || "upload"} ·{" "}
+                {c.durationSec.toFixed(1)}s
+              </div>
               <div className="muted">{c.description || "no description"}</div>
+              {c.generatedBy && (
+                <div className="muted">
+                  {c.generatedBy.provider}
+                  {c.generatedBy.model ? ` · ${c.generatedBy.model}` : ""}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -218,6 +397,76 @@ export function Editor() {
         </div>
         <label>Style</label>
         <input value={style} onChange={(e) => setStyle(e.target.value)} />
+
+        <h2>Story context</h2>
+        <div className="row" style={{ marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label>Audience</label>
+            <input
+              value={storyContext.audience || ""}
+              onChange={(e) => setStoryField("audience", e.target.value)}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Platform</label>
+            <select
+              value={storyContext.platform || "general"}
+              onChange={(e) =>
+                setStoryField(
+                  "platform",
+                  e.target.value as StoryContext["platform"]
+                )
+              }
+            >
+              <option value="general">General</option>
+              <option value="youtube">YouTube</option>
+              <option value="tiktok">TikTok</option>
+              <option value="reels">Reels</option>
+              <option value="facebook">Facebook</option>
+              <option value="vimeo">Vimeo</option>
+            </select>
+          </div>
+        </div>
+        <label>Story format</label>
+        <select
+          value={storyContext.format || "mystery_to_model"}
+          onChange={(e) =>
+            setStoryField("format", e.target.value as StoryContext["format"])
+          }
+        >
+          <option value="mystery_to_model">Mystery → model</option>
+          <option value="visual_reveal">Visual reveal</option>
+          <option value="challenge">Challenge</option>
+          <option value="misconception">Misconception</option>
+          <option value="animated_explainer">Animated explainer</option>
+          <option value="classroom_demo">Classroom demo</option>
+          <option value="aesthetic_montage">Aesthetic montage</option>
+        </select>
+        <label>Hook question</label>
+        <input
+          value={storyContext.hookQuestion || ""}
+          onChange={(e) => setStoryField("hookQuestion", e.target.value)}
+        />
+        <label>Strongest visual</label>
+        <input
+          value={storyContext.strongestVisual || ""}
+          onChange={(e) => setStoryField("strongestVisual", e.target.value)}
+        />
+        <label>One big idea</label>
+        <input
+          value={storyContext.oneBigIdea || ""}
+          onChange={(e) => setStoryField("oneBigIdea", e.target.value)}
+        />
+        <label>Payoff</label>
+        <input
+          value={storyContext.payoff || ""}
+          onChange={(e) => setStoryField("payoff", e.target.value)}
+        />
+        <label>Caveat / trust note</label>
+        <input
+          value={storyContext.caveat || ""}
+          onChange={(e) => setStoryField("caveat", e.target.value)}
+        />
         <div style={{ marginTop: 10 }}>
           <button
             onClick={handleGenerate}

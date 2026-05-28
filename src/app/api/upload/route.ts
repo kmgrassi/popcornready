@@ -27,12 +27,19 @@ export async function POST(req: NextRequest) {
     const bytes = Buffer.from(await file.arrayBuffer());
     await fs.writeFile(path.join(UPLOAD_DIR, stored), bytes);
 
+    const kind = file.type.startsWith("image/") ? "image" : "video";
     const clip: Clip = {
       id,
       filename: file.name,
       url: `/uploads/${stored}`,
-      durationSec: Number.isFinite(durationSec) ? durationSec : 0,
+      kind,
+      durationSec: Number.isFinite(durationSec) && durationSec > 0
+        ? durationSec
+        : kind === "image"
+          ? 4
+          : 0,
       description,
+      source: "upload",
     };
     const project = await addClip(clip);
     return NextResponse.json({ clip, project });

@@ -121,7 +121,9 @@ export function clipCatalog(clips: Clip[]): string {
   return clips
     .map(
       (c) =>
-        `- id=${c.id} | duration=${c.durationSec.toFixed(1)}s | file="${c.filename}" | description="${
+        `- id=${c.id} | kind=${c.kind || "video"} | source=${
+          c.source || "upload"
+        } | duration=${c.durationSec.toFixed(1)}s | file="${c.filename}" | description="${
           c.description || "n/a"
         }"`
     )

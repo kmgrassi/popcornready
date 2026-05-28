@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
       plan: project.plan,
       timeline: project.timeline,
       clips: project.clips,
+      storyContext: project.storyContext,
     });
 
     project.timeline = applyPatches(project.timeline, patches, project.clips);

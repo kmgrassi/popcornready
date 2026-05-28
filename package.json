@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
+    "@google/genai": "^2.6.0",
     "@remotion/bundler": "^4.0.0",
     "@remotion/player": "^4.0.0",
     "@remotion/renderer": "^4.0.0",

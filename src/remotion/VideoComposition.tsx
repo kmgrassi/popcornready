@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, OffthreadVideo, Sequence } from "remotion";
+import { AbsoluteFill, Img, OffthreadVideo, Sequence } from "remotion";
 import { Clip, Timeline } from "../lib/types";
 
 export interface VideoProps {
@@ -42,12 +42,19 @@ export const VideoComposition: React.FC<VideoProps> = ({
         return (
           <Sequence key={seg.id} from={from} durationInFrames={segFrames}>
             <AbsoluteFill>
-              <OffthreadVideo
-                src={src}
-                startFrom={Math.round(seg.sourceInSec * fps)}
-                endAt={Math.round(seg.sourceOutSec * fps)}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+              {(clip.kind || "video") === "image" ? (
+                <Img
+                  src={src}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <OffthreadVideo
+                  src={src}
+                  startFrom={Math.round(seg.sourceInSec * fps)}
+                  endAt={Math.round(seg.sourceOutSec * fps)}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              )}
             </AbsoluteFill>
             {seg.caption ? (
               <AbsoluteFill

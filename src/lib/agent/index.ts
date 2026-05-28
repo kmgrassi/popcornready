@@ -4,10 +4,12 @@ import {
   CriticReport,
   EditPlan,
   Patch,
+  StoryContext,
   Timeline,
   TimelineSegment,
 } from "../types";
 import { clipCatalog, timelineForPrompt } from "../timeline";
+import { storyContextForPrompt } from "../story-context";
 import {
   criticSchema,
   planSchema,
@@ -21,6 +23,16 @@ const PREAMBLE = `You are the editorial brain of an AI-native video editor.
 You never touch raw video — you only produce and edit a structured timeline.
 The timeline is a list of segments; each segment plays one clip trimmed to a
 [sourceInSec, sourceOutSec] window. Segments play back-to-back in order.
+
+Story guidance for science and educational social video:
+- Win attention before explanation: one concrete question, one visual surprise,
+  one immediate reason to care.
+- Use a story arc, not an information dump. Favor mystery-to-model, challenge,
+  visual reveal, misconception, or demo-first structures.
+- Teach one big idea per asset. Reduce cognitive load with captions, concrete
+  nouns, clear visual evidence, and a simple mental model.
+- Earn trust after the hook with accurate wording, visible expertise, and a
+  payoff that leaves the viewer smarter.
 
 Hard rules:
 - Only ever reference clips by the exact ids in the provided catalog.
@@ -47,6 +59,7 @@ export async function planEdit(input: {
   targetLengthSec: number;
   style: string;
   aspectRatio: string;
+  storyContext?: StoryContext | null;
 }): Promise<EditPlan> {
   const sys = `${PREAMBLE}
 
@@ -58,6 +71,8 @@ beats appropriate to the goal and style (e.g. hook / problem / solution / proof
 Target length: ${input.targetLengthSec}s
 Style: ${input.style}
 Aspect ratio: ${input.aspectRatio}
+Story context:
+${storyContextForPrompt(input.storyContext)}
 
 Produce the edit plan.`;
 
@@ -108,6 +123,7 @@ export async function critique(input: {
   plan: EditPlan;
   timeline: Timeline;
   clips: Clip[];
+  storyContext?: StoryContext | null;
 }): Promise<{ report: CriticReport; patches: Patch[] }> {
   const sys = `${PREAMBLE}
 
@@ -120,8 +136,11 @@ patches that would improve the weakest areas. Only patch what helps; an empty
 patch list is fine if the cut is already strong. Reference real segmentIds and
 clipIds.`;
 
-  const user = `Edit plan:
+const user = `Edit plan:
 ${planText(input.plan)}
+
+Story context:
+${storyContextForPrompt(input.storyContext)}
 
 Current timeline:
 ${timelineForPrompt(input.timeline, input.clips)}
@@ -145,6 +164,7 @@ export async function revise(input: {
   plan: EditPlan | null;
   timeline: Timeline;
   clips: Clip[];
+  storyContext?: StoryContext | null;
 }): Promise<{ summary: string; patches: Patch[] }> {
   const sys = `${PREAMBLE}
 
@@ -156,7 +176,10 @@ their request into concrete timeline patches. Make the smallest set of changes
 that satisfies the request. Reference real segmentIds and clipIds. Briefly
 summarize what you changed.`;
 
-  const user = `${input.plan ? `Edit plan:\n${planText(input.plan)}\n\n` : ""}Current timeline:
+  const user = `${input.plan ? `Edit plan:\n${planText(input.plan)}\n\n` : ""}Story context:
+${storyContextForPrompt(input.storyContext)}
+
+Current timeline:
 ${timelineForPrompt(input.timeline, input.clips)}
 
 User request: "${input.message}"
