@@ -13,7 +13,7 @@ observable.
   scoring, embeddings.
 - `generation`: plan beats, select clips, critique, create timeline variants.
 - `revision`: apply conversational edits to the structured timeline and produce
-  a new validated cut.
+  a new validated sibling timeline cut.
 - `export`: render a timeline to an artifact.
 
 ## Job States
@@ -59,6 +59,8 @@ and operation simple while the app is still early.
 - Revision should also be modeled as a job. V1 revisions should restitch from
   copied source assets using the updated structured timeline rather than trying
   to edit rendered media in place.
+- Successful revision jobs should create a sibling `timelineId` and then enqueue
+  an export job for that new timeline.
 - A separate worker process is explicitly deferred until adoption or workload
   requires it.
 
@@ -83,7 +85,7 @@ and operation simple while the app is still early.
 - V1 can execute jobs locally in the API process while preserving the same job
   polling API that a future worker process would use.
 - A render failure does not corrupt the timeline or delete previous artifacts.
-- A revision job creates a new validated timeline cut and preserves the previous
-  valid cut.
+- A revision job creates a new validated sibling timeline, preserves the previous
+  valid cut, and auto-enqueues an export.
 - A client can recover from network loss by polling a known job ID.
 - Operators can diagnose failed jobs from logs without exposing customer secrets.

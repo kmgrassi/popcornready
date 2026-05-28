@@ -32,6 +32,9 @@ export artifacts.
 - Use simple JSON files plus local media directories for local development. This
   keeps the local path easy to inspect and avoids adding SQLite until concurrent
   local writes require it.
+- Treat project metadata as soft-deletable in v1. Copied source assets and
+  generated artifacts can be hard-deleted according to retention policy because
+  they are managed copies/derivatives.
 - Store timeline JSON in Postgres JSONB with schema version and derived columns
   for querying.
 - Store large analysis outputs in object storage if they become too large for
@@ -75,6 +78,8 @@ can reason about compatibility.
 - Multiple projects can exist independently.
 - A project can have multiple source assets, multiple timelines, and multiple
   exports.
+- Revision jobs create sibling timelines rather than mutating the original
+  timeline in place.
 - A failed generation or export cannot overwrite the last good timeline.
 - Every timeline can be traced to the brief version, asset context, model call,
   and patches that created it.

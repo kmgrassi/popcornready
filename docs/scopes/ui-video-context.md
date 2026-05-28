@@ -47,6 +47,9 @@ Revisions should produce a new validated timeline cut from the original copied
 source assets. V1 should not edit rendered media in place; it should update the
 structured timeline and restitch on preview/export.
 
+Each successful revision should appear as a sibling timeline/cut, with its own
+auto-generated export artifact when rendering succeeds.
+
 ## UI Features
 
 - Project brief panel with structured fields and a freeform notes area.
@@ -114,3 +117,5 @@ interface ClipMoment {
 - Every generation stores the exact context snapshot used for traceability.
 - Edit requests create traceable revision jobs and preserve the previous valid
   timeline.
+- Successful edit requests create a sibling timeline and kick off export
+  automatically.

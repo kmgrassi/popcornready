@@ -132,7 +132,9 @@ Users self-create their first workspace after Supabase sign-up. In
 
 Project deletion is soft-delete only in v1. Deleted projects should disappear
 from normal list/read calls but remain available for audit, recovery, and
-artifact retention policies.
+artifact retention policies. Copied source assets and generated artifacts may be
+hard-deleted according to retention policy because they are derived from or
+managed copies of user-provided files.
 
 Project create request:
 
@@ -281,6 +283,10 @@ attempt destructive in-place media editing. The system should apply the requeste
 edits to the structured timeline, validate the result, and restitch/render from
 the original copied source assets.
 
+Each successful revision creates a sibling `timelineId`, not a version under the
+same timeline. This treats every revised cut as a separate timeline that can be
+compared, exported, or deleted independently.
+
 Revision request:
 
 ```json
@@ -308,6 +314,9 @@ structured patches can be added later when there is a clear client need.
 - `POST /api/v1/projects/:projectId/timelines/:timelineId/exports`
 - `GET /api/v1/projects/:projectId/exports/:jobId`
 - `GET /api/v1/projects/:projectId/artifacts/:artifactId`
+
+Successful revision jobs should automatically enqueue an export for the revised
+sibling timeline. Clients can still request explicit exports later.
 
 Export request:
 
@@ -360,20 +369,22 @@ The contract should otherwise match hosted behavior.
 
 ## Open Assumptions
 
-- Exact retention policy for soft-deleted projects and copied local assets.
-- Whether revision jobs should always create a new `timelineVersionId` under the
-  same timeline, or create a new sibling `timelineId` for each revised cut.
-- Whether export jobs should render automatically after a successful revision or
-  require an explicit export request.
+- Exact retention window for hard-deleting copied source assets and generated
+  artifacts.
+- Whether project-level soft deletes should have an operator recovery window
+  before metadata is purged.
 
 ## V1 Decisions
 
 - Project deletion is soft-delete only.
+- Copied source assets and generated artifacts can be hard-deleted according to
+  retention policy.
 - Local agent `local_path` assets are copied into managed local media storage.
 - Generation defaults to one timeline.
 - Webhook callbacks are out of scope for v1; clients poll jobs.
 - External v1 revisions are natural-language edit requests that generate a new
   validated timeline cut and restitch from copied source assets.
+- Successful revisions create sibling timeline IDs and auto-enqueue an export.
 - Direct structured timeline patching is deferred for external clients.
 
 ## Acceptance Criteria
