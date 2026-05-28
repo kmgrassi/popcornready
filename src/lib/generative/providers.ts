@@ -8,6 +8,7 @@ import {
   GenerativeProvider,
   GenerativeProviderName,
 } from "./types";
+import { createElevenLabsAudio } from "./audio";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const GEMINI_DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
@@ -192,7 +193,8 @@ const openAIProvider: GenerativeProvider = {
   name: "openai",
   async generateAsset(input) {
     if (input.kind === "image") return generateOpenAIImage(input);
-    return generateOpenAIVideo(input);
+    if (input.kind === "video") return generateOpenAIVideo(input);
+    throw new Error("OpenAI provider currently supports image and video generation only.");
   },
 };
 
@@ -270,6 +272,16 @@ const geminiProvider: GenerativeProvider = {
   },
 };
 
+const elevenLabsProvider: GenerativeProvider = {
+  name: "elevenlabs",
+  async generateAsset(input) {
+    if (input.kind !== "audio") {
+      throw new Error("ElevenLabs provider currently supports audio generation only.");
+    }
+    return createElevenLabsAudio(input);
+  },
+};
+
 function unsupportedProvider(name: GenerativeProviderName): GenerativeProvider {
   return {
     name,
@@ -306,6 +318,8 @@ export function providerFor(name: string): GenerativeProvider {
       return openAIProvider;
     case "gemini":
       return geminiProvider;
+    case "elevenlabs":
+      return elevenLabsProvider;
     case "nanobanano":
     case "nano-banano":
     case "nano_banano":

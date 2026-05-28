@@ -7,7 +7,7 @@ export interface Clip {
   id: string;
   filename: string;
   url: string; // served path, e.g. /uploads/abc.mp4
-  kind?: "video" | "image";
+  kind?: "video" | "image" | "audio";
   durationSec: number;
   description: string; // user-provided hint the agent reasons over
   source?: "upload" | "generated";

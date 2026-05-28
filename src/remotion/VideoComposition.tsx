@@ -29,6 +29,7 @@ export const VideoComposition: React.FC<VideoProps> = ({
       {timeline.segments.map((seg) => {
         const clip = byId[seg.clipId];
         if (!clip) return null;
+        if (clip.kind === "audio") return null;
         const segFrames = Math.max(
           1,
           Math.round((seg.sourceOutSec - seg.sourceInSec) * fps)

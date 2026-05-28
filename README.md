@@ -37,8 +37,9 @@ Remotion        timeline → <Player> preview + MP4 export
 - **Generative asset fill** (`src/lib/generative/`) can add missing image or
   video assets to the clip library through a provider abstraction. OpenAI
   supports image and video generation; Gemini supports video generation through
-  Veo 3.1; NanoBanano is registered as an explicit placeholder for a future
-  adapter.
+  Veo 3.1; ElevenLabs supports generated audio helpers for speech, dialogue,
+  sound effects, and music; NanoBanano is registered as an explicit placeholder
+  for a future adapter.
 - **Story context** (`src/lib/story-context.ts`) adds reusable science-video
   storytelling guidance from `docs/research/science-video-story-context.md` so
   the planner optimizes for hook, visual surprise, one big idea, simple model,
@@ -49,7 +50,7 @@ Remotion        timeline → <Player> preview + MP4 export
 ## Setup
 
 ```bash
-cp .env.local.example .env.local   # add ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or GEMINI_API_KEY
+cp .env.local.example .env.local   # add provider keys as needed
 npm install
 npm run dev
 ```
@@ -61,7 +62,8 @@ Open http://localhost:3000
    transcription/vision analysis is the documented next step, not in this slice).
 2. If the library is missing a visual, use **Generate missing asset** to create
    an image or short video asset. OpenAI is live when `OPENAI_API_KEY` is set;
-   Gemini video generation is live when `GEMINI_API_KEY` is set.
+   Gemini video generation is live when `GEMINI_API_KEY` is set. ElevenLabs
+   audio generation is live when `ELEVENLABS_API_KEY` is set.
 3. Write a creative goal, set length/aspect/style, and **Generate rough cut**.
 4. Inspect the plan, timeline, and critic scores; preview plays in the browser.
 5. **Revise (chat)**: "make it punchier", "shorten to 15s", "add captions",
@@ -79,6 +81,8 @@ Open http://localhost:3000
   multiple rough-cut variants are future work.
 - Gemini image generation and NanoBanano provider adapters are placeholders in
   this pass.
+- Generated audio is saved as an asset but is not yet mixed into exported
+  timelines. Audio clips are excluded from visual clip selection prompts.
 - MP4 export requires the dev server running (Remotion fetches the uploaded
   clips over `http://localhost:3000`).
 

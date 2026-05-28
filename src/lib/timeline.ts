@@ -117,8 +117,9 @@ export function applyPatches(
 // Compact representation of clips passed to the agents. Keeping it small and
 // deterministic protects the prompt cache.
 export function clipCatalog(clips: Clip[]): string {
-  if (clips.length === 0) return "(no clips uploaded)";
-  return clips
+  const visualClips = clips.filter((c) => (c.kind || "video") !== "audio");
+  if (visualClips.length === 0) return "(no visual clips uploaded)";
+  return visualClips
     .map(
       (c) =>
         `- id=${c.id} | kind=${c.kind || "video"} | source=${
