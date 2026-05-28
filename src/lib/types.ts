@@ -15,6 +15,8 @@ export interface Clip {
     provider: string;
     model?: string;
     prompt: string;
+    originalPrompt?: string;
+    preflight?: GenerationPreflightResult;
   };
   characterBinding?: GeneratedAssetCharacterBinding;
 }
@@ -150,6 +152,39 @@ export interface CriticScores {
 export interface CriticReport {
   scores: CriticScores;
   summary: string;
+}
+
+export interface GenerationPreflightIssue {
+  severity: "low" | "medium" | "high";
+  area:
+    | "story"
+    | "clarity"
+    | "accuracy"
+    | "visual_feasibility"
+    | "safety"
+    | "provider_fit"
+    | "asset_continuity";
+  issue: string;
+  recommendation: string;
+}
+
+export interface GenerationPreflightPass {
+  iteration: number;
+  summary: string;
+  issues: GenerationPreflightIssue[];
+  revisedPrompt: string;
+  revisedDescription: string;
+  revisedDialogueInputs?: { index: number; text: string }[];
+}
+
+export interface GenerationPreflightResult {
+  requestedIterations: number;
+  completedIterations: number;
+  originalPrompt: string;
+  finalPrompt: string;
+  finalDescription: string;
+  finalDialogueInputs?: { text: string; voiceId: string }[];
+  passes: GenerationPreflightPass[];
 }
 
 export type Patch =

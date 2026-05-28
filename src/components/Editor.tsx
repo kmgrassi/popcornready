@@ -69,6 +69,7 @@ export function Editor() {
   const [assetDesc, setAssetDesc] = useState("");
   const [assetSize, setAssetSize] = useState(DEFAULT_IMAGE_SIZE);
   const [assetSeconds, setAssetSeconds] = useState(8);
+  const [preflightReviewIterations, setPreflightReviewIterations] = useState(1);
   const [referenceClipIds, setReferenceClipIds] = useState<string[]>([]);
 
   // chat
@@ -156,8 +157,8 @@ export function Editor() {
     setError(null);
     setBusy(
       assetKind === "video"
-        ? "Generating video asset…"
-        : "Generating image asset…"
+        ? "Reviewing prompt, then generating video asset…"
+        : "Reviewing prompt, then generating image asset…"
     );
     try {
       const res = await fetch("/api/generate-assets", {
@@ -175,6 +176,9 @@ export function Editor() {
           seconds: assetSeconds,
           durationSec: assetKind === "image" ? 4 : assetSeconds,
           referenceClipIds,
+          preflightReviewIterations,
+          script: goal,
+          storyContext,
         }),
       });
       const data = await res.json();
@@ -339,6 +343,20 @@ export function Editor() {
             </div>
           )}
         </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label>AI review passes</label>
+            <input
+              type="number"
+              min={0}
+              max={3}
+              value={preflightReviewIterations}
+              onChange={(e) =>
+                setPreflightReviewIterations(Number(e.target.value))
+              }
+            />
+          </div>
+        </div>
         {imageClips.length > 0 && (
           <div>
             <label>Reference images</label>
@@ -385,10 +403,24 @@ export function Editor() {
               </div>
               <div className="muted">{c.description || "no description"}</div>
               {c.generatedBy && (
-                <div className="muted">
-                  {c.generatedBy.provider}
-                  {c.generatedBy.model ? ` · ${c.generatedBy.model}` : ""}
-                </div>
+                <>
+                  <div className="muted">
+                    {c.generatedBy.provider}
+                    {c.generatedBy.model ? ` · ${c.generatedBy.model}` : ""}
+                    {c.generatedBy.preflight
+                      ? ` · ${c.generatedBy.preflight.completedIterations} AI review pass${
+                          c.generatedBy.preflight.completedIterations === 1
+                            ? ""
+                            : "es"
+                        }`
+                      : ""}
+                  </div>
+                  {c.generatedBy.preflight?.passes[0] && (
+                    <div className="muted">
+                      Preflight: {c.generatedBy.preflight.passes[0].summary}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

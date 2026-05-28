@@ -4,6 +4,7 @@ import path from "path";
 import { addClip, getProject } from "@/lib/store";
 import { Clip } from "@/lib/types";
 import { providerFor } from "@/lib/generative/providers";
+import { preflightGenerationContent } from "@/lib/generative/preflight";
 import {
   characterBindingForAsset,
   CharacterContextValidationError,
@@ -14,6 +15,7 @@ import {
   AudioGenerationMode,
   DialogueInput,
   GenerativeAssetKind,
+  GenerativeProviderName,
 } from "@/lib/generative/types";
 
 export const dynamic = "force-dynamic";
@@ -41,13 +43,43 @@ function parseAudioMode(value: unknown): AudioGenerationMode | undefined {
   return AUDIO_MODES.has(mode) ? (mode as AudioGenerationMode) : undefined;
 }
 
+function normalizeProviderName(
+  value: unknown,
+  kind: GenerativeAssetKind
+): GenerativeProviderName | null {
+  const raw = String(value || (kind === "audio" ? "elevenlabs" : "openai"));
+  const name = raw.toLowerCase();
+  if (name === "openai") return "openai";
+  if (name === "gemini") return "gemini";
+  if (name === "elevenlabs") return "elevenlabs";
+  if (name === "mock") return "mock";
+  if (name === "nanobanano" || name === "nano-banano" || name === "nano_banano") {
+    return "nanobanano";
+  }
+  return null;
+}
+
+function validateProviderKind(
+  providerName: GenerativeProviderName,
+  kind: GenerativeAssetKind
+): string | null {
+  if (providerName === "openai" && (kind === "image" || kind === "video")) {
+    return null;
+  }
+  if (providerName === "gemini" && kind === "video") return null;
+  if (providerName === "elevenlabs" && kind === "audio") return null;
+  if (providerName === "mock" && kind === "image") return null;
+  if (providerName === "nanobanano") {
+    return "NanoBanano provider is registered but not implemented yet.";
+  }
+  return `${providerName} provider does not support ${kind} generation.`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const kind = String(body.kind || "image") as GenerativeAssetKind;
-    const providerName = String(
-      body.provider || (kind === "audio" ? "elevenlabs" : "openai")
-    );
+    const providerName = normalizeProviderName(body.provider, kind);
     const audioMode = parseAudioMode(body.audioMode);
     const prompt = String(body.prompt || "").trim();
     const dialogueInputs: DialogueInput[] | undefined = Array.isArray(body.dialogueInputs)
@@ -79,11 +111,21 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    if (!providerName) {
+      return NextResponse.json(
+        { error: `Unknown generative provider: ${String(body.provider || "")}` },
+        { status: 400 }
+      );
+    }
     if (kind === "audio" && providerName !== "elevenlabs") {
       return NextResponse.json(
         { error: "Audio generation requires provider=elevenlabs." },
         { status: 400 }
       );
+    }
+    const providerKindError = validateProviderKind(providerName, kind);
+    if (providerKindError) {
+      return NextResponse.json({ error: providerKindError }, { status: 400 });
     }
     if (!prompt && !hasDialogueText) {
       return NextResponse.json(
@@ -93,10 +135,28 @@ export async function POST(req: NextRequest) {
     }
 
     const project = await getProject();
+    const preflightPrompt =
+      prompt ||
+      dialogueInputs?.map((line: DialogueInput) => line.text).join("\n") ||
+      "";
+    const preflight = await preflightGenerationContent({
+      provider: providerName,
+      kind,
+      prompt: preflightPrompt,
+      description,
+      iterations: body.preflightReviewIterations,
+      script: body.script || project.goal || undefined,
+      storyboard: body.storyboard,
+      prompts: Array.isArray(body.prompts) ? body.prompts.map(String) : undefined,
+      dialogueInputs,
+      storyContext: body.storyContext || project.storyContext,
+      plan: project.plan,
+      clips: project.clips,
+    });
     const characterContext = resolveCharacterContext(
       project,
       characterFields,
-      prompt
+      preflight.finalPrompt
     );
     const referencePaths = referenceClipIds
       .map((id: string) =>
@@ -112,7 +172,7 @@ export async function POST(req: NextRequest) {
     const result = await provider.generateAsset({
       provider: provider.name,
       kind,
-      prompt,
+      prompt: preflight.finalPrompt,
       referencePaths,
       model: body.model ? String(body.model) : undefined,
       size: body.size ? String(body.size) : undefined,
@@ -122,7 +182,7 @@ export async function POST(req: NextRequest) {
       voiceId: body.voiceId ? String(body.voiceId) : undefined,
       outputFormat: body.outputFormat ? String(body.outputFormat) : undefined,
       languageCode: body.languageCode ? String(body.languageCode) : undefined,
-      dialogueInputs,
+      dialogueInputs: preflight.finalDialogueInputs || dialogueInputs,
       loop:
         typeof body.loop === "boolean"
           ? body.loop
@@ -153,12 +213,20 @@ export async function POST(req: NextRequest) {
       url: `/generated/${filename}`,
       kind: result.kind,
       durationSec,
-      description,
+      description: preflight.finalDescription,
       source: "generated",
       generatedBy: {
         provider: result.provider,
         model: result.model,
         prompt: result.prompt,
+        originalPrompt:
+          preflight.originalPrompt === result.prompt
+            ? undefined
+            : preflight.originalPrompt,
+        preflight:
+          preflight.completedIterations > 0
+            ? preflight
+            : undefined,
       },
       characterBinding: characterContext
         ? characterBindingForAsset(id, characterContext)
