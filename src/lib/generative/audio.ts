@@ -41,6 +41,77 @@ function audioMimeType(outputFormat = DEFAULT_AUDIO_FORMAT): string {
   return "audio/mpeg";
 }
 
+const MP3_BITRATES: Record<number, number[]> = {
+  3: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+};
+
+const MP3_SAMPLE_RATES: Record<number, number[]> = {
+  3: [44100, 48000, 32000],
+  2: [22050, 24000, 16000],
+  0: [11025, 12000, 8000],
+};
+
+export function estimateMp3DurationSec(bytes: Buffer): number | undefined {
+  let offset = 0;
+  if (bytes.slice(0, 3).toString("ascii") === "ID3" && bytes.length >= 10) {
+    const size =
+      ((bytes[6] & 0x7f) << 21) |
+      ((bytes[7] & 0x7f) << 14) |
+      ((bytes[8] & 0x7f) << 7) |
+      (bytes[9] & 0x7f);
+    offset = 10 + size;
+  }
+
+  let samples = 0;
+  let sampleRate = 0;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff || (bytes[offset + 1] & 0xe0) !== 0xe0) {
+      offset += 1;
+      continue;
+    }
+
+    const versionBits = (bytes[offset + 1] >> 3) & 0x03;
+    const layerBits = (bytes[offset + 1] >> 1) & 0x03;
+    const bitrateIndex = (bytes[offset + 2] >> 4) & 0x0f;
+    const sampleRateIndex = (bytes[offset + 2] >> 2) & 0x03;
+    const padding = (bytes[offset + 2] >> 1) & 0x01;
+    if (
+      versionBits === 1 ||
+      layerBits !== 1 ||
+      bitrateIndex === 0 ||
+      bitrateIndex === 15 ||
+      sampleRateIndex === 3
+    ) {
+      offset += 1;
+      continue;
+    }
+
+    const bitrateKbps = MP3_BITRATES[versionBits]?.[bitrateIndex];
+    const frameSampleRate = MP3_SAMPLE_RATES[versionBits]?.[sampleRateIndex];
+    if (!bitrateKbps || !frameSampleRate) {
+      offset += 1;
+      continue;
+    }
+
+    const samplesPerFrame = versionBits === 3 ? 1152 : 576;
+    const frameLength =
+      versionBits === 3
+        ? Math.floor((144000 * bitrateKbps) / frameSampleRate + padding)
+        : Math.floor((72000 * bitrateKbps) / frameSampleRate + padding);
+    if (frameLength <= 4) {
+      offset += 1;
+      continue;
+    }
+
+    sampleRate = frameSampleRate;
+    samples += samplesPerFrame;
+    offset += frameLength;
+  }
+
+  return samples > 0 && sampleRate > 0 ? samples / sampleRate : undefined;
+}
+
 function withOutputFormat(pathName: string, outputFormat?: string): string {
   const format = outputFormat || DEFAULT_AUDIO_FORMAT;
   return `${pathName}?output_format=${encodeURIComponent(format)}`;
@@ -77,7 +148,7 @@ async function elevenLabsAudioFetch({
 export async function createSpeechAudio(
   input: GenerateAssetRequest
 ): Promise<GeneratedAssetResult> {
-  const text = input.prompt.trim();
+  const text = stripSpeechDirectives(input.prompt);
   if (!text) throw new Error("Text is required for speech generation.");
 
   const model = input.model || "eleven_multilingual_v2";
@@ -90,19 +161,43 @@ export async function createSpeechAudio(
     ...(input.languageCode ? { language_code: input.languageCode } : {}),
   };
 
+  const bytes = await elevenLabsAudioFetch({
+    pathName: `/text-to-speech/${voiceId}`,
+    body,
+    outputFormat,
+  });
+
   return {
     kind: "audio",
-    bytes: await elevenLabsAudioFetch({
-      pathName: `/text-to-speech/${voiceId}`,
-      body,
-      outputFormat,
-    }),
+    bytes,
     extension: audioExtension(outputFormat),
     mimeType: audioMimeType(outputFormat),
     provider: "elevenlabs",
     model,
     prompt: text,
+    durationSec: estimateMp3DurationSec(bytes),
   };
+}
+
+export function stripSpeechDirectives(value: string): string {
+  let text = value.trim();
+  let previous = "";
+
+  while (text && text !== previous) {
+    previous = text;
+    text = text
+      .replace(
+        /^\[(?:voice|delivery|narration|tts|elevenlabs|pronunciation|direction|instructions?)[^\]]*\]\s*/i,
+        ""
+      )
+      .replace(
+        /^(?:voice|delivery|narration|tts|elevenlabs|pronunciation|direction|instructions?)\s*(?:direction|directions|instructions|notes?)?\s*:\s*[^\n]*(?:\n\s*)+/i,
+        ""
+      )
+      .trim();
+  }
+
+  return text;
 }
 
 export async function createDialogueAudio(

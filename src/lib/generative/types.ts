@@ -71,6 +71,7 @@ export interface GeneratedAssetResult {
   provider: GenerativeProviderName;
   model?: string;
   prompt: string;
+  durationSec?: number;
   providerSettings?: {
     references: string[];
     mode: CharacterConsistencyMode;

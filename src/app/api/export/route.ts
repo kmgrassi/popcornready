@@ -36,10 +36,6 @@ export async function POST(req: NextRequest) {
     const origin = new URL(req.url).origin;
     const fps = project.timeline.fps || 30;
     const { width, height } = dims(project.timeline.aspectRatio);
-    const durationInFrames = Math.max(
-      1,
-      Math.round(timelineDurationSec(project.timeline) * fps)
-    );
 
     const baseInputProps = {
       timeline: project.timeline,
@@ -63,6 +59,11 @@ export async function POST(req: NextRequest) {
     }
 
     const audioClips = selectedAudioClip ? [selectedAudioClip] : [];
+    const exportDurationSec = Math.max(
+      timelineDurationSec(project.timeline),
+      ...audioClips.map((clip) => clip.durationSec || 0)
+    );
+    const durationInFrames = Math.max(1, Math.round(exportDurationSec * fps));
 
     const entry = path.join(process.cwd(), "src", "remotion", "index.ts");
     const serveUrl = await bundle({ entryPoint: entry });

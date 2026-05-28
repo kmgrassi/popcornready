@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { storyContextForPrompt } from "../story-context";
 import {
+  AudioGenerationMode,
   DialogueInput,
   GenerativeAssetKind,
   GenerativeProviderName,
@@ -117,6 +118,7 @@ export interface PreflightGenerationContentInput {
   storyboard?: string;
   prompts?: string[];
   dialogueInputs?: DialogueInput[];
+  audioMode?: AudioGenerationMode;
   storyContext?: StoryContext | null;
   plan?: EditPlan | null;
   clips?: Clip[];
@@ -165,7 +167,10 @@ Return JSON only. Keep the revised prompt ready to send directly to the
 generation provider. Keep the description short and useful for the asset
 library. If dialogue inputs are provided, return revisedDialogueInputs with the
 same zero-based indexes and revised text only; do not invent or remove speakers.
-If no dialogue inputs are provided, return an empty revisedDialogueInputs array.`;
+If no dialogue inputs are provided, return an empty revisedDialogueInputs array.
+For ElevenLabs speech generation, revisedPrompt is the exact text that will be
+spoken aloud. Do not put voice directions, pronunciation notes, stage
+directions, bracketed instructions, or provider instructions in revisedPrompt.`;
 
   for (let index = 0; index < requestedIterations; index += 1) {
     const previousFeedback =
@@ -194,6 +199,7 @@ If no dialogue inputs are provided, return an empty revisedDialogueInputs array.
       user: `Generation target:
 provider: ${input.provider}
 kind: ${input.kind}
+audio mode: ${input.audioMode || "n/a"}
 
 Current prompt:
 ${prompt}

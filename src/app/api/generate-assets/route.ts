@@ -215,6 +215,7 @@ export async function POST(req: NextRequest) {
       storyboard: body.storyboard,
       prompts: Array.isArray(body.prompts) ? body.prompts.map(String) : undefined,
       dialogueInputs,
+      audioMode,
       storyContext: body.storyContext || project.storyContext,
       plan: project.plan,
       clips: project.clips,
@@ -290,7 +291,7 @@ export async function POST(req: NextRequest) {
       filename,
       url: `/generated/${filename}`,
       kind: result.kind,
-      durationSec,
+      durationSec: result.durationSec || durationSec,
       description: preflight.finalDescription,
       source: "generated",
       generatedBy: {
