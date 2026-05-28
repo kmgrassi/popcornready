@@ -1,3 +1,5 @@
+import { CharacterConsistencyMode, ShotDelta } from "@/lib/types";
+
 export type GenerativeProviderName =
   | "openai"
   | "gemini"
@@ -30,6 +32,11 @@ export interface GenerateAssetRequest {
   loop?: boolean;
   promptInfluence?: number;
   forceInstrumental?: boolean;
+  characterProfileIds?: string[];
+  characterReferenceIds?: string[];
+  consistencyMode?: CharacterConsistencyMode;
+  shotDelta?: ShotDelta;
+  promptInvariantVersion?: string;
 }
 
 export interface GeneratedAssetResult {

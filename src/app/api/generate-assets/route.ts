@@ -5,6 +5,12 @@ import { addClip, getProject } from "@/lib/store";
 import { Clip } from "@/lib/types";
 import { providerFor } from "@/lib/generative/providers";
 import {
+  characterBindingForAsset,
+  CharacterContextValidationError,
+  parseCharacterGenerationFields,
+  resolveCharacterContext,
+} from "@/lib/generative/character-context";
+import {
   AudioGenerationMode,
   DialogueInput,
   GenerativeAssetKind,
@@ -65,6 +71,7 @@ export async function POST(req: NextRequest) {
     const referenceClipIds = Array.isArray(body.referenceClipIds)
       ? body.referenceClipIds.map(String)
       : [];
+    const characterFields = parseCharacterGenerationFields(body);
 
     if (kind !== "image" && kind !== "video" && kind !== "audio") {
       return NextResponse.json(
@@ -86,6 +93,11 @@ export async function POST(req: NextRequest) {
     }
 
     const project = await getProject();
+    const characterContext = resolveCharacterContext(
+      project,
+      characterFields,
+      prompt
+    );
     const referencePaths = referenceClipIds
       .map((id: string) =>
         project.clips.find((clip: Clip) => clip.id === id)
@@ -123,6 +135,11 @@ export async function POST(req: NextRequest) {
         typeof body.forceInstrumental === "boolean"
           ? body.forceInstrumental
           : undefined,
+      characterProfileIds: characterFields.characterProfileIds,
+      characterReferenceIds: characterFields.characterReferenceIds,
+      consistencyMode: characterContext?.consistencyMode,
+      shotDelta: characterContext?.shotDelta,
+      promptInvariantVersion: characterContext?.promptInvariantVersion,
     });
 
     await fs.mkdir(GENERATED_DIR, { recursive: true });
@@ -143,11 +160,17 @@ export async function POST(req: NextRequest) {
         model: result.model,
         prompt: result.prompt,
       },
+      characterBinding: characterContext
+        ? characterBindingForAsset(id, characterContext)
+        : undefined,
     };
 
     const updated = await addClip(clip);
     return NextResponse.json({ clip, project: updated });
   } catch (err: any) {
+    if (err instanceof CharacterContextValidationError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     return NextResponse.json(
       { error: err?.message || "Asset generation failed" },
       { status: 500 }

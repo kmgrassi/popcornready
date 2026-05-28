@@ -16,6 +16,75 @@ export interface Clip {
     model?: string;
     prompt: string;
   };
+  characterBinding?: GeneratedAssetCharacterBinding;
+}
+
+export type CharacterReferenceRole =
+  | "front_portrait"
+  | "three_quarter"
+  | "profile"
+  | "full_body"
+  | "style"
+  | "wardrobe"
+  | "hero_frame";
+
+export type CharacterReferenceQuality = "candidate" | "approved" | "rejected";
+export type CharacterProfileStatus = "draft" | "ready" | "archived";
+export type CharacterConsistencyGrade = "pass" | "needs_review" | "fail";
+
+export type CharacterConsistencyMode =
+  | "prompt_only"
+  | "reference_pack"
+  | "hero_frame"
+  | "first_frame_video";
+
+export interface ShotDelta {
+  action?: string;
+  camera?: string;
+  setting?: string;
+  emotion?: string;
+  [key: string]: string | undefined;
+}
+
+export interface CharacterProfile {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  identityInvariants: string;
+  styleInvariants?: string;
+  wardrobeInvariants?: string;
+  negativePrompt?: string;
+  status: CharacterProfileStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CharacterReference {
+  id: string;
+  characterProfileId: string;
+  assetId: string;
+  role: CharacterReferenceRole;
+  quality: CharacterReferenceQuality;
+  notes?: string;
+}
+
+export interface CharacterConsistencyReview {
+  identity: CharacterConsistencyGrade;
+  wardrobe: CharacterConsistencyGrade;
+  style: CharacterConsistencyGrade;
+  temporal?: CharacterConsistencyGrade;
+  notes?: string;
+}
+
+export interface GeneratedAssetCharacterBinding {
+  assetId: string;
+  characterProfileIds: string[];
+  referenceIds: string[];
+  consistencyMode: CharacterConsistencyMode;
+  shotDelta?: ShotDelta;
+  promptInvariantVersion: string;
+  consistencyReview?: CharacterConsistencyReview;
 }
 
 export interface Beat {
@@ -124,6 +193,8 @@ export interface Project {
   plan: EditPlan | null;
   timeline: Timeline | null;
   clips: Clip[];
+  characterProfiles?: CharacterProfile[];
+  characterReferences?: CharacterReference[];
   critic: CriticReport | null;
   chat: ChatMessage[];
   updatedAt: string;
