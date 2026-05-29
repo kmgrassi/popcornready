@@ -9,6 +9,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { notFound } from "./errors";
 import { newId } from "./ids";
+import { GeneratedAssetProvenance } from "./provenance";
 import {
   AgentAssetSource,
   AssetContext,
@@ -58,6 +59,8 @@ export interface V1Asset {
   storageKey?: string;
   durationSec?: number;
   context?: AssetContext;
+  // Present for assets produced by the generated-assets endpoint (PR2).
+  provenance?: GeneratedAssetProvenance;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +96,10 @@ function dbFile(): string {
 
 export function mediaUploadDir(workspaceId: string, projectId: string): string {
   return path.join(localDir(), "media", "uploads", workspaceId, projectId);
+}
+
+export function mediaGeneratedDir(workspaceId: string, projectId: string): string {
+  return path.join(localDir(), "media", "generated", workspaceId, projectId);
 }
 
 function emptyDb(): V1Db {
