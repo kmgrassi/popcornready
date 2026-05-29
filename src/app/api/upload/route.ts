@@ -10,8 +10,25 @@ export const maxDuration = 60;
 
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
+function localMediaRoutesDisabled(): boolean {
+  return (
+    process.env.POPCORN_READY_DISABLE_LOCAL_MEDIA_ROUTES === "true" ||
+    process.env.NETLIFY === "true"
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
+    if (localMediaRoutesDisabled()) {
+      return NextResponse.json(
+        {
+          error:
+            "Browser uploads are disabled on this host. Use local development or add direct-to-object-storage uploads before deploying this flow.",
+        },
+        { status: 501 }
+      );
+    }
+
     const form = await req.formData();
     const file = form.get("file") as File | null;
     const durationSec = parseFloat(String(form.get("durationSec") || "0"));
