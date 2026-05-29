@@ -1,38 +1,56 @@
 import React from "react";
 import { Clip, EditPlan, Timeline, timelineDurationSec } from "@/lib/types";
 import { DURATION_POLICIES, DurationPolicy } from "@/lib/audio-alignment";
-import { DURATION_POLICY_LABELS, ExportResult } from "./shared";
+import {
+  CreatedVideo,
+  DURATION_POLICY_LABELS,
+  ExportResult,
+  formatBytes,
+  formatCreatedAt,
+} from "./shared";
 
 interface PreviewPanelProps {
   Preview: React.ComponentType<{ timeline: Timeline | null; clips: Clip[] }>;
   audioClips: Clip[];
   busy: boolean;
+  createdVideos: CreatedVideo[];
   durationPolicy: DurationPolicy;
   exportResult: ExportResult | null;
+  galleryLoading: boolean;
+  loadedVideoThumbs: Record<string, boolean>;
   plan?: EditPlan;
   selectedAudioClipId: string;
   setDurationPolicy: (value: DurationPolicy) => void;
+  setLoadedVideoThumbs: React.Dispatch<
+    React.SetStateAction<Record<string, boolean>>
+  >;
   setSelectedAudioClipId: (value: string) => void;
   timeline: Timeline | null;
   clips: Clip[];
   onAlignAudio: (strategy: "rewrite_script" | "extend_timeline") => void;
   onExport: () => void;
+  onRefreshCreatedVideos: () => void;
 }
 
 export function PreviewPanel({
   Preview,
   audioClips,
   busy,
+  createdVideos,
   durationPolicy,
   exportResult,
+  galleryLoading,
+  loadedVideoThumbs,
   plan,
   selectedAudioClipId,
   setDurationPolicy,
+  setLoadedVideoThumbs,
   setSelectedAudioClipId,
   timeline,
   clips,
   onAlignAudio,
   onExport,
+  onRefreshCreatedVideos,
 }: PreviewPanelProps) {
   return (
     <div className="col center">
@@ -151,6 +169,91 @@ export function PreviewPanel({
           ))}
         </div>
       )}
+      <section className="video-gallery" aria-label="Created videos">
+        <div className="gallery-head">
+          <div>
+            <h2>Created videos</h2>
+            <p className="sub">Local renders from this workspace, newest first.</p>
+          </div>
+          <button
+            className="secondary compact"
+            onClick={onRefreshCreatedVideos}
+            disabled={galleryLoading}
+          >
+            Refresh
+          </button>
+        </div>
+        {galleryLoading && createdVideos.length === 0 ? (
+          <div className="video-grid" aria-hidden="true">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div className="video-tile skeleton-tile" key={index}>
+                <div className="thumb-skeleton" />
+                <div className="meta-skeleton wide" />
+                <div className="meta-skeleton" />
+              </div>
+            ))}
+          </div>
+        ) : createdVideos.length === 0 ? (
+          <div className="gallery-empty">
+            <div>No rendered videos yet.</div>
+            <span>Export an MP4 and it will appear here.</span>
+          </div>
+        ) : (
+          <div className="video-grid">
+            {createdVideos.map((video) => (
+              <article className="video-tile" key={video.url}>
+                <a href={video.url} target="_blank" rel="noreferrer">
+                  {!loadedVideoThumbs[video.url] && (
+                    <div className="thumb-skeleton overlay" />
+                  )}
+                  <video
+                    src={video.url}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className={loadedVideoThumbs[video.url] ? "thumb-ready" : ""}
+                    onLoadedData={() =>
+                      setLoadedVideoThumbs((prev) => ({
+                        ...prev,
+                        [video.url]: true,
+                      }))
+                    }
+                    onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.pause();
+                      e.currentTarget.currentTime = 0;
+                    }}
+                  />
+                  <div className="video-shade" />
+                  <div className="video-badge">
+                    {video.hasAudioOverlay ? "Audio" : "Silent"}
+                  </div>
+                </a>
+                <div className="video-meta">
+                  <div className="video-title">{video.filename}</div>
+                  <div className="muted">
+                    {video.durationSec ? `${video.durationSec.toFixed(1)}s · ` : ""}
+                    {formatBytes(video.sizeBytes)} · {formatCreatedAt(video.createdAt)}
+                  </div>
+                  <div className="video-links">
+                    <a href={video.url} target="_blank" rel="noreferrer">
+                      Open
+                    </a>
+                    {video.silentUrl && video.overlayUrl && (
+                      <>
+                        <span>·</span>
+                        <a href={video.silentUrl} target="_blank" rel="noreferrer">
+                          Silent
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

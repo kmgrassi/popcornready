@@ -78,8 +78,36 @@ export interface ExportResult {
   alignment?: ExportAlignment;
 }
 
+export interface CreatedVideo {
+  id: string;
+  url: string;
+  filename: string;
+  createdAt: string;
+  sizeBytes: number;
+  durationSec?: number;
+  hasAudioOverlay: boolean;
+  silentUrl?: string;
+  overlayUrl?: string;
+}
+
 export const DURATION_POLICY_LABELS: Record<DurationPolicy, string> = {
   timeline_only: "Timeline only (may cut audio)",
   match_longest_media: "Match longest media (keep audio whole)",
   fail_on_mismatch: "Fail on mismatch (require alignment)",
 };
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatCreatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}

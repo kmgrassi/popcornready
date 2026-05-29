@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { promises as fs } from "fs";
+import path from "path";
 import { PromptComposer } from "@/components/PromptComposer";
 
 const GITHUB_URL = "https://github.com/kmgrassi/aividi";
+const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
 
 const STEPS = [
   {
@@ -104,7 +107,57 @@ const PRICING = [
   },
 ];
 
-export default function LandingPage() {
+interface LandingExampleVideo {
+  id: string;
+  url: string;
+  filename: string;
+}
+
+function exportGroupId(filename: string): string {
+  return filename.replace(/_overlay\.mp4$/, "").replace(/\.mp4$/, "");
+}
+
+async function getExampleVideos(): Promise<LandingExampleVideo[]> {
+  try {
+    const entries = await fs.readdir(EXPORT_DIR, { withFileTypes: true });
+    const groups = new Map<
+      string,
+      { filename: string; url: string; mtimeMs: number; overlay: boolean }
+    >();
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".mp4")) continue;
+      const filePath = path.join(EXPORT_DIR, entry.name);
+      const stat = await fs.stat(filePath);
+      const id = exportGroupId(entry.name);
+      const overlay = entry.name.endsWith("_overlay.mp4");
+      const current = groups.get(id);
+      if (!current || (overlay && !current.overlay) || stat.mtimeMs > current.mtimeMs) {
+        groups.set(id, {
+          filename: entry.name,
+          url: `/exports/${entry.name}`,
+          mtimeMs: stat.mtimeMs,
+          overlay,
+        });
+      }
+    }
+
+    return [...groups.entries()]
+      .map(([id, video]) => ({ id, url: video.url, filename: video.filename }))
+      .sort((a, b) => {
+        const aVideo = groups.get(a.id)!;
+        const bVideo = groups.get(b.id)!;
+        return bVideo.mtimeMs - aVideo.mtimeMs;
+      })
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+export default async function LandingPage() {
+  const exampleVideos = await getExampleVideos();
+
   return (
     <div className="landing">
       <header className="lp-nav">
@@ -136,6 +189,36 @@ export default function LandingPage() {
           </p>
 
           <PromptComposer />
+        </section>
+
+        <section className="lp-examples" aria-label="Example renders">
+          <div className="lp-examples-head">
+            <div>
+              <h2>Example renders</h2>
+              <p>Local videos created with this workspace.</p>
+            </div>
+            <Link href="/studio">Open studio</Link>
+          </div>
+          {exampleVideos.length > 0 ? (
+            <div className="lp-example-grid">
+              {exampleVideos.map((video) => (
+                <a
+                  className="lp-example-tile"
+                  href={video.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  key={video.id}
+                >
+                  <video src={video.url} muted playsInline preload="metadata" />
+                  <span>{video.filename.replace(/_overlay\.mp4|\.mp4/g, "")}</span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="lp-example-empty">
+              Exports will appear here after the first local render.
+            </div>
+          )}
         </section>
 
         <section id="how" className="lp-section">

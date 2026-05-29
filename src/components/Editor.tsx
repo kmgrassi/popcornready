@@ -23,6 +23,7 @@ import { PreviewPanel } from "./editor/PreviewPanel";
 import { SidebarPanel } from "./editor/SidebarPanel";
 import {
   CharacterFormState,
+  CreatedVideo,
   DEFAULT_IMAGE_SIZE,
   DEFAULT_VIDEO_SIZE,
   ExportResult,
@@ -63,6 +64,11 @@ export function Editor({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [createdVideos, setCreatedVideos] = useState<CreatedVideo[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [loadedVideoThumbs, setLoadedVideoThumbs] = useState<
+    Record<string, boolean>
+  >({});
 
   const [goal, setGoal] = useState(initialGoal);
   const [targetLength, setTargetLength] = useState(initialLength);
@@ -127,6 +133,25 @@ export function Editor({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAutostart, initialGoal]);
+
+  async function refreshCreatedVideos() {
+    setGalleryLoading(true);
+    try {
+      const response = await fetch("/api/exports");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to load videos");
+      setCreatedVideos(data.videos || []);
+      setLoadedVideoThumbs({});
+    } catch (refreshError: any) {
+      setError(refreshError.message);
+    } finally {
+      setGalleryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshCreatedVideos();
+  }, []);
 
   const clips = project?.clips ?? [];
   const timeline = project?.timeline ?? null;
@@ -329,6 +354,7 @@ export function Editor({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Export failed");
       setExportResult(data);
+      await refreshCreatedVideos();
     } catch (exportError: any) {
       setError(exportError.message);
     } finally {
@@ -742,14 +768,19 @@ export function Editor({
         busy={!!busy}
         durationPolicy={durationPolicy}
         exportResult={exportResult}
+        createdVideos={createdVideos}
+        galleryLoading={galleryLoading}
+        loadedVideoThumbs={loadedVideoThumbs}
         plan={project?.plan ?? undefined}
         selectedAudioClipId={selectedAudioClipId}
         setDurationPolicy={setDurationPolicy}
+        setLoadedVideoThumbs={setLoadedVideoThumbs}
         setSelectedAudioClipId={setSelectedAudioClipId}
         timeline={timeline}
         clips={clips}
         onAlignAudio={handleAlignAudio}
         onExport={handleExport}
+        onRefreshCreatedVideos={refreshCreatedVideos}
       />
 
       <SidebarPanel
