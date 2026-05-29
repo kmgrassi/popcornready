@@ -15,6 +15,7 @@ import {
   TimelineSegment,
 } from "@/lib/types";
 import { mergeStoryContext } from "@/lib/story-context";
+import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 
 export const dynamic = "force-dynamic";
 // Per-beat video generation is slow. Clips are generated in parallel so the
@@ -100,7 +101,8 @@ function beatPrompt(
     `${style} ${medium} for a ${ar} short-form video.`,
     `Beat: ${beat.name} — ${beat.intent}.`,
     `Overall concept: ${goal}.`,
-    `High quality, vivid lighting, strong composition, no on-screen text.`,
+    `Production quality guidance: ${videoQualityContextForPrompt()}`,
+    `Make the shot feel designed, not accidental: strong visual hierarchy, controlled lighting, subject-background separation, cohesive tone, and no on-screen text.`,
   ].join(" ");
 }
 

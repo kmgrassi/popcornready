@@ -2,6 +2,7 @@ import { structuredCall } from "../anthropic";
 import { Clip, CompositionMode, StoryContext } from "../types";
 import { clipCatalog } from "../timeline";
 import { storyContextForPrompt } from "../story-context";
+import { videoQualityContextForPrompt } from "../video-quality-context";
 import {
   NarrationProposal,
   PlannedBeatProposal,
@@ -25,6 +26,9 @@ final timeline here; you only plan which assets are needed.
 Rules:
 - Beat durations should roughly sum to the target length.
 - Favor a strong hook, a clear middle, and a payoff/CTA appropriate to the goal.
+- Plan for production value: clear intent, purposeful scene progression,
+  designed composition, motivated movement, cohesive tone, deliberate pacing,
+  and an informational or emotional payoff.
 - Only reference existing assets by the exact ids in the catalog.
 - Prefer generated images over generated video unless motion is essential, since
   images are cheaper and faster.
@@ -48,6 +52,9 @@ export async function planCompositionBeats(input: {
 
 MODE: ${input.mode}
 ${MODE_GUIDANCE[input.mode]}
+
+VIDEO QUALITY CONTEXT:
+${videoQualityContextForPrompt()}
 
 ASSET CATALOG:
 ${input.mode === "prompt_only" ? "(ignored in prompt_only mode)" : clipCatalog(input.clips)}`;

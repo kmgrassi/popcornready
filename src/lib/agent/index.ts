@@ -14,6 +14,7 @@ import {
   estimateWordsForDuration,
   NARRATION_WORDS_PER_SEC,
 } from "../audio-alignment";
+import { videoQualityContextForPrompt } from "../video-quality-context";
 import {
   criticSchema,
   narrationRewriteSchema,
@@ -38,6 +39,9 @@ Story guidance for science and educational social video:
   nouns, clear visual evidence, and a simple mental model.
 - Earn trust after the hook with accurate wording, visible expertise, and a
   payoff that leaves the viewer smarter.
+
+Production-value guidance:
+${videoQualityContextForPrompt()}
 
 Hard rules:
 - Only ever reference clips by the exact ids in the provided catalog.
@@ -70,7 +74,9 @@ export async function planEdit(input: {
 
 TASK: Convert the user's creative goal into a beat-by-beat edit plan. Choose
 beats appropriate to the goal and style (e.g. hook / problem / solution / proof
-/ cta for an ad). Beat durations should roughly sum to the target length.`;
+/ cta for an ad). Beat durations should roughly sum to the target length.
+Make sure the plan has a clear beginning, middle, payoff, and a reason for
+each scene. Avoid random shot collections.`;
 
   const user = `Creative goal: ${input.goal}
 Target length: ${input.targetLengthSec}s
@@ -103,7 +109,8 @@ ${clipCatalog(input.clips)}
 
 TASK: Build the first rough cut. For each beat, pick the best-matching clip(s)
 and choose tight in/out points. Cover every beat; you may use multiple
-segments per beat. Order segments to flow as a finished edit.`;
+segments per beat. Order segments to flow as a finished edit. Favor motivated
+cuts, pacing variation, clear information flow, and visual cohesion.`;
 
   const user = `Edit plan:
 ${planText(input.plan)}
@@ -139,7 +146,8 @@ TASK: You are the critic. Score the current cut 0–10 on each rubric dimension
 (repetition_penalty is 0=none, 10=severe). Then output concrete timeline
 patches that would improve the weakest areas. Only patch what helps; an empty
 patch list is fine if the cut is already strong. Reference real segmentIds and
-clipIds.`;
+clipIds. Prioritize fixes that improve story clarity, momentum, purpose,
+cohesion, and payoff before decorative transitions or effects.`;
 
 const user = `Edit plan:
 ${planText(input.plan)}
