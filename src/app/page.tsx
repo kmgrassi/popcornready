@@ -2,6 +2,7 @@ import Link from "next/link";
 import { promises as fs } from "fs";
 import path from "path";
 import { PromptComposer } from "@/components/PromptComposer";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const GITHUB_URL = "https://github.com/kmgrassi/aividi";
 const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
@@ -174,6 +175,7 @@ export default async function LandingPage() {
             <Link className="lp-nav-cta" href="/studio">
               Open studio
             </Link>
+            <ThemeToggle />
           </nav>
         </div>
       </header>
