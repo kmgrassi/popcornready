@@ -106,17 +106,17 @@ The MVP cleanup and production feature roadmap lives in
 [`docs/productionization-scope.md`](docs/productionization-scope.md), with
 focused scoping docs for browser upload/context workflows and agent-facing APIs.
 
-## Deploy to Railway
+## Deploy to Netlify
 
-Railway deployment notes live in
-[`docs/railway-deployment.md`](docs/railway-deployment.md). The repo includes a
-`railway.toml` that uses Railpack, runs `npm run build`, starts the service with
-`npm run start`, and healthchecks `/api/v1/health`.
+Netlify deployment notes live in
+[`docs/netlify-deployment.md`](docs/netlify-deployment.md). The repo includes a
+`netlify.toml` that builds with `npm run build`, publishes `.next`, and enables
+the official Netlify Next.js plugin for App Router pages and API routes.
 
-Set the provider keys from `.env.local.example` as Railway service variables.
-For a hosted demo, be aware that the current MVP stores project state and media
-on the local filesystem; see the Railway deployment doc for the persistence
-limitations and production storage recommendations.
+Set the provider keys from `.env.local.example` as Netlify environment
+variables. For a hosted demo, be aware that the current MVP stores project state
+and media on the local filesystem; see the Netlify deployment doc for the
+persistence limitations and production storage recommendations.
 
 ## Project layout
 
