@@ -253,8 +253,16 @@ export function buildCompositionPlan(
       );
     }
 
-    const genStrategy: CompositionAssetStrategy =
-      beat.generationKind === "video" ? "generate_video" : "generate_image";
+    // Honor an explicit generationKind; otherwise derive the kind from the
+    // proposed assetStrategy so a "generate_video" beat is not silently
+    // downgraded to an image job when generationKind is omitted.
+    const wantsVideo =
+      beat.generationKind === "video" ||
+      (beat.generationKind === undefined &&
+        beat.assetStrategy === "generate_video");
+    const genStrategy: CompositionAssetStrategy = wantsVideo
+      ? "generate_video"
+      : "generate_image";
 
     if (!input.assetPolicy.generateMissingAssets) {
       // Record the gap so the caller knows what to supply, but generate nothing.
@@ -321,6 +329,33 @@ export function buildCompositionPlan(
   };
 
   return { composition, jobs };
+}
+
+// Deterministic check that the planner actually honored the caller's explicit
+// asset constraints. Validated against the built plan (the assets it will
+// really use), not just the planner prompt. Skipped in prompt_only mode, which
+// intentionally ignores provided assets.
+export function assertCompositionConstraints(
+  composition: CompositionPlan,
+  constraints: { mustUseAssetIds?: string[]; avoidAssetIds?: string[] }
+): void {
+  if (composition.mode === "prompt_only") return;
+
+  const used = new Set<string>();
+  for (const beat of composition.plannedBeats) {
+    for (const id of beat.requiredAssetIds || []) used.add(id);
+  }
+
+  for (const id of constraints.mustUseAssetIds || []) {
+    if (!used.has(id)) {
+      throw new Error(`Composition omits required asset: ${id}.`);
+    }
+  }
+  for (const id of constraints.avoidAssetIds || []) {
+    if (used.has(id)) {
+      throw new Error(`Composition uses an avoided asset: ${id}.`);
+    }
+  }
 }
 
 function planNarration(args: {

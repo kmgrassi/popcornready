@@ -8,6 +8,7 @@ import {
 import { planCompositionBeats } from "@/lib/agent/composition";
 import { mergeStoryContext } from "@/lib/story-context";
 import {
+  assertCompositionConstraints,
   buildCompositionPlan,
   NarrationProposal,
   parseCompositionMode,
@@ -31,6 +32,8 @@ const BAD_REQUEST_MARKERS = [
   "Narration references unknown",
   "is not an audio asset",
   "Provide a creative goal",
+  "omits required asset",
+  "uses an avoided asset",
 ];
 
 function statusForError(message: string): number {
@@ -152,6 +155,10 @@ export async function POST(req: NextRequest) {
       briefVersionId,
       idempotencyKey: idempotencyKey || undefined,
     });
+
+    // Verify the planner honored the caller's explicit asset constraints
+    // before persisting; the prompt alone does not guarantee compliance.
+    assertCompositionConstraints(composition, { mustUseAssetIds, avoidAssetIds });
 
     await saveComposition(composition, jobs);
     return NextResponse.json({ composition, jobs }, { status: 201 });

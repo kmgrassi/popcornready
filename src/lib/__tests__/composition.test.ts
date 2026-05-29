@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertCompositionConstraints,
   buildCompositionPlan,
   parseCompositionMode,
   resolveAssetPolicy,
@@ -137,6 +138,26 @@ test("hybrid reuses provided assets and only generates missing beats", () => {
   assert.equal(cutaway.assetStrategy, "generate_image");
   assert.deepEqual(cutaway.generatedAssetJobIds, [jobs[0].id]);
   assert.equal(composition.narrationStrategy?.mode, "none");
+});
+
+test("generate_video without generationKind still queues a video job", () => {
+  const { composition, jobs } = build({
+    mode: "prompt_only",
+    beats: [
+      {
+        name: "motion",
+        intent: "needs real motion",
+        durationSec: 5,
+        assetStrategy: "generate_video",
+        // generationKind intentionally omitted
+      },
+    ],
+    narration: { mode: "none" },
+  });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].kind, "video");
+  assert.equal(jobs[0].provider, "gemini");
+  assert.equal(composition.plannedBeats[0].assetStrategy, "generate_video");
 });
 
 test("hybrid generates when a use_existing beat has no usable asset", () => {
@@ -281,5 +302,61 @@ test("provided narration validates the referenced audio asset", () => {
         availableAssets: [clip("asset_video", "video")],
       }),
     /is not an audio asset/
+  );
+});
+
+test("assertCompositionConstraints enforces must-use and avoid lists", () => {
+  const { composition } = build({
+    mode: "hybrid",
+    availableAssets: [clip("asset_real"), clip("asset_other")],
+    beats: [
+      {
+        name: "intro",
+        intent: "supplied footage",
+        durationSec: 5,
+        assetStrategy: "use_existing",
+        requiredAssetIds: ["asset_real"],
+      },
+    ],
+    narration: { mode: "none" },
+  });
+
+  // Satisfied: asset_real is used; asset_other is not.
+  assert.doesNotThrow(() =>
+    assertCompositionConstraints(composition, {
+      mustUseAssetIds: ["asset_real"],
+      avoidAssetIds: ["asset_other"],
+    })
+  );
+  // Must-use asset missing from the plan.
+  assert.throws(
+    () =>
+      assertCompositionConstraints(composition, {
+        mustUseAssetIds: ["asset_other"],
+      }),
+    /omits required asset/
+  );
+  // Avoided asset present in the plan.
+  assert.throws(
+    () =>
+      assertCompositionConstraints(composition, {
+        avoidAssetIds: ["asset_real"],
+      }),
+    /uses an avoided asset/
+  );
+});
+
+test("assertCompositionConstraints is skipped for prompt_only", () => {
+  const { composition } = build({
+    mode: "prompt_only",
+    beats: [{ name: "a", intent: "x", durationSec: 2, generationKind: "image" }],
+    narration: { mode: "none" },
+  });
+  // prompt_only ignores provided assets, so asset constraints never apply.
+  assert.doesNotThrow(() =>
+    assertCompositionConstraints(composition, {
+      mustUseAssetIds: ["anything"],
+      avoidAssetIds: ["whatever"],
+    })
   );
 });
