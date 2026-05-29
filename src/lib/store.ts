@@ -1,12 +1,14 @@
 import { promises as fs } from "fs";
 import path from "path";
 import {
+  AssetGenerationJob,
   CharacterConsistencyReview,
   CharacterProfile,
   CharacterReference,
   CharacterReferenceQuality,
   CharacterReferenceRole,
   Clip,
+  CompositionPlan,
   Project,
 } from "./types";
 
@@ -58,22 +60,26 @@ function emptyProject(): Project {
     clips: [],
     characterProfiles: [],
     characterReferences: [],
+    compositions: [],
+    assetGenerationJobs: [],
     critic: null,
     chat: [],
     updatedAt: new Date().toISOString(),
   };
 }
 
-function ensureCharacterCollections(p: Project): Project {
+function ensureCollections(p: Project): Project {
   p.characterProfiles ||= [];
   p.characterReferences ||= [];
+  p.compositions ||= [];
+  p.assetGenerationJobs ||= [];
   return p;
 }
 
 export async function getProject(): Promise<Project> {
   try {
     const raw = await fs.readFile(PROJECT_FILE, "utf8");
-    return ensureCharacterCollections(JSON.parse(raw) as Project);
+    return ensureCollections(JSON.parse(raw) as Project);
   } catch {
     const p = emptyProject();
     await saveProject(p);
@@ -97,7 +103,7 @@ export async function addClip(clip: Clip): Promise<Project> {
 export async function createCharacterProfile(
   input: CreateCharacterProfileInput
 ): Promise<{ project: Project; character: CharacterProfile }> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   const now = new Date().toISOString();
   const character: CharacterProfile = {
     id: newId("char"),
@@ -125,7 +131,7 @@ export async function updateCharacterProfile(
   characterId: string,
   input: UpdateCharacterProfileInput
 ): Promise<{ project: Project; character: CharacterProfile }> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   const character = p.characterProfiles!.find((c) => c.id === characterId);
   if (!character) throw new Error(`Character profile not found: ${characterId}`);
 
@@ -159,7 +165,7 @@ export async function updateCharacterProfile(
 }
 
 export async function deleteCharacterProfile(characterId: string): Promise<Project> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   p.characterProfiles = p.characterProfiles!.filter((c) => c.id !== characterId);
   p.characterReferences = p.characterReferences!.filter(
     (r) => r.characterProfileId !== characterId
@@ -171,7 +177,7 @@ export async function attachCharacterReference(
   characterId: string,
   input: UpsertCharacterReferenceInput
 ): Promise<{ project: Project; reference: CharacterReference }> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   if (!p.characterProfiles!.some((c) => c.id === characterId)) {
     throw new Error(`Character profile not found: ${characterId}`);
   }
@@ -197,7 +203,7 @@ export async function updateCharacterReference(
   referenceId: string,
   input: UpdateCharacterReferenceInput
 ): Promise<{ project: Project; reference: CharacterReference }> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   const reference = p.characterReferences!.find(
     (r) => r.id === referenceId && r.characterProfileId === characterId
   );
@@ -223,7 +229,7 @@ export async function removeCharacterReference(
   characterId: string,
   referenceId: string
 ): Promise<Project> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   p.characterReferences = p.characterReferences!.filter(
     (r) => !(r.id === referenceId && r.characterProfileId === characterId)
   );
@@ -234,7 +240,7 @@ export async function updateGeneratedAssetReview(
   assetId: string,
   review: CharacterConsistencyReview
 ): Promise<Project> {
-  const p = ensureCharacterCollections(await getProject());
+  const p = ensureCollections(await getProject());
   const clip = p.clips.find((candidate) => candidate.id === assetId);
   if (!clip) throw new Error(`Generated asset not found: ${assetId}`);
   const binding = clip.generatedBy?.characterBinding || clip.characterBinding;
@@ -246,4 +252,34 @@ export async function updateGeneratedAssetReview(
     clip.characterBinding.consistencyReview = review;
   }
   return saveProject(p);
+}
+
+export async function saveComposition(
+  composition: CompositionPlan,
+  jobs: AssetGenerationJob[]
+): Promise<{ project: Project; composition: CompositionPlan }> {
+  const p = ensureCollections(await getProject());
+  p.compositions!.push(composition);
+  p.assetGenerationJobs!.push(...jobs);
+  await saveProject(p);
+  return { project: p, composition };
+}
+
+export async function getComposition(
+  compositionId: string
+): Promise<{ composition: CompositionPlan; jobs: AssetGenerationJob[] } | null> {
+  const p = ensureCollections(await getProject());
+  const composition = p.compositions!.find((c) => c.id === compositionId);
+  if (!composition) return null;
+  const jobs = p.assetGenerationJobs!.filter(
+    (j) => j.compositionId === compositionId
+  );
+  return { composition, jobs };
+}
+
+export async function findCompositionByIdempotencyKey(
+  key: string
+): Promise<CompositionPlan | null> {
+  const p = ensureCollections(await getProject());
+  return p.compositions!.find((c) => c.idempotencyKey === key) || null;
 }

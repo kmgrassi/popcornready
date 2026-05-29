@@ -28,6 +28,43 @@ export const planSchema = {
   required: ["targetLengthSec", "style", "aspectRatio", "beats"],
 };
 
+export const compositionSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    beats: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: str,
+          intent: str,
+          durationSec: num,
+          assetStrategy: {
+            type: "string",
+            enum: ["use_existing", "generate_image", "generate_video"],
+          },
+          requiredAssetIds: { type: "array", items: str },
+          generationKind: { type: "string", enum: ["image", "video"] },
+          generationPrompt: str,
+        },
+        required: ["name", "intent", "durationSec", "assetStrategy"],
+      },
+    },
+    narration: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        mode: { type: "string", enum: ["none", "provided", "generate"] },
+        script: str,
+      },
+      required: ["mode"],
+    },
+  },
+  required: ["beats", "narration"],
+};
+
 export const timelineSchema = {
   type: "object",
   additionalProperties: false,

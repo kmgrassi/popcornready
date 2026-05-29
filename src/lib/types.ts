@@ -229,6 +229,77 @@ export interface ChatMessage {
   content: string;
 }
 
+// Composition planning (agent video generation API, PR3): turn a brief into an
+// explicit per-beat plan of which assets to reuse and which to generate, plus
+// the child asset-generation jobs needed before a timeline can be built.
+
+export type CompositionMode = "asset_driven" | "prompt_only" | "hybrid";
+
+export type CompositionAssetStrategy =
+  | "use_existing"
+  | "generate_image"
+  | "generate_video";
+
+export type AssetGenerationKind = "image" | "video" | "audio";
+
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
+
+export interface AssetGenerationJob {
+  id: string;
+  compositionId: string;
+  projectId: string;
+  beatName: string;
+  kind: AssetGenerationKind;
+  provider: string;
+  prompt: string;
+  status: JobStatus;
+  resultAssetId?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompositionPlannedBeat {
+  name: string;
+  intent: string;
+  durationSec: number;
+  assetStrategy: CompositionAssetStrategy;
+  requiredAssetIds?: string[];
+  generatedAssetJobIds?: string[];
+}
+
+export interface CompositionNarrationStrategy {
+  mode: "none" | "provided" | "generate";
+  script?: string;
+  audioAssetId?: string;
+  estimatedDurationSec?: number;
+  actualDurationSec?: number;
+}
+
+export type CompositionStatus =
+  | "ready_for_timeline"
+  | "needs_assets"
+  | "failed";
+
+export interface CompositionPlan {
+  id: string;
+  projectId: string;
+  briefVersionId?: string;
+  idempotencyKey?: string;
+  mode: CompositionMode;
+  plannedBeats: CompositionPlannedBeat[];
+  narrationStrategy?: CompositionNarrationStrategy;
+  generatedAssetJobIds: string[];
+  status: CompositionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   goal: string;
@@ -238,6 +309,8 @@ export interface Project {
   clips: Clip[];
   characterProfiles?: CharacterProfile[];
   characterReferences?: CharacterReference[];
+  compositions?: CompositionPlan[];
+  assetGenerationJobs?: AssetGenerationJob[];
   critic: CriticReport | null;
   chat: ChatMessage[];
   updatedAt: string;
