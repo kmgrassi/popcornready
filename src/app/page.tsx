@@ -6,6 +6,8 @@ import { PromptComposer } from "@/components/PromptComposer";
 const GITHUB_URL = "https://github.com/kmgrassi/aividi";
 const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
 
+export const dynamic = "force-dynamic";
+
 const STEPS = [
   {
     n: "1",
@@ -201,17 +203,24 @@ export default async function LandingPage() {
           </div>
           {exampleVideos.length > 0 ? (
             <div className="lp-example-grid">
-              {exampleVideos.map((video) => (
-                <a
-                  className="lp-example-tile"
-                  href={video.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  key={video.id}
-                >
-                  <video src={video.url} muted playsInline preload="metadata" />
-                  <span>{video.filename.replace(/_overlay\.mp4|\.mp4/g, "")}</span>
-                </a>
+              {exampleVideos.slice(0, 4).map((video) => (
+                <article className="lp-example-card" key={video.id}>
+                  <video
+                    className="lp-example-video"
+                    src={video.url}
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
+                  <div className="lp-example-meta">
+                    <span>
+                      {video.filename.replace(/_overlay\.mp4|\.mp4/g, "")}
+                    </span>
+                    <a href={video.url} target="_blank" rel="noreferrer">
+                      Open MP4
+                    </a>
+                  </div>
+                </article>
               ))}
             </div>
           ) : (
