@@ -23,10 +23,22 @@ landing experience to the productization phases already defined in
 
 The one-shot pipeline (`POST /api/oneshot`) plans beats from the prompt,
 generates one visual per beat, assembles a timeline, and runs the critic — so a
-visitor with no footage still gets a finished, editable cut. Image generation
-uses the configured provider (OpenAI when `OPENAI_API_KEY` is set); without
-provider keys it falls back to placeholder frames so the flow always completes.
-Generating full video clips per beat (vs. still frames) is a later enhancement.
+visitor with no footage still gets a finished, editable cut.
+
+By default it generates a real **video clip per beat** (OpenAI Sora when
+`OPENAI_API_KEY` is set, Gemini Veo when `GEMINI_API_KEY` is set), so the
+visitor sees an actual moving 30-second video — the differentiator vs. tools
+that only return a prompt-to-clip stub. This is deliberately expensive, so it is
+gated by an operator **kill switch**: `ONESHOT_VIDEO=off` falls back to fast,
+cheap still-frame generation, intended to be flipped when traffic outpaces the
+generation budget. When no video-capable key is present (and for local/demo use)
+the pipeline degrades to image mode — real OpenAI images with a key, placeholder
+frames without — so the flow always completes.
+
+Clips are generated in parallel, so wall-clock latency is roughly the slowest
+single clip rather than the sum; even so, video generation takes a couple of
+minutes. Making this an async job with status polling (so the request doesn't
+block) is the remaining Phase 3 hardening.
 
 ## Landing Page Content Model
 
@@ -57,6 +69,9 @@ Pricing decisions to resolve before launch:
 - How self-supplied model keys (BYO-key) interact with hosted quotas.
 - Free hosted trial allowance vs. self-host-only free tier.
 - Overage behavior: hard cap vs. metered overage.
+- How per-beat video generation cost (the main COGS driver) maps to tier
+  limits, and the policy for tripping the `ONESHOT_VIDEO` kill switch when
+  traffic outruns the budget.
 
 ## Two-Track Productization
 
@@ -84,15 +99,16 @@ This maps onto the phases in the productionization scope:
   auth, workspaces, project briefs, and the agent API that powers both the
   hosted UI and external automation. Pricing tiers gate quotas here.
 - **Phase 3 (Durable production):** metered billing, object storage, background
-  render workers, quotas/rate limits, and richer one-shot generation (full video
-  clips per beat, audio, and async job + status polling so long renders don't
-  block the request).
+  render workers, quotas/rate limits, and hardening the one-shot — moving the
+  (already shipping) per-beat video generation onto async jobs with status
+  polling, plus generated audio, so long renders never block the request.
 
 ## Out Of Scope For This Pass
 
 - Billing integration, metering, and account provisioning (Phase 2/3).
-- Per-beat full video-clip generation and async job/status polling for one-shot
-  (Phase 3) — v1 generates still frames synchronously.
+- Async job/status polling for one-shot generation (Phase 3) — v1 runs
+  synchronously within the request and relies on the `ONESHOT_VIDEO` kill switch
+  for cost control.
 - Auth on the marketing site; it is public and static apart from the form.
 - Final pricing — the tiers here are launch proposals to validate with users.
 

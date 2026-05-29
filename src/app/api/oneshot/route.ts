@@ -17,18 +17,55 @@ import {
 import { mergeStoryContext } from "@/lib/story-context";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 600;
+// Per-beat video generation is slow. Clips are generated in parallel so the
+// wall-clock cost is ~the slowest single clip, but give the request headroom.
+export const maxDuration = 800;
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
+
+type OneShotMode = "video" | "image";
 
 function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
 }
 
-// Without provider keys we still produce a real timeline using the mock
-// provider's placeholder frames, so the one-shot always returns a video.
-function defaultImageProvider(): string {
-  return process.env.OPENAI_API_KEY ? "openai" : "mock";
+// Operator kill switch. Defaults ON so early visitors get a real generated
+// video; set ONESHOT_VIDEO=off to fall back to cheap still-frame mode under
+// heavy traffic. Read per-request (the route is dynamic) so flipping the env
+// + restarting the server is enough to toggle it.
+function oneShotVideoEnabled(): boolean {
+  const v = (process.env.ONESHOT_VIDEO ?? "on").trim().toLowerCase();
+  return !["off", "false", "0", "no"].includes(v);
+}
+
+// Resolve the generation mode and provider from the kill switch, available
+// provider keys, and any explicit request override. Always degrades to a mode
+// that can actually run, so the one-shot never hard-fails on configuration.
+function resolveMode(body: any): { mode: OneShotMode; provider: string } {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasGemini = !!process.env.GEMINI_API_KEY;
+  const requested =
+    body.mode === "image" || body.mode === "video"
+      ? (body.mode as OneShotMode)
+      : undefined;
+  const wantVideo = requested ? requested === "video" : oneShotVideoEnabled();
+
+  if (wantVideo) {
+    if (body.provider === "gemini" && hasGemini) {
+      return { mode: "video", provider: "gemini" };
+    }
+    if (hasOpenAI) return { mode: "video", provider: "openai" };
+    if (hasGemini) return { mode: "video", provider: "gemini" };
+    // No video-capable key — fall through to image mode below.
+  }
+
+  const imageProvider =
+    body.provider && body.provider !== "gemini"
+      ? String(body.provider)
+      : hasOpenAI
+        ? "openai"
+        : "mock";
+  return { mode: "image", provider: imageProvider };
 }
 
 function imageSizeForAspect(ar: AspectRatio): string {
@@ -37,44 +74,64 @@ function imageSizeForAspect(ar: AspectRatio): string {
   return "1024x1536"; // 9:16
 }
 
-function beatImagePrompt(
+function videoSizeForAspect(ar: AspectRatio): string {
+  if (ar === "16:9") return "1280x720";
+  if (ar === "1:1") return "1024x1024";
+  return "720x1280"; // 9:16
+}
+
+function clampSeconds(durationSec: number): number {
+  const s = Math.round(Number(durationSec) || 6);
+  return Math.min(8, Math.max(4, s));
+}
+
+function beatPrompt(
   goal: string,
   beat: Beat,
   style: string,
-  ar: AspectRatio
+  ar: AspectRatio,
+  mode: OneShotMode
 ): string {
+  const medium =
+    mode === "video"
+      ? "cinematic live-action video clip with natural motion and camera movement"
+      : "cinematic still frame";
   return [
-    `${style} cinematic still frame for a ${ar} short-form video.`,
+    `${style} ${medium} for a ${ar} short-form video.`,
     `Beat: ${beat.name} — ${beat.intent}.`,
     `Overall concept: ${goal}.`,
     `High quality, vivid lighting, strong composition, no on-screen text.`,
   ].join(" ");
 }
 
-async function generateImageClip(input: {
+async function generateBeatClip(input: {
+  mode: OneShotMode;
   provider: string;
   prompt: string;
   description: string;
   size: string;
-  durationSec: number;
+  displaySec: number;
+  seconds?: number;
 }): Promise<Clip> {
+  const kind = input.mode === "video" ? "video" : "image";
   const provider = providerFor(input.provider);
   const result = await provider.generateAsset({
     provider: provider.name,
-    kind: "image",
+    kind,
     prompt: input.prompt,
     size: input.size,
+    ...(kind === "video" ? { seconds: input.seconds } : {}),
   });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
-  const id = newId("img");
+  const id = newId(kind === "video" ? "vid" : "img");
   const filename = `${id}.${result.extension}`;
   await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
   return {
     id,
     filename,
     url: `/generated/${filename}`,
-    kind: "image",
-    durationSec: input.durationSec,
+    kind: result.kind,
+    durationSec: input.displaySec,
     description: input.description,
     source: "generated",
     generatedBy: {
@@ -93,9 +150,7 @@ export async function POST(req: NextRequest) {
     const style = String(body.style || "fast-paced social ad");
     const aspectRatio = (body.aspectRatio || "9:16") as AspectRatio;
     const storyContext = mergeStoryContext(body.storyContext as StoryContext);
-    const provider = body.provider
-      ? String(body.provider)
-      : defaultImageProvider();
+    const { mode, provider } = resolveMode(body);
 
     if (!goal) {
       return NextResponse.json(
@@ -120,18 +175,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Generate one visual per beat from scratch (no uploads required).
-    const size = imageSizeForAspect(aspectRatio);
+    // 2. Generate a visual per beat from scratch (no uploads required). In
+    // video mode each beat becomes a short generated clip so the assembled
+    // result is a real moving video; in image mode each beat is a still frame.
+    const imageSize = imageSizeForAspect(aspectRatio);
+    const videoSize = videoSizeForAspect(aspectRatio);
     const clips = await Promise.all(
-      plan.beats.map((beat) =>
-        generateImageClip({
+      plan.beats.map((beat) => {
+        if (mode === "video") {
+          const seconds = clampSeconds(beat.durationSec);
+          return generateBeatClip({
+            mode,
+            provider,
+            prompt: beatPrompt(goal, beat, style, aspectRatio, mode),
+            description: `${beat.name}: ${beat.intent}`,
+            size: videoSize,
+            displaySec: seconds,
+            seconds,
+          });
+        }
+        return generateBeatClip({
+          mode,
           provider,
-          prompt: beatImagePrompt(goal, beat, style, aspectRatio),
+          prompt: beatPrompt(goal, beat, style, aspectRatio, mode),
           description: `${beat.name}: ${beat.intent}`,
-          size,
-          durationSec: Math.max(1.5, Number(beat.durationSec) || 4),
-        })
-      )
+          size: imageSize,
+          displaySec: Math.max(1.5, Number(beat.durationSec) || 4),
+        });
+      })
     );
 
     // 3. Assemble a beat-by-beat timeline from the generated clips.
@@ -175,6 +246,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       project,
+      mode,
       provider,
       generatedClips: clips.length,
       appliedPatches: patches.length,

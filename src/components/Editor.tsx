@@ -247,7 +247,7 @@ export function Editor({
     if (!goal.trim()) return;
     setError(null);
     setExportResult(null);
-    setBusy("Creating your video from the prompt — planning, generating visuals, cutting…");
+    setBusy("Creating your video from the prompt — planning, generating a clip for each scene, and cutting. This can take a couple of minutes…");
     try {
       const res = await fetch("/api/oneshot", {
         method: "POST",
