@@ -85,10 +85,13 @@ export interface Artifact {
   createdAt: string;
 }
 
-export type DurationPolicy =
-  | "timeline_only"
-  | "match_longest_media"
-  | "fail_on_mismatch";
+export const DURATION_POLICIES = [
+  "timeline_only",
+  "match_longest_media",
+  "fail_on_mismatch",
+] as const;
+
+export type DurationPolicy = (typeof DURATION_POLICIES)[number];
 
 export interface ExportRenderPlan {
   durationPolicy: DurationPolicy;

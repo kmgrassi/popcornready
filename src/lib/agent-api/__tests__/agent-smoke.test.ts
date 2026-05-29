@@ -165,6 +165,21 @@ test("export worker fails on audio/timeline mismatch when policy is fail_on_mism
   );
 });
 
+test("export worker rejects an unknown duration policy", () => {
+  const project = projectFixture();
+  // Simulates a misspelled policy arriving as raw JSON (bypassing the type).
+  assert.throws(
+    () =>
+      runExportJob({
+        project,
+        timelineId: "tl_requested",
+        options: { durationPolicy: "fail_on_mismtach" as any },
+      }),
+    (err: unknown) =>
+      err instanceof ApiError && err.code === "unsupported_duration_policy"
+  );
+});
+
 test("export worker rejects a non-audio asset", () => {
   const project = projectFixture();
   assert.throws(

@@ -15,6 +15,7 @@ import { Clip, Project, timelineDurationSec } from "../types";
 import { ApiError, newId } from "./runtime";
 import {
   Artifact,
+  DURATION_POLICIES,
   DurationPolicy,
   ExportRenderPlan,
   RevisionJobResult,
@@ -149,7 +150,22 @@ export function runExportJob(input: {
     audioClips.push(clip);
   }
 
-  const policy: DurationPolicy = options.durationPolicy ?? "match_longest_media";
+  // Reject unknown policies (e.g. a misspelled "fail_on_mismtach") instead of
+  // silently falling through to timeline-only behavior, which would defeat a
+  // caller's intended fail_on_mismatch guard.
+  const requestedPolicy = options.durationPolicy;
+  if (
+    requestedPolicy !== undefined &&
+    !DURATION_POLICIES.includes(requestedPolicy)
+  ) {
+    throw new ApiError(
+      "unsupported_duration_policy",
+      400,
+      `Unsupported durationPolicy: ${requestedPolicy}.`,
+      { supported: DURATION_POLICIES }
+    );
+  }
+  const policy: DurationPolicy = requestedPolicy ?? "match_longest_media";
   const tDuration = timelineDurationSec(timeline);
   // TODO(PR5): use measured actual audio duration from the audio_alignment
   // step instead of the registered clip duration.
