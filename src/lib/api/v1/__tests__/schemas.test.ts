@@ -43,6 +43,22 @@ test("parseBrief reports all invalid fields with paths", () => {
   );
 });
 
+test("parseBrief rejects non-string optional text fields", () => {
+  const err = expectApiError(
+    () =>
+      parseBrief({
+        goal: "g",
+        targetLengthSec: 10,
+        aspectRatio: "1:1",
+        audience: 42,
+        style: { not: "a string" },
+      }),
+    "validation_failed"
+  );
+  const paths = (err.details?.fields || []).map((f) => f.path).sort();
+  assert.deepEqual(paths, ["brief.audience", "brief.style"].sort());
+});
+
 test("parseBrief validates nested narration mode", () => {
   expectApiError(
     () =>

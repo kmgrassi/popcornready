@@ -290,14 +290,19 @@ export function parseBrief(input: unknown, pathPrefix = "brief"): VideoBrief {
     }
   }
 
+  // Validate optional text fields before throwing so malformed values surface
+  // as validation_failed rather than being silently coerced to undefined.
+  const audience = optionalString(input.audience, `${pathPrefix}.audience`, fields);
+  const style = optionalString(input.style, `${pathPrefix}.style`, fields);
+
   throwIfInvalid(fields);
 
   return {
     goal: goal as string,
     targetLengthSec: targetLengthSec as number,
     aspectRatio: aspectRatio as AspectRatio,
-    audience: optionalString(input.audience, `${pathPrefix}.audience`, fields),
-    style: optionalString(input.style, `${pathPrefix}.style`, fields),
+    audience,
+    style,
     platform,
     format,
     narration,

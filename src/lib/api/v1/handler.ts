@@ -6,8 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthContext, resolveAuth } from "./auth";
 import { ApiError } from "./errors";
 import { newRequestId } from "./ids";
+import { ApiResult, runIdempotent } from "./idempotency";
 import { ok, errorResponse } from "./responses";
-import { findIdempotencyRecord, saveIdempotencyRecord } from "./store";
 
 export interface HandlerCtx {
   requestId: string;
@@ -16,10 +16,7 @@ export interface HandlerCtx {
   body: unknown;
 }
 
-export interface ApiResult {
-  status: number;
-  body: Record<string, unknown>;
-}
+export type { ApiResult } from "./idempotency";
 
 function toResponse(result: ApiResult, requestId: string): NextResponse {
   return ok(result.body, requestId, result.status);
@@ -77,31 +74,7 @@ export async function handleMutation(
     const scope = `${auth.workspaceId}:${auth.actor.id}:${req.method}:${req.nextUrl.pathname}`;
     const bodyHash = createHash("sha256").update(rawBody).digest("hex");
 
-    const existing = await findIdempotencyRecord(scope, key);
-    if (existing) {
-      if (existing.bodyHash !== bodyHash) {
-        throw new ApiError(
-          "idempotency_conflict",
-          "This Idempotency-Key was already used with a different request body."
-        );
-      }
-      return toResponse(
-        { status: existing.status, body: existing.responseBody as Record<string, unknown> },
-        requestId
-      );
-    }
-
-    const result = await fn(ctx);
-    if (result.status >= 200 && result.status < 300) {
-      await saveIdempotencyRecord({
-        scope,
-        key,
-        bodyHash,
-        status: result.status,
-        responseBody: result.body,
-        createdAt: new Date().toISOString(),
-      });
-    }
+    const result = await runIdempotent(scope, key, bodyHash, () => fn(ctx));
     return toResponse(result, requestId);
   } catch (err) {
     return toError(err, requestId);
