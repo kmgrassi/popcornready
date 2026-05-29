@@ -28,6 +28,7 @@ import {
 const Preview = dynamic(() => import("./Preview"), { ssr: false });
 const DEFAULT_IMAGE_SIZE = "1024x1536";
 const DEFAULT_VIDEO_SIZE = "720x1280";
+const NETLIFY_DEMO_MODE = process.env.NEXT_PUBLIC_NETLIFY_DEMO === "true";
 const CHARACTER_REFERENCE_ROLES: CharacterReferenceRole[] = [
   "front_portrait",
   "three_quarter",
@@ -273,6 +274,12 @@ export function Editor({
   }, [audioClips]);
 
   async function handleUpload() {
+    if (NETLIFY_DEMO_MODE) {
+      setError(
+        "Uploads are disabled on the Netlify demo because video files need direct object-storage uploads."
+      );
+      return;
+    }
     const file = fileRef.current?.files?.[0];
     if (!file) return;
     setError(null);
@@ -423,6 +430,12 @@ export function Editor({
   }
 
   async function handleExport() {
+    if (NETLIFY_DEMO_MODE) {
+      setError(
+        "MP4 export is disabled on the Netlify demo because renders need a background worker or dedicated render service."
+      );
+      return;
+    }
     setError(null);
     setBusy("Rendering MP4 with Remotion (first run downloads a browser)…");
     try {
@@ -749,15 +762,26 @@ export function Editor({
           <summary>Assets and character setup</summary>
 
         <h2>Upload media</h2>
-        <input ref={fileRef} type="file" accept="video/*,image/*" />
+        {NETLIFY_DEMO_MODE && (
+          <p className="muted">
+            Uploads are local-development only until hosted storage is added.
+          </p>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="video/*,image/*"
+          disabled={NETLIFY_DEMO_MODE}
+        />
         <label>Description (what's in this asset — helps the AI choose)</label>
         <input
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
           placeholder="e.g. close-up of product, smiling face, city b-roll"
+          disabled={NETLIFY_DEMO_MODE}
         />
         <div style={{ marginTop: 8 }}>
-          <button onClick={handleUpload} disabled={!!busy}>
+          <button onClick={handleUpload} disabled={!!busy || NETLIFY_DEMO_MODE}>
             Add asset
           </button>
         </div>
@@ -1580,7 +1604,17 @@ export function Editor({
                 )}
               </div>
             )}
-            <button className="secondary" onClick={handleExport} disabled={!!busy}>
+            {NETLIFY_DEMO_MODE && (
+              <p className="muted">
+                MP4 export is disabled on Netlify until rendering moves to a
+                worker.
+              </p>
+            )}
+            <button
+              className="secondary"
+              onClick={handleExport}
+              disabled={!!busy || NETLIFY_DEMO_MODE}
+            >
               Export MP4
             </button>
             {exportResult && (

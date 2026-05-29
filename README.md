@@ -114,9 +114,10 @@ Netlify deployment notes live in
 the official Netlify Next.js plugin for App Router pages and API routes.
 
 Set the provider keys from `.env.local.example` as Netlify environment
-variables. For a hosted demo, be aware that the current MVP stores project state
-and media on the local filesystem; see the Netlify deployment doc for the
-persistence limitations and production storage recommendations.
+variables. The checked-in Netlify config runs in demo mode: raw media uploads
+and MP4 export are disabled because Netlify synchronous functions are not a
+durable large-file upload or long-running render target. See the Netlify
+deployment doc for the storage, worker, and production hosting requirements.
 
 ## Project layout
 

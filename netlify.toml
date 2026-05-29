@@ -2,5 +2,9 @@
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  NEXT_PUBLIC_NETLIFY_DEMO = "true"
+  POPCORN_READY_DISABLE_LOCAL_MEDIA_ROUTES = "true"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

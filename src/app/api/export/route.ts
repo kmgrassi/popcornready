@@ -15,6 +15,13 @@ export const maxDuration = 600;
 
 const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
 
+function localMediaRoutesDisabled(): boolean {
+  return (
+    process.env.POPCORN_READY_DISABLE_LOCAL_MEDIA_ROUTES === "true" ||
+    process.env.NETLIFY === "true"
+  );
+}
+
 function publicPathForClip(url: string): string | null {
   if (!url.startsWith("/uploads/") && !url.startsWith("/generated/")) return null;
   const filePath = path.normalize(path.join(process.cwd(), "public", url));
@@ -48,6 +55,16 @@ function parseAudioClipIds(body: any): string[] {
 
 export async function POST(req: NextRequest) {
   try {
+    if (localMediaRoutesDisabled()) {
+      return NextResponse.json(
+        {
+          error:
+            "MP4 export is disabled on this host. Move rendering to a queue-backed worker or dedicated render service before deploying this flow.",
+        },
+        { status: 501 }
+      );
+    }
+
     const project = await getProject();
     if (!project.timeline || project.timeline.segments.length === 0) {
       return NextResponse.json(

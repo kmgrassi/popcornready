@@ -6,6 +6,13 @@ the official Next.js runtime plugin for App Router pages, API routes, and server
 rendering. The checked-in `netlify.toml` pins those settings so dashboard and
 CLI deploys behave the same way.
 
+The checked-in Netlify configuration is demo-safe, not a full production editor
+deployment. It sets `NEXT_PUBLIC_NETLIFY_DEMO=true` and
+`POPCORN_READY_DISABLE_LOCAL_MEDIA_ROUTES=true`, which disables browser uploads
+and MP4 export in the hosted app. Keep those flags on until uploads are moved to
+object storage and Remotion rendering is moved to a worker or dedicated render
+service.
+
 ## Deploy from the Netlify dashboard
 
 1. Push this repository to GitHub.
@@ -60,6 +67,29 @@ Notes:
 
 ## Runtime limitations
 
+### Disabled on Netlify
+
+The following MVP flows are intentionally disabled by `netlify.toml`:
+
+- Browser media upload through `/api/upload`
+- Remotion MP4 export through `/api/export`
+
+Raw video uploads are posted as multipart `FormData` to a Next route handler.
+On Netlify that handler runs as a synchronous Function, where request bodies are
+buffered before user code runs and normal video files can exceed the function
+request-size limit. Production upload should use signed direct-to-object-storage
+URLs, then register the uploaded asset with the app.
+
+MP4 export runs `ensureBrowser()` and one or more Remotion `renderMedia()` calls.
+That work can exceed synchronous Function duration limits, especially on cold
+starts or audio-overlay exports. Production export should enqueue a render job
+for a background worker or dedicated render service and return job status to the
+browser.
+
+With the checked-in flags enabled, the Netlify site is suitable for the landing
+page, studio UI inspection, health checks, and small private prompt-generation
+demos that do not rely on browser upload or MP4 export.
+
 The MVP currently stores project state and media on the local filesystem:
 
 - `.local/`
@@ -68,10 +98,9 @@ The MVP currently stores project state and media on the local filesystem:
 - `public/exports/`
 
 Netlify function filesystems are ephemeral and are not shared durable storage.
-Uploaded clips, generated assets, exported MP4s, and local JSON stores should
-move to object storage and a database before this becomes a public hosted
-service. S3-compatible object storage plus Postgres is the likely production
-shape.
+Uploaded clips, generated assets, exported MP4s, and local JSON stores must move
+to object storage and a database before this becomes a public hosted service.
+S3-compatible object storage plus Postgres is the likely production shape.
 
 Video generation and Remotion rendering can also be long-running and CPU-heavy.
 Use Netlify first for the landing page, studio UI, and private demos. For public
@@ -92,5 +121,5 @@ Expected response:
 {"status":"ok","authMode":"local","time":"..."}
 ```
 
-Then open the public URL and create a small test project. MP4 export is the
-heaviest path, so test at least one export before sharing the service.
+Then open the public URL and create a small prompt-generated project. Confirm
+that browser uploads and MP4 export are visibly disabled in the hosted studio.
