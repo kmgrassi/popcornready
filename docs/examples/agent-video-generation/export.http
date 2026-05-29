@@ -1,0 +1,74 @@
+# Request an export and read the resulting artifact. In PR6 the export job is a
+# skeleton: it validates the request, resolves the duration policy, and records
+# a `pending_render` artifact. Real MP4 rendering is deferred to PR5.
+
+### Create an export job
+POST http://localhost:3000/api/v1/projects/proj_local/timelines/tl_current/exports
+Content-Type: application/json
+Idempotency-Key: export-final-001
+
+{
+  "format": "mp4",
+  "quality": "standard",
+  "audioAssetIds": ["asset_narration"],
+  "durationPolicy": "match_longest_media"
+}
+
+# 201 Created
+# {
+#   "job": {
+#     "id": "job_export_1",
+#     "type": "export",
+#     "status": "succeeded",
+#     "projectId": "proj_local",
+#     "result": { "artifactId": "art_99ff00aa" }
+#   }
+# }
+
+### Poll the export job
+GET http://localhost:3000/api/v1/projects/proj_local/exports/job_export_1
+
+### Read the artifact
+GET http://localhost:3000/api/v1/projects/proj_local/artifacts/art_99ff00aa
+
+# 200 OK
+# {
+#   "artifact": {
+#     "id": "art_99ff00aa",
+#     "projectId": "proj_local",
+#     "kind": "video/mp4",
+#     "status": "pending_render",
+#     "url": null,
+#     "timelineId": "tl_current",
+#     "durationSec": 60,
+#     "renderPlan": {
+#       "durationPolicy": "match_longest_media",
+#       "durationSec": 60,
+#       "timelineDurationSec": 58,
+#       "audioDurationSec": 60,
+#       "audioAssetIds": ["asset_narration"],
+#       "format": "mp4",
+#       "quality": "standard"
+#     }
+#   }
+# }
+
+### Mismatch example — fail_on_mismatch returns a typed 422 error
+POST http://localhost:3000/api/v1/projects/proj_local/timelines/tl_current/exports
+Content-Type: application/json
+
+{
+  "audioAssetIds": ["asset_narration"],
+  "durationPolicy": "fail_on_mismatch",
+  "maxDeltaSec": 1.0
+}
+
+# 422 Unprocessable Entity
+# {
+#   "error": {
+#     "code": "audio_timeline_mismatch",
+#     "message": "Audio and timeline durations differ beyond the allowed threshold.",
+#     "requestId": "req_…",
+#     "details": { "timelineDurationSec": 58, "audioDurationSec": 72, "deltaSec": 14, "maxDeltaSec": 1 }
+#   }
+# }
