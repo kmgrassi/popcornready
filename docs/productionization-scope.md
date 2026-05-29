@@ -7,6 +7,28 @@ it, preview it, and export a deterministic MP4. Productionization should keep
 that architecture: agents plan and patch structured data; rendering remains
 deterministic and inspectable.
 
+## North Star
+
+Aividi should become the AI-native production studio where users and agents turn
+raw or generated media into finished cinematic videos through structured intent,
+editable timelines, and deterministic rendering.
+
+The product should act as the system of record and control plane for
+AI-assisted video production. External APIs can generate, analyze, or transform
+media, but Aividi owns the project model, creative brief, asset context,
+timeline structure, revision history, validation, rendering, exports, feedback,
+and operational reliability.
+
+The durable product principle is:
+
+> AI plans and patches structured timelines; Aividi validates, versions,
+> renders, learns from feedback, and stores the result.
+
+The first production target is a reliable workflow where a browser user or
+external agent can produce a finished short video from mixed uploaded and
+generated assets, revise it without losing prior work, export it, and use
+review feedback to improve future generations.
+
 ## Product Goals
 
 - Make video upload, context entry, timeline generation, review, revision, and
@@ -21,6 +43,9 @@ deterministic and inspectable.
   durable outputs.
 - Establish a foundation for richer media analysis without requiring it for the
   first production version.
+- Establish an OODA feedback loop so user, reviewer, and operational feedback
+  can improve future generated videos through explicit context, configuration,
+  prompt, and service changes.
 
 ## Current MVP Gaps
 
@@ -29,6 +54,8 @@ deterministic and inspectable.
 - Upload metadata is thin: filename, description, duration, and URL.
 - The UI does not guide users through structured context capture, asset review,
   or clip readiness checks.
+- Feedback from generated videos is not captured as structured data, evaluated
+  for actionability, or used to improve future generation behavior.
 - API routes are browser-oriented and synchronous; long-running generation and
   export should become jobs with idempotency and status polling.
 - Export depends on local public file storage and a running Next server.
@@ -58,6 +85,10 @@ deterministic and inspectable.
 - Run jobs locally in the API process for v1. If the app gets meaningful
   adoption, split jobs into a separate worker process without changing the job
   API contract.
+- Treat feedback as a first-class input to future generation. The system should
+  capture feedback, classify whether it is actionable, decide what context or
+  system behavior should change, and apply approved updates through controlled
+  project, workspace, or service-level changes.
 - In hosted environments, users self-create their first workspace after
   Supabase sign-up. Production should use Postgres-backed project data and
   object storage for media/artifacts.
@@ -69,9 +100,11 @@ deterministic and inspectable.
 - [UI Video Upload](./scopes/ui-video-upload.md)
 - [UI Video Context](./scopes/ui-video-context.md)
 - [Agent API](./scopes/agent-api.md)
+- [Agent Video Generation API](./scopes/agent-video-generation-api.md)
 - [API Contract V1](./scopes/api-contract-v1.md)
 - [Project Model And Storage](./scopes/project-model-storage.md)
 - [Jobs And Processing](./scopes/jobs-processing.md)
+- [OODA Feedback Loop](./scopes/ooda-feedback-loop.md)
 - [Character Consistency Generation](./scopes/character-consistency-generation.md)
 - [Quality, Safety, And Observability](./scopes/quality-safety-observability.md)
 
@@ -89,6 +122,9 @@ deterministic and inspectable.
 - Make upload duration extraction server-side instead of trusting form input.
 - Add clear UI states for upload progress, generation progress, export progress,
   validation errors, and retryable failures.
+- Add lightweight structured feedback capture on exported videos and generated
+  timelines so reviewers can record what worked, what failed, and what should be
+  different next time.
 - Add smoke tests for upload, generate, revise, and export using small fixture
   videos.
 
@@ -108,6 +144,9 @@ deterministic and inspectable.
   automate the workflow without provisioning API keys.
 - Use workspace-scoped API keys for v1 hosted agent access; OAuth-style external
   app authorization is out of scope for v1.
+- Introduce Observe and Orient feedback agents that store reviewer feedback and
+  classify whether it is actionable for a specific timeline, project brief,
+  workspace preference, provider setting, prompt pattern, or service behavior.
 
 ### Phase 3: Durable Production System
 
@@ -117,6 +156,9 @@ deterministic and inspectable.
 - Add project history, timeline versions, generated variants, and export
   artifacts.
 - Add role management, rate limits, quotas, audit trails, and admin visibility.
+- Introduce Decide and Act feedback agents that propose approved updates to
+  context, configuration, prompt templates, evaluation criteria, or code changes
+  when repeated feedback shows the generation system should improve.
 
 ## Non-Goals For The First Production Pass
 

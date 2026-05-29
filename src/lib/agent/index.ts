@@ -11,7 +11,12 @@ import {
 import { clipCatalog, timelineForPrompt } from "../timeline";
 import { storyContextForPrompt } from "../story-context";
 import {
+  estimateWordsForDuration,
+  NARRATION_WORDS_PER_SEC,
+} from "../audio-alignment";
+import {
   criticSchema,
+  narrationRewriteSchema,
   planSchema,
   reviseSchema,
   timelineSchema,
@@ -191,5 +196,48 @@ Produce patches and a summary.`;
     user,
     schema: reviseSchema,
     maxTokens: 6000,
+  });
+}
+
+// Rewrites a narration script so that, read at a natural pace, it fills a
+// target duration. Used by the audio-alignment `rewrite_script` strategy to
+// fit generated narration to the visual timeline.
+export async function rewriteNarrationScript(input: {
+  currentScript: string;
+  targetDurationSec: number;
+  storyContext?: StoryContext | null;
+}): Promise<{ script: string; summary: string; estimatedDurationSec: number }> {
+  const targetWordCount = estimateWordsForDuration(input.targetDurationSec);
+  const sys = `You rewrite voiceover narration to hit a target spoken length.
+Read aloud at a natural pace of about ${NARRATION_WORDS_PER_SEC} words per second.
+Rules:
+- Preserve the original meaning, key facts, and tone.
+- Return only the spoken words — no stage directions, timestamps, or labels.
+- Do not invent claims that were not implied by the original script.
+- Aim for the target word count so the audio lands within ~1 second of the target.`;
+
+  const user = `Original narration:
+"""
+${input.currentScript}
+"""
+
+Story context:
+${storyContextForPrompt(input.storyContext)}
+
+Target spoken duration: ${input.targetDurationSec.toFixed(1)}s
+Target length: about ${targetWordCount} words.
+
+Rewrite the narration to fit, then report the rewritten script, your estimated
+spoken duration in seconds, and a one-line summary of what changed.`;
+
+  return structuredCall<{
+    script: string;
+    estimatedDurationSec: number;
+    summary: string;
+  }>({
+    cachedSystem: sys,
+    user,
+    schema: narrationRewriteSchema,
+    maxTokens: 2000,
   });
 }

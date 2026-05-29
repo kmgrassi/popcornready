@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { addClip } from "@/lib/store";
 import { Clip } from "@/lib/types";
+import { measureAudioDurationSec } from "@/lib/generative/audio-duration";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,17 +28,26 @@ export async function POST(req: NextRequest) {
     const bytes = Buffer.from(await file.arrayBuffer());
     await fs.writeFile(path.join(UPLOAD_DIR, stored), bytes);
 
-    const kind = file.type.startsWith("image/") ? "image" : "video";
+    const kind = file.type.startsWith("image/")
+      ? "image"
+      : file.type.startsWith("audio/")
+        ? "audio"
+        : "video";
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    const measuredDurationSec =
+      kind === "audio"
+        ? measureAudioDurationSec(bytes, extension) ?? undefined
+        : undefined;
+    const providedDurationSec =
+      Number.isFinite(durationSec) && durationSec > 0 ? durationSec : undefined;
     const clip: Clip = {
       id,
       filename: file.name,
       url: `/uploads/${stored}`,
       kind,
-      durationSec: Number.isFinite(durationSec) && durationSec > 0
-        ? durationSec
-        : kind === "image"
-          ? 4
-          : 0,
+      durationSec:
+        measuredDurationSec ?? providedDurationSec ?? (kind === "image" ? 4 : 0),
+      ...(measuredDurationSec ? { measuredDurationSec } : {}),
       description,
       source: "upload",
     };
