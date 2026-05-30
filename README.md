@@ -1,51 +1,64 @@
-# popcornready.ai — AI-native video editor (MVP)
+# [![Popcorn Ready](./public/logo.svg)](https://popcornready.ai)
 
-An MVP of the "core timeline loop" from the AI-native video editing architecture:
+**Popcorn Ready** is an AI-native video editor that turns clips and your brief into an editable timeline quickly.
 
-> Upload clips → give a goal/script → Claude generates an editable **timeline**
-> → a critic loop improves it → revise it conversationally → preview in the
-> browser → export an MP4.
+- **Upload media and descriptions**
+- **Generate a rough cut automatically**
+- **Revise with chat**
+- **Preview in-browser and export MP4**
 
-The guiding principle from the architecture: **the AI never touches raw video.**
-It only plans and edits a structured **timeline** (`src/lib/types.ts`). Rendering
-is deterministic from that timeline via Remotion.
+🌐 **Website:** https://popcornready.ai
 
-## How it works
+## What it is
 
-```
-goal + clips
-   │
-   ▼
-planEdit()      goal → beats              (Claude, structured JSON)
-   ▼
-selectClips()   beats + clips → timeline  (Claude, structured JSON)
-   ▼
-critique()      timeline → scores + patches → applied  (Claude)
-   ▼
-revise()        chat message → patches → applied        (Claude)
-   ▼
-Remotion        timeline → <Player> preview + MP4 export
-```
+Popcorn Ready is a content production workflow:
 
-- **Agents** live in `src/lib/agent/`. Each is one structured Claude call using
-  `output_config.format` (JSON schema) on `claude-opus-4-7`, with the stable
-  instructions + clip catalog placed in a cached system block.
-- **Timeline patches** (`src/lib/timeline.ts`) are validated and clamped before
-  they touch the timeline, so a bad suggestion can't break rendering.
-- **Rendering** (`src/remotion/`) is shared between the live `@remotion/player`
-  preview and the server-side `renderMedia` MP4 export.
-- **Generative asset fill** (`src/lib/generative/`) can add missing image or
-  video assets to the clip library through a provider abstraction. OpenAI
-  supports image and video generation; Gemini supports video generation through
-  Veo 3.1; ElevenLabs supports generated audio helpers for speech, dialogue,
-  sound effects, and music; NanoBanano is registered as an explicit placeholder
-  for a future adapter.
-- **Story context** (`src/lib/story-context.ts`) adds reusable science-video
-  storytelling guidance from `docs/research/science-video-story-context.md` so
-  the planner optimizes for hook, visual surprise, one big idea, simple model,
-  caveat, and payoff.
-- **Storage** is an MVP single-project JSON file in `data/`; uploaded clips go
-  to `public/uploads/`, and generated assets go to `public/generated/`.
+1. Upload your video and image assets with short descriptions.
+2. Give the app a creative goal, target length, and style.
+3. Generate a first-pass timeline and a critic response.
+4. Refine the cut with conversational prompts.
+5. Preview in Remotion and export to MP4.
+
+The editor never directly manipulates raw footage. It plans and patches a
+structured timeline model (`src/lib/types.ts`) and then renders it deterministically.
+
+- Timeline changes are generated as validated patches.
+- Asset metadata and generated media are organized per project store.
+- Rendering is reproducible across preview and export.
+
+## Features
+
+- **Structured pipeline**
+  - `planEdit`, `selectClips`, `critique`, and `revise` run through stable JSON
+    contracts.
+- **AI review loop**
+  - Timeline suggestions are scored and patched before final playback.
+- **Interactive revision**
+  - Ask for changes in plain language and apply targeted patch updates.
+- **Generative fallback assets**
+  - Missing visuals can be auto-generated from provider integrations.
+- **Export-ready output**
+  - In-browser preview and MP4 export are part of the same timeline pipeline.
+
+## Who it is for
+
+- Marketers and creators iterating quickly on short-form campaigns.
+- Product teams creating consistent brand motion content.
+- Creators wanting a fast first draft before manual finishing.
+
+## Typical flow
+
+1. Upload media assets.
+2. Add short descriptions for each asset.
+3. Use **Generate missing asset** for any gaps.
+4. Set length/aspect/style, then click **Generate rough cut**.
+5. Inspect the plan, timeline, and critic scores.
+6. Revise with commands like:
+   - make it punchier
+   - shorten to 15s
+   - add captions
+   - use less talking head
+7. Export MP4.
 
 ## Setup
 
@@ -57,52 +70,13 @@ npm run dev
 
 Open http://localhost:3000
 
-1. Upload a handful of video or image assets. Add a short description for each —
-   in this MVP the AI reasons over the **filename + your description + duration** (real
-   transcription/vision analysis is the documented next step, not in this slice).
-2. If the library is missing a visual, use **Generate missing asset** to create
-   an image or short video asset. OpenAI is live when `OPENAI_API_KEY` is set;
-   Gemini video generation is live when `GEMINI_API_KEY` is set. ElevenLabs
-   audio generation is live when `ELEVENLABS_API_KEY` is set.
-3. Write a creative goal, set length/aspect/style, and **Generate rough cut**.
-4. Inspect the plan, timeline, and critic scores; preview plays in the browser.
-5. **Revise (chat)**: "make it punchier", "shorten to 15s", "add captions",
-   "use less talking head". Each message is turned into timeline patches.
-6. **Export MP4**: renders the real cut of your clips via Remotion. The first
-   export downloads a headless browser, so it takes a bit longer.
-
-## Scope / limitations (deliberate, for the MVP)
-
-- Clip understanding is description-based — no FFmpeg proxies, Whisper
-  transcription, vision tagging, or embeddings yet (those are the "real
-  analysis" extension from the architecture doc).
-- Single project, file-based store (no Postgres/pgvector, no auth, no queue).
-- Critic runs one pass on generate; the full critique→re-render loop and
-  multiple rough-cut variants are future work.
-- Gemini image generation and NanoBanano provider adapters are placeholders in
-  this pass.
-- Generated audio is saved as an asset but is not yet mixed into exported
-  timelines. Audio clips are excluded from visual clip selection prompts.
-- MP4 export requires the dev server running (Remotion fetches the uploaded
-  clips over `http://localhost:3000`).
-
 ## Productionization docs
 
-The MVP cleanup and production feature roadmap lives in
-[`docs/productionization-scope.md`](docs/productionization-scope.md), with
-focused scoping docs for browser upload/context workflows and agent-facing APIs.
+- [`docs/productionization-scope.md`](docs/productionization-scope.md)
+- [`docs/railway-deployment.md`](docs/railway-deployment.md)
+- [`docs/streaming-generation-plan.md`](docs/streaming-generation-plan.md)
 
-## Deploy to Railway
-
-Railway deployment notes live in
-[`docs/railway-deployment.md`](docs/railway-deployment.md). The repo includes a
-`railway.toml` that uses Railpack, runs `npm run build`, starts the service with
-`npm run start`, and healthchecks `/api/v1/health`.
-
-Set the provider keys from `.env.local.example` as Railway service variables.
-For a hosted demo, be aware that the current MVP stores project state and media
-on the local filesystem; see the Railway deployment doc for the persistence
-limitations and production storage recommendations.
+Railway configuration is in `railway.toml`; healthcheck is `/api/v1/health`.
 
 ## Project layout
 
@@ -110,11 +84,11 @@ limitations and production storage recommendations.
 src/
   app/                Next.js App Router (page + API routes)
     api/{project,upload,generate,generate-assets,revise,export}/route.ts
-  components/         Editor (UI) + Preview (Remotion Player)
+  components/         Editor + Preview (Remotion Player)
   lib/
     agent/            planEdit / selectClips / critique / revise + JSON schemas
     anthropic.ts      Claude client + structured JSON call helper
-    timeline.ts       patch engine + prompt formatting
+    timeline.ts       Patch engine + prompt formatting
     types.ts          Timeline / Plan / Patch / Clip types
     store.ts          JSON-file project store
     generative/       Provider abstraction + OpenAI and Gemini adapters

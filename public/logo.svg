@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" role="img" aria-labelledby="title desc">
+  <title id="title">Popcorn Ready logo</title>
+  <desc id="desc">Abstract popcorn-ready brand mark and wordmark</desc>
+  <rect width="240" height="80" rx="16" fill="#0f1117"/>
+  <circle cx="44" cy="40" r="22" fill="#ff6a3d"/>
+  <circle cx="36" cy="30" r="3" fill="#ffdcb1"/>
+  <circle cx="43" cy="27" r="2.5" fill="#ffdcb1"/>
+  <circle cx="50" cy="31" r="2.8" fill="#ffdcb1"/>
+  <path d="M33 42c3 7 13 9 18 0" stroke="#ffdcb1" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <rect x="88" y="22" width="132" height="36" rx="12" fill="#151a23"/>
+  <text x="100" y="46" fill="#e7e9ec" font-size="22" font-family="Arial, Helvetica, sans-serif" font-weight="700" letter-spacing="0.4">Popcorn Ready</text>
+</svg>
