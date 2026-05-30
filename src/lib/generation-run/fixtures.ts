@@ -66,7 +66,9 @@ function stage(
   runId: string,
   type: GenerationStageType,
   overrides: Partial<GenerationStage> = {},
+  now: Date = new Date(),
 ): GenerationStage {
+  const nowIso = iso(now);
   return {
     stageId: `${runId}-${type}`,
     runId,
@@ -74,6 +76,8 @@ function stage(
     label: GENERATION_STAGE_LABELS[type],
     order: GENERATION_STAGE_ORDER[type],
     status: "queued",
+    createdAt: nowIso,
+    updatedAt: nowIso,
     jobIds: [],
     artifactIds: [],
     ...overrides,
