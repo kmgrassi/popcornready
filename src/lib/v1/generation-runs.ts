@@ -1,23 +1,22 @@
 import { promises as fs } from "fs";
 import path from "path";
+
 import { defaultDbDir } from "./store";
 import {
+  GENERATION_STAGE_LABELS,
   GenerationRun,
+  GenerationRunStatus,
   GenerationStage,
   GenerationStageItem,
+  GenerationStageType,
 } from "./types";
+import { ApiError } from "./errors";
 
-// Local persistence for generation runs, stages, and stage items
-// (scope doc: docs/scopes/generation-progress-ui.md, PR 2).
+// Local persistence for generation runs, stages, and stage items.
 //
-// Records live under `.local/dev-db/` alongside the rest of the v1 store, one
-// JSON file per record keyed by the record's own ID, following the pattern in
-// src/lib/v1/store.ts so a future PR can swap to a database without changing
-// the API response shape. The record shape IS the API response shape — this
-// module deliberately does not wrap records in an internal envelope.
-//
-// Types come from src/lib/v1/types.ts (PR 1 of the same scope) so we share
-// one vocabulary with future PRs (3+ emit progress, 4 exposes endpoints).
+// Records live under `.local/dev-db/` following the JSON-per-record convention
+// used by `store.ts`. The shapes here intentionally match the endpoint wire
+// response.
 
 // --- Input/patch types -----------------------------------------------------
 
@@ -29,9 +28,7 @@ export type CreateGenerationRunInput = Omit<
 export type CreateGenerationStageInput = Omit<
   GenerationStage,
   "stageId" | "createdAt" | "updatedAt"
-> & {
-  stageId?: string;
-};
+> & { stageId?: string };
 
 export type CreateGenerationStageItemInput = Omit<
   GenerationStageItem,
@@ -55,10 +52,7 @@ export type UpdateGenerationStageItemPatch = Partial<
 export interface GenerationRunsStore {
   createRun(input: CreateGenerationRunInput): Promise<GenerationRun>;
   getRun(runId: string): Promise<GenerationRun | null>;
-  updateRun(
-    runId: string,
-    patch: UpdateGenerationRunPatch
-  ): Promise<GenerationRun>;
+  updateRun(runId: string, patch: UpdateGenerationRunPatch): Promise<GenerationRun>;
   listRunsForProject(projectId: string): Promise<GenerationRun[]>;
 
   saveStage(input: CreateGenerationStageInput): Promise<GenerationStage>;
@@ -98,9 +92,7 @@ function newId(prefix: string): string {
   return `${prefix}_${rand()}`;
 }
 
-export function createGenerationRunsStore(
-  rootDir: string
-): GenerationRunsStore {
+export function createGenerationRunsStore(rootDir: string): GenerationRunsStore {
   function dir(collection: string): string {
     return path.join(rootDir, collection);
   }
@@ -127,11 +119,7 @@ export function createGenerationRunsStore(
     value: T
   ): Promise<T> {
     await fs.mkdir(dir(collection), { recursive: true });
-    await fs.writeFile(
-      file(collection, key),
-      JSON.stringify(value, null, 2),
-      "utf8"
-    );
+    await fs.writeFile(file(collection, key), JSON.stringify(value, null, 2), "utf8");
     return value;
   }
 
@@ -146,10 +134,7 @@ export function createGenerationRunsStore(
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
       try {
-        const raw = await fs.readFile(
-          path.join(dir(collection), name),
-          "utf8"
-        );
+        const raw = await fs.readFile(path.join(dir(collection), name), "utf8");
         records.push(JSON.parse(raw) as T);
       } catch {
         // Skip unreadable/partial records rather than failing the whole list.
@@ -213,10 +198,7 @@ export function createGenerationRunsStore(
       readJson<GenerationStage>(COLLECTIONS.stages, stageId),
 
     async updateStage(stageId, patch) {
-      const current = await readJson<GenerationStage>(
-        COLLECTIONS.stages,
-        stageId
-      );
+      const current = await readJson<GenerationStage>(COLLECTIONS.stages, stageId);
       if (!current) {
         throw new Error(`generation stage not found: ${stageId}`);
       }
@@ -287,4 +269,150 @@ let _store: GenerationRunsStore | null = null;
 export function getGenerationRunsStore(): GenerationRunsStore {
   if (!_store) _store = createGenerationRunsStore(defaultDbDir());
   return _store;
+}
+
+// Compatibility alias used by PR4 route handlers.
+export function getGenerationRunStore(): GenerationRunsStore {
+  return getGenerationRunsStore();
+}
+
+// Hook for tests that need to inject a deterministic store.
+export function setGenerationRunStoreForTests(
+  store: GenerationRunsStore | null
+): void {
+  _store = store;
+}
+
+// --- API helpers -----------------------------------------------------------
+
+export interface GenerationRunPayload {
+  run: GenerationRun;
+  stages: GenerationStage[];
+  stageItems: GenerationStageItem[];
+  resultArtifacts: GenerationRunResultArtifact[];
+}
+
+export interface GenerationRunResultArtifact {
+  kind: GenerationStageItem["kind"];
+  artifactId: string;
+  assetId?: string;
+  stageId: string;
+  itemId?: string;
+}
+
+export interface CreateGenerationRunBody {
+  briefVersionId?: string;
+  prompt?: string;
+}
+
+export interface CreateRunArgs {
+  store: GenerationRunsStore;
+  projectId: string;
+  body: CreateGenerationRunBody;
+}
+
+type StageSeed = {
+  type: GenerationStageType;
+};
+
+const STAGE_SEEDS: StageSeed[] = [
+  { type: "brief_intake" },
+  { type: "creative_plan" },
+  { type: "asset_generation" },
+  { type: "audio_generation" },
+  { type: "timeline_assembly" },
+  { type: "quality_review" },
+  { type: "export" },
+  { type: "ready" },
+];
+
+export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
+  const { store, projectId, body } = args;
+  const parsedBody = body && typeof body === "object" && !Array.isArray(body)
+    ? body
+    : {};
+  const briefVersionId = parsedBody.briefVersionId
+    ? String(parsedBody.briefVersionId).trim() || undefined
+    : undefined;
+
+  const run = await store.createRun({
+    projectId,
+    status: "queued" as GenerationRunStatus,
+    ...(briefVersionId ? { briefVersionId } : {}),
+    currentStageType: "brief_intake",
+    progressPercent: 0,
+    message: "Run queued.",
+  });
+
+  const stages: GenerationStage[] = [];
+  for (let i = 0; i < STAGE_SEEDS.length; i += 1) {
+    const seed = STAGE_SEEDS[i];
+    const stage = await store.saveStage({
+      runId: run.runId,
+      type: seed.type,
+      label: GENERATION_STAGE_LABELS[seed.type],
+      order: i,
+      status: "queued",
+      jobIds: [],
+      artifactIds: [],
+    });
+    stages.push(stage);
+  }
+
+  return { run, stages, stageItems: [], resultArtifacts: [] };
+}
+
+export async function assemblePayload(
+  store: GenerationRunsStore,
+  runId: string
+): Promise<GenerationRunPayload | null> {
+  const run = await store.getRun(runId);
+  if (!run) return null;
+  const stages = await store.listStagesForRun(runId);
+
+  const stageItems: GenerationStageItem[] = [];
+  for (const stage of stages) {
+    const items = await store.listStageItemsForStage(stage.stageId);
+    stageItems.push(...items);
+  }
+
+  return {
+    run,
+    stages,
+    stageItems,
+    resultArtifacts: collectResultArtifacts(stages, stageItems),
+  };
+}
+
+function collectResultArtifacts(
+  stages: GenerationStage[],
+  stageItems: GenerationStageItem[]
+): GenerationRunResultArtifact[] {
+  const artifacts: GenerationRunResultArtifact[] = [];
+  for (const stage of stages) {
+    for (const artifactId of stage.artifactIds) {
+      const matchingItem = stageItems.find(
+        (i) => i.stageId === stage.stageId && i.artifactId === artifactId
+      );
+      artifacts.push({
+        kind: matchingItem?.kind ?? "export",
+        artifactId,
+        stageId: stage.stageId,
+        ...(matchingItem?.itemId ? { itemId: matchingItem.itemId } : {}),
+        ...(matchingItem?.assetId ? { assetId: matchingItem.assetId } : {}),
+      });
+    }
+  }
+  return artifacts;
+}
+
+export function requireRun(
+  payload: GenerationRunPayload | null,
+  runId: string,
+  projectId: string
+): GenerationRunPayload {
+  if (!payload || payload.run.projectId !== projectId) {
+    throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  }
+  return payload;
 }
