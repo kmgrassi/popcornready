@@ -6,7 +6,18 @@ import test from "node:test";
 
 // Keep the v1 logger quiet so node:test output is not interleaved with the
 // structured JSON lines runGenerationJob emits on every step transition.
-process.env.AIVIDI_LOG_LEVEL = "silent";
+const previousLogLevel = process.env.AIVIDI_LOG_LEVEL;
+test.before(() => {
+  process.env.AIVIDI_LOG_LEVEL = "silent";
+});
+
+test.after(() => {
+  if (previousLogLevel === undefined) {
+    delete process.env.AIVIDI_LOG_LEVEL;
+  } else {
+    process.env.AIVIDI_LOG_LEVEL = previousLogLevel;
+  }
+});
 
 import { resolveActor } from "../actor";
 import { ApiError } from "../errors";
