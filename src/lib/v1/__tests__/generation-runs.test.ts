@@ -175,6 +175,7 @@ test("updateStage applies patch and preserves runId", async () => {
   });
 
   const startedAt = new Date().toISOString();
+  await new Promise((r) => setTimeout(r, 5));
   const updated = await store.updateStage(stage.stageId, {
     status: "running",
     progressPercent: 50,
@@ -223,6 +224,7 @@ test("stage items are scoped by stageId and updatable", async () => {
 
   assert.match(item.itemId, /^genitem_/);
   assert.equal(item.createdAt, item.updatedAt);
+  await new Promise((r) => setTimeout(r, 5));
 
   const completed = await store.updateStageItem(item.itemId, {
     status: "succeeded",
@@ -375,21 +377,6 @@ test("createRunWithSeedStages treats a null body as an empty payload", async () 
   assert.equal(payload.run.status, "queued");
   assert.equal(payload.run.currentStageType, "brief_intake");
   assert.equal(payload.run.briefVersionId, undefined);
-});
-
-test("createRunWithSeedStages treats a null body as an empty payload", async () => {
-  await withStore(async (store) => {
-    const payload = await createRunWithSeedStages({
-      store,
-      projectId: "proj_null",
-      workspaceId: "dev_workspace",
-      body: null as unknown as CreateGenerationRunBody,
-    });
-
-    assert.equal(payload.run.projectId, "proj_null");
-    assert.equal(payload.run.status, "queued");
-    assert.equal(payload.run.briefVersionId, undefined);
-  });
 });
 
 test("createRunWithSeedStages persists run + stages so polling sees the same data", async () => {
