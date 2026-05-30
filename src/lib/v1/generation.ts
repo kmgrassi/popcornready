@@ -5,6 +5,12 @@ import { mergeStoryContext } from "../story-context";
 import { Clip, StoryContext } from "../types";
 import { Actor } from "./actor";
 import { ApiError, ErrorCode } from "./errors";
+import {
+  RunProgressEmitter,
+  RunStageHandle,
+  noopProgressEmitter,
+  toErrorSummary,
+} from "./generation-progress";
 import * as ids from "./ids";
 import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
@@ -379,16 +385,44 @@ async function failJob(
   return next;
 }
 
+// Fail the underlying job AND roll the current run stage to `failed` with a
+// matching error summary, so the run UI reflects the same termination as the
+// job record. The stage parameter is optional because failures can land before
+// any stage has been opened (e.g. structural validation).
+async function failJobAndStage(
+  store: V1Store,
+  job: GenerationJob,
+  code: ErrorCode,
+  message: string,
+  stage: RunStageHandle | null,
+  logger?: Logger
+): Promise<GenerationJob> {
+  if (stage) await stage.fail({ code, message, retryable: false });
+  return failJob(store, job, code, message, logger);
+}
+
 export async function runGenerationJob(
   store: V1Store,
   jobId: string,
   deps: GenerationDeps = defaultDeps,
-  parentLogger?: Logger
+  progressOrLogger: Logger | RunProgressEmitter = noopProgressEmitter
 ): Promise<GenerationJob> {
   const loaded = (await store.getJob(jobId)) as GenerationJob | null;
   if (!loaded) throw new ApiError("not_found", `Job not found: ${jobId}`);
   // Terminal/already-running jobs are not re-executed (idempotent worker claim).
   if (loaded.status !== "queued") return loaded;
+
+  const isProgressEmitter =
+    typeof progressOrLogger === "object" &&
+    progressOrLogger !== null &&
+    "beginStage" in progressOrLogger &&
+    "updateRun" in progressOrLogger;
+  const progress = isProgressEmitter
+    ? (progressOrLogger as RunProgressEmitter)
+    : noopProgressEmitter;
+  const parentLogger = isProgressEmitter
+    ? undefined
+    : (progressOrLogger as Logger | undefined);
 
   const logger = (parentLogger ?? createLogger()).child({
     requestId: loaded.requestId,
@@ -410,25 +444,33 @@ export async function runGenerationJob(
     logger
   );
 
-  const input = loaded.input;
-  if (!input) {
-    return failJob(
-      store,
-      job,
-      "internal_error",
-      "Generation job has no resolved input.",
-      logger
-    );
-  }
+  // Track the active stage so a failure mid-flight can roll it (and only it)
+  // to a `failed` terminal state.
+  let activeStage: RunStageHandle | null = null;
 
   try {
+    await progress.updateRun({ progressPercent: 5, message: "Validating request" });
+
+    const input = loaded.input;
+    if (!input) {
+      return failJobAndStage(
+        store,
+        job,
+        "internal_error",
+        "Generation job has no resolved input.",
+        null,
+        logger
+      );
+    }
+
     const brief = await store.getBriefVersion(input.briefVersionId);
     if (!brief) {
-      return failJob(
+      return failJobAndStage(
         store,
         job,
         "brief_missing",
         `Brief version not found: ${input.briefVersionId}`,
+        null,
         logger
       );
     }
@@ -437,14 +479,22 @@ export async function runGenerationJob(
     for (const id of input.assetIds) {
       const asset = await store.getAsset(id);
       if (!asset) {
-        return failJob(store, job, "asset_invalid", `Asset disappeared: ${id}`, logger);
+        return failJobAndStage(
+          store,
+          job,
+          "asset_invalid",
+          `Asset disappeared: ${id}`,
+          null,
+          logger
+        );
       }
       if (asset.status !== "ready") {
-        return failJob(
+        return failJobAndStage(
           store,
           job,
           "asset_not_ready",
           `Asset ${id} is no longer ready.`,
+          null,
           logger
         );
       }
@@ -458,12 +508,21 @@ export async function runGenerationJob(
     // surface with that context.
     const modelLogger = logger.child({ provider: "anthropic" });
 
+    // creative_plan: convert the brief into a beat-level plan.
     job = await saveJobUpdate(
       store,
       job,
-      { progress: { currentStep: "planning_timeline", percent: 20 } },
+      {
+        progress: { currentStep: "planning_timeline", percent: 20 },
+      },
       modelLogger
     );
+    activeStage = await progress.beginStage("creative_plan", {
+      label: "Planning the cut",
+      message: `Planning a ${brief.brief.targetLengthSec}-second video.`,
+    });
+    await activeStage.attachJob(job.id);
+    await progress.updateRun({ progressPercent: 20, message: "Planning the cut" });
     const plan = await deps.planEdit({
       goal: brief.brief.goal,
       targetLengthSec: brief.brief.targetLengthSec,
@@ -471,40 +530,81 @@ export async function runGenerationJob(
       aspectRatio: brief.brief.aspectRatio,
       storyContext,
     });
+    await activeStage.succeed();
 
+    // timeline_assembly: select clips and build the timeline segments.
     job = await saveJobUpdate(
       store,
       job,
-      { progress: { currentStep: "selecting_clips", percent: 50 } },
+      {
+        progress: { currentStep: "selecting_clips", percent: 50 },
+      },
       modelLogger
     );
-    let timeline = sanitizeTimeline(await deps.selectClips({ plan, clips }), clips);
+    activeStage = await progress.beginStage("timeline_assembly", {
+      label: "Assembling the timeline",
+      message: "Selecting clips for each beat.",
+    });
+    await activeStage.attachJob(job.id);
+    await progress.updateRun({ progressPercent: 50, message: "Assembling the timeline" });
+    const timelineItem = await activeStage.startItem({
+      kind: "timeline",
+      label: "Timeline draft",
+    });
+    let timeline: ReturnType<typeof sanitizeTimeline>;
+    try {
+      timeline = sanitizeTimeline(await deps.selectClips({ plan, clips }), clips);
+    } catch (err) {
+      const summary = toErrorSummary(err, { fallbackCode: "internal_error" });
+      await timelineItem.fail(summary);
+      throw err;
+    }
+    await timelineItem.succeed();
+    await activeStage.succeed();
 
+    // quality_review: critique the draft timeline and apply patches.
     job = await saveJobUpdate(
       store,
       job,
-      { progress: { currentStep: "critiquing_timeline", percent: 75 } },
+      {
+        progress: { currentStep: "critiquing_timeline", percent: 75 },
+      },
       modelLogger
     );
+    activeStage = await progress.beginStage("quality_review", {
+      label: "Reviewing the cut",
+      message: "Checking pacing, clarity, and coverage.",
+    });
+    await activeStage.attachJob(job.id);
+    await progress.updateRun({ progressPercent: 75, message: "Reviewing the cut" });
+
     const { report, patches } = await deps.critique({ plan, timeline, clips, storyContext });
     timeline = applyPatches(timeline, patches, clips);
 
     if (timeline.segments.length === 0) {
-      return failJob(
+      return failJobAndStage(
         store,
         job,
         "timeline_invalid",
         "Generated timeline has no valid segments.",
+        activeStage,
         logger
       );
     }
+    await activeStage.succeed({
+      message: `Applied ${patches.length} revision${patches.length === 1 ? "" : "s"}.`,
+    });
+    activeStage = null;
 
     job = await saveJobUpdate(
       store,
       job,
-      { progress: { currentStep: "saving_artifact", percent: 90 } },
+      {
+        progress: { currentStep: "saving_artifact", percent: 90 },
+      },
       logger
     );
+    await progress.updateRun({ progressPercent: 90, message: "Saving the timeline." });
     const now = new Date().toISOString();
     const versioned: VersionedTimeline = {
       id: ids.timelineId(),
@@ -533,11 +633,12 @@ export async function runGenerationJob(
       job,
       {
         status: "succeeded",
-        progress: { percent: 100 },
+        progress: { currentStep: "saving_artifact", percent: 100 },
         result: { timelineIds: [versioned.id] },
       },
       logger
     );
+    await progress.updateRun({ progressPercent: 100, message: "Timeline ready." });
     const totalMs = Date.parse(finished.updatedAt) - Date.parse(finished.createdAt);
     logger.info("job.succeeded", {
       durationMs: totalMs,
@@ -553,6 +654,6 @@ export async function runGenerationJob(
     // message (Authorization headers, raw upstream JSON bodies) never lands in
     // the job record or the API response.
     const message = redactMessage(rawMessage);
-    return failJob(store, job, code, message, logger);
+    return failJobAndStage(store, job, code, message, activeStage, logger);
   }
 }
