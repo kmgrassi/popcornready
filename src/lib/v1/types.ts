@@ -231,12 +231,11 @@ export interface GenerationJobResult {
 
 export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
 
+
 // --- Generation Runs (Progress UI) -----------------------------------------
 //
-// A GenerationRun is a thin, UI-facing aggregate over the backend Jobs (above)
-// that make up one end-to-end video generation attempt. It lets the browser
-// represent and recover a single "generate my video" request without having to
-// understand every individual job.
+// A GenerationRun is the run-level aggregate the progress UI renders against:
+// one end-to-end video-generation attempt expressed as a sequence of stages.
 //
 // Run state maps onto existing job state — it does NOT introduce a second
 // status vocabulary:
@@ -275,7 +274,9 @@ export type GenerationStageType =
 export interface GenerationErrorSummary {
   code: string;
   message: string;
-  retryable: boolean;
+  // Keep optional so existing fixture/demo payloads can omit non-essential metadata.
+  retryable?: boolean;
+  // Optional diagnostic detail suitable for UI copy or troubleshooting surfaces.
   details?: string;
 }
 
@@ -311,10 +312,18 @@ export interface GenerationStage {
 }
 
 // Child item of an asset-heavy stage so the UI can show per-beat cards.
+export type GenerationStageItemKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "caption"
+  | "timeline"
+  | "export";
+
 export interface GenerationStageItem {
   itemId: string;
   stageId: string;
-  kind: "image" | "video" | "audio" | "caption" | "timeline" | "export";
+  kind: GenerationStageItemKind;
   label: string;
   status: GenerationRunStatus;
   progressPercent?: number;
@@ -325,3 +334,28 @@ export interface GenerationStageItem {
   retryable?: boolean;
   error?: GenerationErrorSummary;
 }
+
+// Canonical order and default labels for the stage rail. Individual runs may
+// skip stages they do not need; the rail orders whatever it is given by this
+// position.
+export const GENERATION_STAGE_ORDER: Record<GenerationStageType, number> = {
+  brief_intake: 0,
+  creative_plan: 1,
+  asset_generation: 2,
+  audio_generation: 3,
+  timeline_assembly: 4,
+  quality_review: 5,
+  export: 6,
+  ready: 7,
+};
+
+export const GENERATION_STAGE_LABELS: Record<GenerationStageType, string> = {
+  brief_intake: "Brief",
+  creative_plan: "Plan",
+  asset_generation: "Visuals",
+  audio_generation: "Audio",
+  timeline_assembly: "Timeline",
+  quality_review: "Review",
+  export: "Render",
+  ready: "Ready",
+};
