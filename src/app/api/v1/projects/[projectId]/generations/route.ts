@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { ApiError } from "@/lib/v1/errors";
 import { resolveActor } from "@/lib/v1/actor";
 import { createGenerationJob, runGenerationJob } from "@/lib/v1/generation";
 import { errorResponse, jsonResponse } from "@/lib/v1/http";
@@ -76,6 +77,9 @@ export async function POST(
       durationMs: Date.now() - start,
       error: { message },
     });
-    return errorResponse(err, requestId);
+    if (err instanceof ApiError) {
+      return errorResponse(new ApiError(err.code, message, err.details), requestId);
+    }
+    return errorResponse(new ApiError("internal_error", message), requestId);
   }
 }

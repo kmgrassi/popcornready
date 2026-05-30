@@ -45,6 +45,9 @@ export async function GET(
       durationMs: Date.now() - start,
       error: { message },
     });
-    return errorResponse(err, requestId);
+    if (err instanceof ApiError) {
+      return errorResponse(new ApiError(err.code, message, err.details), requestId);
+    }
+    return errorResponse(new ApiError("internal_error", message), requestId);
   }
 }
