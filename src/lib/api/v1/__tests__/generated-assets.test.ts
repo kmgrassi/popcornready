@@ -7,7 +7,7 @@ import test from "node:test";
 // store call. store.localDir()/jobs read this lazily, so setting it here is enough.
 process.env.AIVIDI_LOCAL_DIR = path.join(
   os.tmpdir(),
-  `aividi-pr2-${process.pid}-${Date.now()}`
+  `popcornready-pr2-${process.pid}-${Date.now()}`
 );
 delete process.env.AUTH_MODE;
 

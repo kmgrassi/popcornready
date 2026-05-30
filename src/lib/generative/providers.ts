@@ -217,7 +217,7 @@ const openAIProvider: GenerativeProvider = {
 async function downloadGeminiVideo(ai: GoogleGenAI, video: Video): Promise<Buffer> {
   if (video.videoBytes) return Buffer.from(video.videoBytes, "base64");
 
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-gemini-"));
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-gemini-"));
   const tmpPath = path.join(tmpDir, "generated.mp4");
   try {
     await ai.files.download({ file: video, downloadPath: tmpPath });

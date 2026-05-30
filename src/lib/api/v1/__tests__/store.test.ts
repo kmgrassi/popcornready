@@ -21,7 +21,7 @@ import {
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-v1-"));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-"));
   process.env.AIVIDI_LOCAL_DIR = tmpDir;
 });
 

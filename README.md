@@ -1,4 +1,4 @@
-# aividi — AI-native video editor (MVP)
+# popcornready.ai — AI-native video editor (MVP)
 
 An MVP of the "core timeline loop" from the AI-native video editing architecture:
 
@@ -91,6 +91,18 @@ Open http://localhost:3000
 The MVP cleanup and production feature roadmap lives in
 [`docs/productionization-scope.md`](docs/productionization-scope.md), with
 focused scoping docs for browser upload/context workflows and agent-facing APIs.
+
+## Deploy to Railway
+
+Railway deployment notes live in
+[`docs/railway-deployment.md`](docs/railway-deployment.md). The repo includes a
+`railway.toml` that uses Railpack, runs `npm run build`, starts the service with
+`npm run start`, and healthchecks `/api/v1/health`.
+
+Set the provider keys from `.env.local.example` as Railway service variables.
+For a hosted demo, be aware that the current MVP stores project state and media
+on the local filesystem; see the Railway deployment doc for the persistence
+limitations and production storage recommendations.
 
 ## Project layout
 

@@ -69,7 +69,7 @@ const fakeDeps: GenerationDeps = {
 };
 
 async function withStore(fn: (store: V1Store) => Promise<void>): Promise<void> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-v1-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-"));
   try {
     await fn(createStore(dir));
   } finally {
