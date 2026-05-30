@@ -24,15 +24,15 @@ export function StatusBanner({ run }: StatusBannerProps) {
         : "Generating your video";
 
   return (
-    <div className="status-banner" role="status" aria-live="polite">
+    <div className="status-banner">
       <div className="status-banner-head">
         <span className={`status-banner-dot status-banner-dot-${run.status}`} />
         <span className="status-banner-heading">{heading}</span>
       </div>
-      <p className="status-banner-message">
+      <p className="status-banner-message" role="status" aria-live="polite" aria-atomic="true">
         {run.message ?? "Tracking progress…"}
       </p>
-      <div className="status-banner-meta">
+      <div className="status-banner-meta" aria-live="off">
         <span className="status-banner-meta-label">Elapsed</span>
         <span className="status-banner-meta-value">
           {elapsed === null ? "—" : formatElapsed(elapsed)}
