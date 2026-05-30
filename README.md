@@ -1,4 +1,4 @@
-# [![Popcorn Ready](./public/logo.svg)](https://popcornready.ai)
+# [![Popcorn Ready](./public/brand/popcorn-ready-logo.svg)](https://popcornready.ai)
 
 **Popcorn Ready** is an AI-native video editor that turns clips and your brief into an editable timeline quickly.
 
