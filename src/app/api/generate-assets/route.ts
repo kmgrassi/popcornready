@@ -253,16 +253,14 @@ export async function POST(req: NextRequest) {
         })
       : preflight.finalPrompt;
 
-    const result = await provider.generateAsset({
-      provider: provider.name,
-      kind,
+    let result;
+    const baseRequest = {
       prompt: providerPrompt,
       referencePaths: [...characterReferencePaths, ...referencePaths],
       characterContext,
       model: body.model ? String(body.model) : undefined,
       size: body.size ? String(body.size) : undefined,
       quality: body.quality,
-      seconds,
       audioMode,
       voiceId: body.voiceId ? String(body.voiceId) : undefined,
       outputFormat: body.outputFormat ? String(body.outputFormat) : undefined,
@@ -280,7 +278,49 @@ export async function POST(req: NextRequest) {
         typeof body.forceInstrumental === "boolean"
           ? body.forceInstrumental
           : undefined,
-    });
+    };
+
+    if (providerName === "openai" && kind === "image") {
+      result = await provider.generateAsset({
+        provider: "openai",
+        kind: "image",
+        ...baseRequest,
+      });
+    } else if (providerName === "openai" && kind === "video") {
+      result = await provider.generateAsset({
+        provider: "openai",
+        kind: "video",
+        seconds,
+        ...baseRequest,
+      });
+    } else if (providerName === "gemini" && kind === "video") {
+      result = await provider.generateAsset({
+        provider: "gemini",
+        kind: "video",
+        seconds,
+        ...baseRequest,
+      });
+    } else if (providerName === "elevenlabs" && kind === "audio") {
+      result = await provider.generateAsset({
+        provider: "elevenlabs",
+        kind: "audio",
+        ...baseRequest,
+      });
+    } else if (providerName === "mock" && kind === "image") {
+      result = await provider.generateAsset({
+        provider: "mock",
+        kind: "image",
+        ...baseRequest,
+      });
+    } else if (providerName === "nanobanano" && kind === "image") {
+      result = await provider.generateAsset({
+        provider: "nanobanano",
+        kind: "image",
+        ...baseRequest,
+      });
+    } else {
+      throw new Error(`${providerName} provider does not support ${kind}.`);
+    }
 
     await fs.mkdir(GENERATED_DIR, { recursive: true });
     const id = newId(kind === "image" ? "img" : kind === "audio" ? "aud" : "vid");

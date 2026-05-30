@@ -4,6 +4,15 @@ import path from "path";
 import { GoogleGenAI, type Image, type Video } from "@google/genai";
 import {
   GenerateAssetRequest,
+  OpenAIImageSize,
+  OpenAIImageModel,
+  OpenAIVideoSize,
+  OpenAIVideoModel,
+  OpenAIVideoRequest,
+  OpenAIVideoSeconds,
+  normalizeOpenAIImageSize,
+  normalizeOpenAIVideoSize,
+  normalizeOpenAIVideoSeconds,
   GeneratedAssetResult,
   GenerativeProvider,
   GenerativeProviderName,
@@ -12,6 +21,44 @@ import { createElevenLabsAudio } from "./audio";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const GEMINI_DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
+const OPENAI_DEFAULT_IMAGE_MODEL: OpenAIImageModel = "gpt-image-1.5";
+const OPENAI_DEFAULT_VIDEO_MODEL: OpenAIVideoModel = "sora-2";
+
+interface OpenAIImageGenerationPayload {
+  model: string;
+  prompt: string;
+  size?: OpenAIImageSize;
+  quality?: "low" | "medium" | "high" | "auto";
+}
+
+interface OpenAIVideoGenerationPayload {
+  model: string;
+  prompt: string;
+  size: OpenAIVideoSize;
+  seconds: OpenAIVideoSeconds;
+}
+
+function buildOpenAIImagePayload(
+  input: Extract<GenerateAssetRequest, { provider: "openai"; kind: "image" }>
+): OpenAIImageGenerationPayload {
+  return {
+    model: input.model || OPENAI_DEFAULT_IMAGE_MODEL,
+    prompt: requirePrompt(input.prompt),
+    ...(input.size ? { size: normalizeOpenAIImageSize(input.size) } : {}),
+    ...(input.quality ? { quality: input.quality } : {}),
+  };
+}
+
+function buildOpenAIVideoPayload(
+  input: OpenAIVideoRequest
+): OpenAIVideoGenerationPayload {
+  return {
+    model: input.model || OPENAI_DEFAULT_VIDEO_MODEL,
+    prompt: requirePrompt(input.prompt),
+    size: normalizeOpenAIVideoSize(input.size),
+    seconds: normalizeOpenAIVideoSeconds(input.seconds),
+  };
+}
 
 function requirePrompt(prompt: string): string {
   const trimmed = prompt.trim();
@@ -87,18 +134,17 @@ async function openaiFetch(
 }
 
 async function generateOpenAIImage(
-  input: GenerateAssetRequest
+  input: Extract<GenerateAssetRequest, { provider: "openai"; kind: "image" }>
 ): Promise<GeneratedAssetResult> {
-  const prompt = requirePrompt(input.prompt);
-  const model = input.model || "gpt-image-1.5";
+  const payload = buildOpenAIImagePayload(input);
   const referencePaths = input.referencePaths || [];
 
   if (referencePaths.length > 0) {
     const form = new FormData();
-    form.set("model", model);
-    form.set("prompt", prompt);
-    if (input.size) form.set("size", input.size);
-    if (input.quality) form.set("quality", input.quality);
+    form.set("model", payload.model);
+    form.set("prompt", payload.prompt);
+    if (payload.size) form.set("size", payload.size);
+    if (payload.quality) form.set("quality", payload.quality);
     for (const filePath of referencePaths) {
       form.append("image[]", await readAsBlob(filePath), path.basename(filePath));
     }
@@ -116,8 +162,8 @@ async function generateOpenAIImage(
       extension: "png",
       mimeType: "image/png",
       provider: "openai",
-      model,
-      prompt,
+      model: payload.model,
+      prompt: payload.prompt,
       providerSettings: characterProviderSettings(input),
     };
   }
@@ -126,10 +172,10 @@ async function generateOpenAIImage(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model,
-      prompt,
-      ...(input.size ? { size: input.size } : {}),
-      ...(input.quality ? { quality: input.quality } : {}),
+      model: payload.model,
+      prompt: payload.prompt,
+      ...(payload.size ? { size: payload.size } : {}),
+      ...(payload.quality ? { quality: payload.quality } : {}),
     }),
   });
   const data = await res.json();
@@ -141,22 +187,21 @@ async function generateOpenAIImage(
     extension: "png",
     mimeType: "image/png",
     provider: "openai",
-    model,
-    prompt,
+    model: payload.model,
+    prompt: payload.prompt,
     providerSettings: characterProviderSettings(input),
   };
 }
 
 async function generateOpenAIVideo(
-  input: GenerateAssetRequest
+  input: OpenAIVideoRequest
 ): Promise<GeneratedAssetResult> {
-  const prompt = requirePrompt(input.prompt);
-  const model = input.model || "sora-2";
+  const payload = buildOpenAIVideoPayload(input);
   const form = new FormData();
-  form.set("model", model);
-  form.set("prompt", prompt);
-  form.set("size", input.size || "1280x720");
-  form.set("seconds", String(input.seconds || 8));
+  form.set("model", payload.model);
+  form.set("prompt", payload.prompt);
+  form.set("size", payload.size);
+  form.set("seconds", String(payload.seconds));
 
   const firstReference = input.referencePaths?.[0];
   if (firstReference) {
@@ -199,8 +244,8 @@ async function generateOpenAIVideo(
     extension: "mp4",
     mimeType: "video/mp4",
     provider: "openai",
-    model,
-    prompt,
+    model: payload.model,
+    prompt: payload.prompt,
     providerSettings: characterProviderSettings(input),
   };
 }
@@ -208,8 +253,16 @@ async function generateOpenAIVideo(
 const openAIProvider: GenerativeProvider = {
   name: "openai",
   async generateAsset(input) {
-    if (input.kind === "image") return generateOpenAIImage(input);
-    if (input.kind === "video") return generateOpenAIVideo(input);
+    if (input.provider !== "openai") {
+      throw new Error("OpenAI provider currently supports image and video generation only.");
+    }
+
+    if (input.kind === "image") {
+      return generateOpenAIImage(input);
+    }
+    if (input.kind === "video") {
+      return generateOpenAIVideo(input);
+    }
     throw new Error("OpenAI provider currently supports image and video generation only.");
   },
 };
@@ -228,7 +281,7 @@ async function downloadGeminiVideo(ai: GoogleGenAI, video: Video): Promise<Buffe
 }
 
 async function generateGeminiVideo(
-  input: GenerateAssetRequest
+  input: Extract<GenerateAssetRequest, { provider: "gemini"; kind: "video" }>
 ): Promise<GeneratedAssetResult> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
@@ -291,6 +344,9 @@ async function generateGeminiVideo(
 const geminiProvider: GenerativeProvider = {
   name: "gemini",
   async generateAsset(input) {
+    if (input.provider !== "gemini") {
+      throw new Error("Gemini provider currently supports video generation only.");
+    }
     if (input.kind !== "video") {
       throw new Error("Gemini provider currently supports video generation only.");
     }
