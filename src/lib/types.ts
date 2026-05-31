@@ -1,3 +1,5 @@
+import type { EditGraph } from "./edit-graph";
+
 // Core domain types. The whole product revolves around the Timeline — the AI
 // never touches raw video, it only edits this structured representation.
 
@@ -336,6 +338,7 @@ export interface Project {
   storyContext?: StoryContext;
   editGraph?: import("./edit-graph").EditGraph;
   plan: EditPlan | null;
+  editGraph?: EditGraph;
   timeline: Timeline | null;
   renderPlan?: RenderPlan | null;
   clips: Clip[];

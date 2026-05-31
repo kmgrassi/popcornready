@@ -101,6 +101,9 @@ test("revision worker produces a sibling timeline without mutating the base", as
   assert.equal(result.appliedPatches, 1);
   assert.equal(result.summary, "Added a caption.");
   assert.equal(result.timeline.segments[0].caption, "Hello");
+  assert.equal(result.editGraph.schemaVersion, "editGraph.v1");
+  assert.equal(result.graphOperations[0].targetLayer, "edit");
+  assert.equal(result.graphOperations[0].alternatives.length, 2);
   // Base timeline is untouched — the revision is a sibling cut.
   assert.equal(project.timeline?.segments[0].caption, undefined);
 });
