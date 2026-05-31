@@ -1,0 +1,932 @@
+{
+  "model": "gpt-4o",
+  "timestamp": "2026-05-31T13:46:43.049Z",
+  "totals": {
+    "total": 27,
+    "verdict": {
+      "pass": 27,
+      "total": 27
+    },
+    "attribution": {
+      "pass": 17,
+      "total": 17
+    },
+    "hardFloor": {
+      "pass": 3,
+      "total": 3
+    }
+  },
+  "cases": [
+    {
+      "id": "V-PASS-01",
+      "modality": "video",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 9,
+          "storyboard_cohesion": 10,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 10,
+          "specificity": 9
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "brief_alignment",
+          "beat_fit",
+          "constraint_compliance"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "V-PASS-02",
+      "modality": "video",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 10,
+          "beat_fit": 10,
+          "storyboard_cohesion": 10,
+          "character_consistency": 10,
+          "production_quality": 10,
+          "constraint_compliance": 10,
+          "specificity": 10
+        },
+        "overall": 10,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "clear character consistency",
+          "strong production quality",
+          "excellent brief alignment"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "V-PASS-03",
+      "modality": "video",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 9,
+          "storyboard_cohesion": 9,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 10,
+          "specificity": 9
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "specificity",
+          "production_quality",
+          "constraint_compliance"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "V-FAIL-BRIEF",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": "brief_alignment",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 3,
+          "beat_fit": 2,
+          "storyboard_cohesion": 3,
+          "character_consistency": 10,
+          "production_quality": 8,
+          "constraint_compliance": 8,
+          "specificity": 8
+        },
+        "overall": 3,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "production_quality",
+          "specificity"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "beat_fit",
+          "storyboard_cohesion"
+        ],
+        "rewriteGuidance": "Focus on the daily commute pain theme by depicting a relatable commuting scenario, such as a person stuck in traffic or waiting for a delayed train. Ensure the setting and action align with the concept of commuting rather than a restaurant kitchen.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "beat_fit"
+    },
+    {
+      "id": "V-FAIL-BEAT",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": "beat_fit",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 7,
+          "storyboard_cohesion": 8,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 9,
+          "specificity": 9
+        },
+        "overall": 7,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "production_quality",
+          "specificity",
+          "brief_alignment"
+        ],
+        "weaknesses": [
+          "beat_fit"
+        ],
+        "rewriteGuidance": "Focus more on the pain of the daily commute rather than the positive aspects of using the scooter.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "beat_fit"
+    },
+    {
+      "id": "V-FAIL-STORYBOARD",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": "storyboard_cohesion",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 4,
+          "beat_fit": 5,
+          "storyboard_cohesion": 3,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 8,
+          "specificity": 8
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "production_quality",
+          "specificity"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "beat_fit",
+          "storyboard_cohesion"
+        ],
+        "rewriteGuidance": "Adjust the setting to match the bright morning sun on a sidewalk as in previous and subsequent beats. Ensure the scene aligns with the solution aspect of the ad, possibly showing the scooter in use or highlighting its features in a relevant context.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "storyboard_cohesion"
+    },
+    {
+      "id": "V-FAIL-CHARACTER",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": "character_consistency",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 3,
+          "beat_fit": 3,
+          "storyboard_cohesion": 3,
+          "character_consistency": 0,
+          "production_quality": 8,
+          "constraint_compliance": 8,
+          "specificity": 9
+        },
+        "overall": 3,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "production_quality",
+          "specificity"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "beat_fit",
+          "storyboard_cohesion",
+          "character_consistency"
+        ],
+        "rewriteGuidance": "Revise the prompt to align with the character profile of Maya, ensuring she is in a sunlit kitchen wearing an oatmeal cable-knit sweater and gold hoop earrings. Adjust the setting to fit the Hearth coffee subscription theme and ensure the scene matches the payoff beat in a cohesive manner with the surrounding storyboard.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "character_consistency"
+    },
+    {
+      "id": "V-FAIL-PRODUCTION",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": [
+        "production_quality",
+        "specificity"
+      ],
+      "notes": "Vague on both craft (no camera/lens/lighting) and subject (no concrete who/what/where). Either dimension as lowest counts.",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 5,
+          "beat_fit": 4,
+          "storyboard_cohesion": 6,
+          "character_consistency": 10,
+          "production_quality": 5,
+          "constraint_compliance": 8,
+          "specificity": 3
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "character_consistency"
+        ],
+        "weaknesses": [
+          "specificity",
+          "production_quality",
+          "brief_alignment"
+        ],
+        "rewriteGuidance": "Specify concrete details about the person, scooter, and city setting. Include camera angles, lighting, and motion to enhance the cinematic quality. Align more closely with the 'hook' beat by creating an engaging and attention-grabbing scene.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "specificity"
+    },
+    {
+      "id": "V-FAIL-CONSTRAINT",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": "constraint_compliance",
+      "hardFloor": "constraint_compliance",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 4,
+          "beat_fit": 5,
+          "storyboard_cohesion": 6,
+          "character_consistency": 10,
+          "production_quality": 8,
+          "constraint_compliance": 3,
+          "specificity": 8
+        },
+        "overall": 3,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "production_quality",
+          "specificity"
+        ],
+        "weaknesses": [
+          "constraint_compliance",
+          "brief_alignment",
+          "beat_fit"
+        ],
+        "rewriteGuidance": "Adjust the aspect ratio to 9:16 vertical and remove the request for on-screen text. Ensure the clip aligns with the user's goal of a 30s ad for Drift scooters.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "hardFloorHandled": true,
+      "lowestDimension": "constraint_compliance"
+    },
+    {
+      "id": "V-FAIL-SPECIFICITY",
+      "modality": "video",
+      "expectedPassed": false,
+      "expectedLowestDimension": [
+        "specificity",
+        "production_quality"
+      ],
+      "notes": "Pure adjective-soup. Either dimension as lowest counts.",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 4,
+          "beat_fit": 5,
+          "storyboard_cohesion": 6,
+          "character_consistency": 10,
+          "production_quality": 3,
+          "constraint_compliance": 8,
+          "specificity": 2
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "constraint_compliance"
+        ],
+        "weaknesses": [
+          "lack of specificity",
+          "poor production quality",
+          "weak brief alignment"
+        ],
+        "rewriteGuidance": "Include specific visual elements such as people riding Drift scooters in an urban setting, with clear descriptions of camera angles, lighting, and motion to convey the joy and freedom of modern transportation.",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "specificity"
+    },
+    {
+      "id": "V-EDGE-01",
+      "modality": "video",
+      "expectedPassed": true,
+      "notes": "Borderline — beat_fit may be 7-8 because 'weaving' reads more aggressive than 'effortlessly'. Either pass or marginal fail acceptable.",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 9,
+          "storyboard_cohesion": 8,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 10,
+          "specificity": 9
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "specificity",
+          "production_quality",
+          "constraint_compliance"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "storyboard_cohesion"
+    },
+    {
+      "id": "V-EDGE-02",
+      "modality": "video",
+      "expectedPassed": true,
+      "notes": "character_consistency MUST score 10 (N/A). Catches graders that penalize for missing character info when none is bound.",
+      "graded": {
+        "modality": "video",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 9,
+          "storyboard_cohesion": 8,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 8,
+          "specificity": 9
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "specificity",
+          "production_quality",
+          "brief_alignment"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "video.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "storyboard_cohesion"
+    },
+    {
+      "id": "I-PASS-01",
+      "modality": "image",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "image",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 10,
+          "beat_fit": 10,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 8,
+          "specificity": 9,
+          "composition_intent": 9
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "specificity",
+          "composition_intent",
+          "brief_alignment"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "image.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "constraint_compliance"
+    },
+    {
+      "id": "I-FAIL-COMPOSITION",
+      "modality": "image",
+      "expectedPassed": false,
+      "expectedLowestDimension": "composition_intent",
+      "graded": {
+        "modality": "image",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "beat_fit": 10,
+          "character_consistency": 10,
+          "production_quality": 9,
+          "constraint_compliance": 8,
+          "specificity": 7,
+          "composition_intent": 7
+        },
+        "overall": 8,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "brief_alignment",
+          "production_quality",
+          "constraint_compliance"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "image.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "specificity"
+    },
+    {
+      "id": "A-PASS-01",
+      "modality": "audio",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "arc_fit": 9,
+          "mood_specificity": 9,
+          "mix_constraints": 9,
+          "safety_compliance": 10
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "Detailed arc fit",
+          "Specific instrumentation",
+          "Clear mix constraints"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "A-PASS-02",
+      "modality": "audio",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "arc_fit": 9,
+          "mood_specificity": 9,
+          "mix_constraints": 9,
+          "safety_compliance": 10
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "Clear mix constraints",
+          "Specific instrumentation and mood",
+          "Strong arc fit with rise for CTA"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "A-FAIL-BRIEF",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "brief_alignment",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 0,
+          "arc_fit": 2,
+          "mood_specificity": 9,
+          "mix_constraints": 8,
+          "safety_compliance": 10
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "mood_specificity",
+          "safety_compliance"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "arc_fit"
+        ],
+        "rewriteGuidance": "The prompt should align with the calm and meditative style of the 'Stillwater' app. Consider using descriptors like 'slow', 'soft', 'breathy', and avoid high-energy elements like EDM festival drops. Focus on gentle instrumentation and a soothing tempo."
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "brief_alignment"
+    },
+    {
+      "id": "A-FAIL-ARC",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "arc_fit",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 5,
+          "arc_fit": 4,
+          "mood_specificity": 6,
+          "mix_constraints": 8,
+          "safety_compliance": 10
+        },
+        "overall": 6,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "safety_compliance",
+          "mix_constraints"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "arc_fit",
+          "mood_specificity"
+        ],
+        "rewriteGuidance": "Incorporate dynamic changes to match the ad's escalation structure. Specify instrumentation details beyond 'acoustic guitar' and consider adding elements to enhance mood specificity.",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "arc_fit"
+    },
+    {
+      "id": "A-FAIL-MOOD",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "mood_specificity",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 8,
+          "arc_fit": 6,
+          "mood_specificity": 5,
+          "mix_constraints": 8,
+          "safety_compliance": 10
+        },
+        "overall": 7,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "brief_alignment",
+          "mix_constraints",
+          "safety_compliance"
+        ],
+        "weaknesses": [
+          "arc_fit",
+          "mood_specificity"
+        ],
+        "rewriteGuidance": "Specify the rise and fall of the track to match the ad's narrative arc. Provide more concrete details on instrumentation, tempo, and key to enhance mood specificity.",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "mood_specificity"
+    },
+    {
+      "id": "A-FAIL-MIX",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "mix_constraints",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 5,
+          "arc_fit": 5,
+          "mood_specificity": 7,
+          "mix_constraints": 3,
+          "safety_compliance": 8
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "mood_specificity"
+        ],
+        "weaknesses": [
+          "brief_alignment",
+          "arc_fit",
+          "mix_constraints"
+        ],
+        "rewriteGuidance": "Remove vocals to avoid clashing with narration. Specify instrumental elements and ensure the track supports the explainer's narrative arc. Consider specifying a dynamic range that allows for voiceover clarity.",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "mix_constraints"
+    },
+    {
+      "id": "A-FAIL-SAFETY-1",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "safety_compliance",
+      "hardFloor": "safety_compliance",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 6,
+          "arc_fit": 5,
+          "mood_specificity": 5,
+          "mix_constraints": 4,
+          "safety_compliance": 3
+        },
+        "overall": 3,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [],
+        "weaknesses": [
+          "Named artist reference",
+          "Recognizable motif",
+          "Lacks specific tempo and key"
+        ],
+        "rewriteGuidance": "Remove references to Hans Zimmer and specific motifs like 'BRAAAM'. Instead, describe the desired mood and instrumentation without using specific artist or song references. Specify the tempo, key, and whether vocals are needed. Ensure the track fits the 30-second duration and allows for any necessary narration.",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "hardFloorHandled": true,
+      "lowestDimension": "safety_compliance"
+    },
+    {
+      "id": "A-FAIL-SAFETY-2",
+      "modality": "audio",
+      "expectedPassed": false,
+      "expectedLowestDimension": "safety_compliance",
+      "hardFloor": "safety_compliance",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 5,
+          "arc_fit": 5,
+          "mood_specificity": 4,
+          "mix_constraints": 5,
+          "safety_compliance": 0
+        },
+        "overall": 0,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [],
+        "weaknesses": [
+          "Includes brand audio/jingle",
+          "Lacks concrete instrumentation and tempo",
+          "Does not specify rise/fall/tension"
+        ],
+        "rewriteGuidance": "Remove any references to brand audio or jingles like the McDonald's motif. Specify the desired mood, instrumentation, and tempo more concretely. Ensure the audio structure matches the intended arc of the ad.",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "hardFloorHandled": true,
+      "lowestDimension": "safety_compliance"
+    },
+    {
+      "id": "A-EDGE-01",
+      "modality": "audio",
+      "expectedPassed": true,
+      "notes": "Tests genre/era exception. 'late-90s trip-hop' is allowed; a paranoid grader will reject thinking Massive Attack/Portishead.",
+      "graded": {
+        "modality": "audio",
+        "schemaVersion": 1,
+        "dimensions": {
+          "brief_alignment": 9,
+          "arc_fit": 8,
+          "mood_specificity": 9,
+          "mix_constraints": 9,
+          "safety_compliance": 10
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "mood_specificity",
+          "mix_constraints",
+          "safety_compliance"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "audio.v1"
+      },
+      "verdictMatch": true,
+      "lowestDimension": "arc_fit"
+    },
+    {
+      "id": "S-PASS-01",
+      "modality": "storyboard",
+      "expectedPassed": true,
+      "graded": {
+        "modality": "storyboard",
+        "schemaVersion": 1,
+        "dimensions": {
+          "arc_continuity": 9,
+          "visual_through_line": 9,
+          "pacing_distribution": 8,
+          "outlier_detection": 9,
+          "redundancy": 10
+        },
+        "overall": 9,
+        "passed": true,
+        "threshold": 8,
+        "strengths": [
+          "coherent story arc",
+          "consistent visual theme",
+          "effective pacing"
+        ],
+        "weaknesses": [],
+        "rewriteGuidance": "",
+        "rubricVersion": "storyboard.v1",
+        "outlierBeatIndices": []
+      },
+      "verdictMatch": true,
+      "lowestDimension": "pacing_distribution"
+    },
+    {
+      "id": "S-FAIL-CONTINUITY",
+      "modality": "storyboard",
+      "expectedPassed": false,
+      "expectedLowestDimension": "outlier_detection",
+      "graded": {
+        "modality": "storyboard",
+        "schemaVersion": 1,
+        "dimensions": {
+          "arc_continuity": 5,
+          "visual_through_line": 4,
+          "pacing_distribution": 6,
+          "outlier_detection": 3,
+          "redundancy": 8
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "clear beat structure",
+          "varied shot types"
+        ],
+        "weaknesses": [
+          "inconsistent setting",
+          "disjointed narrative",
+          "unrelated solution beat"
+        ],
+        "rewriteGuidance": "Ensure all beats are set in the same morning city setting and maintain a coherent narrative arc. Replace the sunset yoga scene with a solution that fits the urban context and addresses the problem of traffic congestion.",
+        "rubricVersion": "storyboard.v1",
+        "outlierBeatIndices": [
+          2
+        ]
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "outlier_detection"
+    },
+    {
+      "id": "S-FAIL-REDUNDANCY",
+      "modality": "storyboard",
+      "expectedPassed": false,
+      "expectedLowestDimension": "redundancy",
+      "graded": {
+        "modality": "storyboard",
+        "schemaVersion": 1,
+        "dimensions": {
+          "arc_continuity": 5,
+          "visual_through_line": 7,
+          "pacing_distribution": 6,
+          "outlier_detection": 5,
+          "redundancy": 4
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "consistent visual theme",
+          "clear CTA"
+        ],
+        "weaknesses": [
+          "arc discontinuity",
+          "redundant shots",
+          "pacing imbalance"
+        ],
+        "rewriteGuidance": "Ensure a coherent story arc by clearly defining the problem before presenting the solution. Avoid redundancy by combining similar shots. Balance pacing by varying shot types and durations.",
+        "rubricVersion": "storyboard.v1",
+        "outlierBeatIndices": [
+          0,
+          2
+        ]
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "redundancy"
+    },
+    {
+      "id": "S-FAIL-PACING",
+      "modality": "storyboard",
+      "expectedPassed": false,
+      "expectedLowestDimension": [
+        "pacing_distribution",
+        "redundancy"
+      ],
+      "notes": "Five identical wide-static shots are inherently both under-paced and redundant. Either dimension as lowest counts.",
+      "graded": {
+        "modality": "storyboard",
+        "schemaVersion": 1,
+        "dimensions": {
+          "arc_continuity": 5,
+          "visual_through_line": 7,
+          "pacing_distribution": 4,
+          "outlier_detection": 6,
+          "redundancy": 3
+        },
+        "overall": 5,
+        "passed": false,
+        "threshold": 8,
+        "strengths": [
+          "consistent visual theme"
+        ],
+        "weaknesses": [
+          "lack of narrative progression",
+          "redundant shot types",
+          "poor pacing distribution"
+        ],
+        "rewriteGuidance": "Introduce variety in shot types and camera movements to enhance engagement. Ensure each beat contributes to a coherent narrative arc. Avoid redundancy by varying the composition and focus of each shot.",
+        "rubricVersion": "storyboard.v1",
+        "outlierBeatIndices": []
+      },
+      "verdictMatch": true,
+      "attributionMatch": true,
+      "lowestDimension": "redundancy"
+    }
+  ]
+}

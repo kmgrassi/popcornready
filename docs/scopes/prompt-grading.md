@@ -139,9 +139,16 @@ Lowering the run threshold cannot lower these. A violation is disqualifying.
 | `beat_fit` | How well the prompt realizes *this specific beat's* `name` and `intent` from the `EditPlan`. |
 | `storyboard_cohesion` | Whether the prompt names visual elements (subject, setting, framing, lighting, motion) consistent with the **shot before** and **shot after** in the plan. Catches "clip 3 is a totally different scene from clips 1–2." |
 | `character_consistency` | If a `CharacterProfile` is bound to this beat: does the prompt reference the character's identity/wardrobe/style invariants and the provider reference mode correctly? If no character is bound: scored as N/A (10). |
-| `production_quality` | Is the prompt specific about camera, lens/feel, lighting, composition, motion — the cues that separate "designed shot" from "stock generation"? Cross-checks `videoQualityContextForPrompt()`. |
+| `production_quality` | Scores the **craft layer**: camera (angle, distance), lens/feel (focal length, depth of field), lighting (source, direction, quality), composition (framing, motion language). Does **not** depend on whether the subject is concrete — score whether the *how* is directed. Cross-checks `videoQualityContextForPrompt()`. |
 | `constraint_compliance` | Aspect ratio, duration window, no-text-on-screen rule, brand/safety constraints from `StoryContext`. **Absolute floor of 8** — violation is disqualifying regardless of run threshold. |
-| `specificity` | Concrete nouns and visual evidence vs. vague adjectives. Penalizes "cinematic beautiful inspiring." |
+| `specificity` | Scores the **subject layer**: concrete nouns for who/what/where/when (subject, setting, action, time of day) vs. vague feeling-adjectives ("inspiring", "beautiful", "modern"). Does **not** depend on whether the craft is specified — score whether the *what* is concrete. |
+
+**Orthogonality note for `production_quality` vs `specificity`.** A prompt can
+be specific-but-uncinematic ("a man drinking coffee at his desk" — `specificity`
+high, `production_quality` low) or cinematic-but-generic ("low-angle tracking
+shot, golden hour, shallow depth of field, of a person" — opposite). The two
+dimensions should score independently; a grader that drops both on every vague
+prompt is mis-calibrated.
 
 ### Image Prompt Rubric
 
@@ -231,6 +238,25 @@ interface GradedPrompt {
 ```
 
 `PromptGrade` is the single shape the UI, logs, and future evals read.
+
+**Do not trust the model's `passed` field.** Empirically (see
+[`prompt-grading-test-cases.md`](./prompt-grading-test-cases.md) baseline
+results), strong models will occasionally return `passed: true` while one or
+more dimensions are below the threshold — i.e. they violate their own pass
+rule. The grader wrapper **must recompute `passed` deterministically** from
+the dimension scores and the threshold:
+
+```ts
+function computePassed(grade: PromptGrade, threshold: number): boolean {
+  return Object.values(grade.dimensions).every((v) => v >= threshold);
+}
+```
+
+The model still returns `passed` in its JSON (it's useful as a sanity check
+and shows up in logs as a self-report mismatch metric), but the wrapper
+overwrites it before storing or routing. This is the rule that prevents the
+"average-gaming via self-report" failure mode from ever reaching the
+provider call.
 
 ## Revision Loop
 

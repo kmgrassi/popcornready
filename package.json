@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start",
     "test": "tsx --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:grader": "tsx scripts/eval-prompt-grader.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
