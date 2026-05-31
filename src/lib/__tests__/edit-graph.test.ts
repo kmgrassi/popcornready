@@ -145,3 +145,52 @@ test("editGraphFromTimeline preserves existing segment rationale", () => {
 
   assert.deepEqual(compiled, timeline);
 });
+
+test("editGraphFromTimeline preserves roles that do not match a plan beat", () => {
+  // `add_segment` patches and imported/older timelines can introduce roles that
+  // do not exactly match any plan.beats[].name. The original role must survive a
+  // graph round-trip rather than being overwritten with a fallback beat's name.
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_hook",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 3,
+        role: "hook",
+        reason: "Open strong.",
+      },
+      {
+        id: "seg_patch",
+        clipId: "clip_b",
+        sourceInSec: 0,
+        sourceOutSec: 2,
+        role: "B-roll insert", // arbitrary role with no matching beat name
+        reason: "Critic added a cutaway.",
+      },
+    ],
+  };
+
+  const graph = editGraphFromTimeline({
+    goal: "Explain tides",
+    plan,
+    timeline,
+  });
+
+  // The decision carries the original role even though it falls back to a beat
+  // for association.
+  assert.equal(graph.decisions[1].role, "B-roll insert");
+
+  const compiled = compileEditGraphToTimeline({
+    graph,
+    aspectRatio: timeline.aspectRatio,
+    fps: timeline.fps,
+  });
+
+  assert.deepEqual(
+    compiled.segments.map((segment) => segment.role),
+    ["hook", "B-roll insert"]
+  );
+});

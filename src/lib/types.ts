@@ -164,6 +164,11 @@ export interface StoryPlan {
 export interface EditDecision {
   id: string;
   beatId: string;
+  // The original timeline segment role this decision serves. Beat association
+  // (`beatId`) is best-effort, but this preserves the authoritative segment
+  // role for roles that do not exactly match a `story.beats[].name` (e.g.
+  // roles introduced by `add_segment` patches or imported/older timelines).
+  role?: string;
   operation: "select_segment";
   sourceClipId: string;
   sourceInMs: number;

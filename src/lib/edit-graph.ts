@@ -94,6 +94,10 @@ export function editGraphFromTimeline(input: {
     return {
       id: decisionIdForSegment(segment, index),
       beatId: beat?.id || storyBeatId(segment.role, index),
+      // Preserve the segment's authoritative role even when it does not match a
+      // beat name exactly, so recompiling the graph does not overwrite it with
+      // a fallback beat's name and corrupt the story link.
+      role: segment.role,
       operation: "select_segment",
       sourceClipId: segment.clipId,
       sourceInMs: secondsToMs(segment.sourceInSec),
@@ -160,7 +164,10 @@ export function compileEditGraphToTimeline(input: {
         clipId: decision.sourceClipId,
         sourceInSec: msToSeconds(decision.sourceInMs),
         sourceOutSec: msToSeconds(decision.sourceOutMs),
-        role: beat?.name || decision.beatId,
+        // Prefer the decision's preserved original role; only derive a role from
+        // the associated beat when the decision has none (e.g. graphs authored
+        // directly from a story plan rather than reconstructed from a timeline).
+        role: decision.role ?? beat?.name ?? decision.beatId,
         reason: decision.rationale || beat?.intent || "",
         ...(decision.caption ? { caption: decision.caption } : {}),
       };
