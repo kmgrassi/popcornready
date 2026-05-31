@@ -93,6 +93,7 @@ export interface Clip {
     characterBinding?: GeneratedAssetCharacterBinding;
     originalPrompt?: string;
     preflight?: GenerationPreflightResult;
+    costUsd?: number;
   };
   characterBinding?: GeneratedAssetCharacterBinding;
 }
