@@ -575,7 +575,7 @@ export function applyEditGraphRevisionOperations(input: {
         const decision: EditGraphDecision = {
           id: newId("decision"),
           operation: "select_segment",
-          beatId: beat?.id ?? beatId(0, patch.role || "timeline"),
+          beatId: beat?.id ?? editGraphBeatId(0, patch.role || "timeline"),
           role: patch.role,
           sourceSegmentIds: [mediaSegmentId],
           timelineSegmentId: segmentId,

@@ -336,7 +336,6 @@ export interface Project {
   id: string;
   goal: string;
   storyContext?: StoryContext;
-  editGraph?: import("./edit-graph").EditGraph;
   plan: EditPlan | null;
   editGraph?: EditGraph;
   timeline: Timeline | null;
