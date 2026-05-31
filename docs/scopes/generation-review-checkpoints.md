@@ -63,10 +63,10 @@ configuration step listing the gateable stages with a checkbox each:
   (or all) of the stages to review.
 - A secondary "Review every step" affordance checks all boxes at once.
 
-> Open decision below: whether the checkbox semantics are "check = review this
-> step" (recommended, opt-in to friction) or the inverse. The data model is the
-> same either way — a set of gated stage types — so the UI copy can flip without
-> backend change.
+**Decided — checkbox semantics:** a checked box means "review this step." Each
+check opts the user into a pause/review at that stage; an unchecked box runs that
+stage through without stopping. This keeps the default (all unchecked) as the
+zero-friction YOLO path and treats every checkbox as opting *into* review.
 
 ## Data Model Additions
 
@@ -201,7 +201,8 @@ This keeps the executor's normal path intact; the gate is a guard between stages
   listing the gateable stages with checkboxes and short descriptions ("Plan",
   "Visuals", "Audio", "Timeline", using `GENERATION_STAGE_LABELS`).
 - Primary action: **"YOLO, let's go"** (no boxes checked → no gates).
-- Selecting boxes adds review gates; a "Review every step" toggle checks all.
+- A checked box means "review this step" — each check adds a review gate after
+  that stage; a "Review every step" toggle checks all.
 - Starting the run posts `reviewGates` and routes to the progress view.
 
 ### In-progress review
@@ -319,8 +320,6 @@ Acceptance criteria:
 
 ## Open Decisions
 
-- **Checkbox polarity:** "check = review this step" (recommended) vs. "check =
-  skip/auto-approve this step." Backend model is identical; UI copy decides.
 - **Pause representation:** keep `run.status` as a `JobStatus` and derive
   awaiting-review from `reviewGate` (recommended), vs. add an explicit
   `awaiting_review` run status.
