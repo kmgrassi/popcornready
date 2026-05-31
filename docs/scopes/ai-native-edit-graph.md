@@ -489,3 +489,31 @@ audio-event detection, and additional timeline projections (shot list, cutdowns)
 - New users and existing projects migrate without losing edit history, and the
   renderer consumes a declarative render plan rather than ad-hoc ffmpeg as the
   canonical model.
+
+## PR 1 Implementation Mapping
+
+The shared contract lives in `src/lib/edit-graph`:
+
+- `types.ts` exports the layered TypeScript domain model.
+- `schemas.ts` exports hand-written JSON schema objects for the same persisted
+  shape.
+- `EDIT_GRAPH_SCHEMA_VERSION` is `editGraph.v1`.
+- `EDIT_GRAPH_PROJECT_SCHEMA_VERSION` is `aiVideoProject.v1`.
+
+| Current type | New graph layer | Mapping |
+| --- | --- | --- |
+| `Clip` | `MediaAsset` | `id`, `url`, `kind`, `durationSec`, and generated provenance become immutable source media with millisecond duration and structured metadata. |
+| `Clip.generatedBy` | `GeneratedMediaProvenance` | Provider/model/prompt are preserved on the asset rather than inferred from timeline usage. |
+| `Beat` | `StoryBeat` | Beat name maps to semantic `role`, intent is preserved, and duration becomes `targetDurationMs`. |
+| `EditPlan` | `StoryPlan` | Target length, audience/tone context, and beats become the narrative plan optimized by the agent. |
+| `StoryContext` | `CreativeBrief` and `StoryPlan` | Brief fields describe intent; beat-level story details move into `StoryBeat.requiredContent` or emotional shape. |
+| `TimelineSegment.role` | `StoryBeat.role` and `EditDecision.beatId` | The timeline role becomes a traceable relationship between a compiled segment and the story beat it serves. |
+| `TimelineSegment.reason` | `EditDecision.rationale` and `TransitionDecision.reason` | Rationale is stored on the decision that caused the segment, trim, cut, transition, or overlay. |
+| `Patch` | `EditDecision` | Revision operations become semantic graph mutations before recompiling a timeline. |
+| `CriticReport` / `CriticScores` | Future graph analysis | Critic output can target story, analysis, decisions, or render constraints instead of only post-hoc timeline patches. |
+| `CompositionPlan` / `CompositionPlannedBeat` | `StoryPlan` plus `EditDecision` | Asset strategy separates into beat intent and segment-selection decisions. |
+| `Timeline` / `TimelineSegment` | `EditGraphTimeline` | Timeline becomes the compiled projection with millisecond timing and track/item structure. |
+
+This PR intentionally does not compile or persist edit graphs. PR 2 should add
+the pure `editGraph -> Timeline` compiler and golden tests showing existing
+renders remain unchanged.
