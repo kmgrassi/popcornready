@@ -3,12 +3,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import { getProject, saveProject } from "@/lib/store";
 import { critique, planEdit } from "@/lib/agent";
-import {
-  compileEditGraphToTimeline,
-  editGraphFromTimeline,
-  editGraphForGeneratedBeatClips,
-} from "@/lib/edit-graph";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
+import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { providerFor } from "@/lib/generative/providers";
 import {
   AspectRatio,
@@ -181,6 +177,7 @@ async function generateBeatClip(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -240,6 +237,16 @@ async function savePartialProject(input: {
     id: "default",
     goal: input.goal,
     storyContext: input.storyContext,
+    editGraph: timeline
+      ? synthesizeEditGraph({
+          id: "oneshot_partial",
+          goal: input.goal,
+          plan: input.plan,
+          timeline,
+          clips: input.clips,
+          storyContext: input.storyContext,
+        })
+      : undefined,
     plan: input.plan,
     timeline,
     clips: input.clips,
@@ -295,6 +302,7 @@ async function generateSoundtrack(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -409,21 +417,26 @@ export async function POST(req: NextRequest) {
     if (soundtrack) clips.push(soundtrack);
 
     // 3. Assemble a beat-by-beat timeline from the generated clips.
-    const editGraph = editGraphForGeneratedBeatClips({
-      goal,
-      plan,
-      clips,
-      storyContext,
-    });
+    const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
+      id: newId("seg"),
+      clipId: clips[i].id,
+      sourceInSec: 0,
+      sourceOutSec: clips[i].durationSec,
+      role: beat.name,
+      reason: beat.intent,
+    }));
     let timeline: Timeline = sanitizeTimeline(
-      compileEditGraphToTimeline({
-        graph: editGraph,
-        aspectRatio,
-        fps: 30,
-        showCaptions,
+      compileTimelineViaEditGraph({
+        id: "oneshot_initial",
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
       }),
       clips
     );
+    timeline.showCaptions = showCaptions;
 
     // 4. Critique once and apply patches. Critique is useful polish, but it is
     // optional: a critic failure should never discard generated clips.
@@ -444,20 +457,18 @@ export async function POST(req: NextRequest) {
       if (patched.segments.length > 0) timeline = patched;
     }
 
-    // Persist the (possibly patched) timeline back into an edit graph so the
-    // story rationale lives in the graph rather than the flat timeline.
-    const persistedEditGraph = editGraphFromTimeline({
-      goal,
-      plan,
-      timeline,
-      storyContext,
-    });
-
     const project: Project = {
       id: "default",
       goal,
       storyContext,
-      editGraph: persistedEditGraph,
+      editGraph: synthesizeEditGraph({
+        id: "oneshot_final",
+        goal,
+        plan,
+        timeline,
+        clips,
+        storyContext,
+      }),
       plan,
       timeline,
       clips,

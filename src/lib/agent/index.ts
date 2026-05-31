@@ -6,13 +6,11 @@ import {
   Patch,
   StoryContext,
   Timeline,
+  TimelineSegment,
 } from "../types";
 import { clipCatalog, timelineForPrompt } from "../timeline";
+import { compileTimelineViaEditGraph, editGraphBeatId } from "../edit-graph";
 import { storyContextForPrompt } from "../story-context";
-import {
-  compileEditGraphToTimeline,
-  storyPlanFromEditPlan,
-} from "../edit-graph";
 import {
   estimateWordsForDuration,
   NARRATION_WORDS_PER_SEC,
@@ -66,11 +64,13 @@ function planText(p: EditPlan): string {
   ].join("\n");
 }
 
-function storyPlanText(p: EditPlan, story: ReturnType<typeof storyPlanFromEditPlan>): string {
+function storyPlanText(p: EditPlan): string {
   return [
     planText(p),
     "story beat ids:",
-    ...story.beats.map((b) => `  - ${b.id}: ${b.name}`),
+    ...p.beats.map(
+      (beat, index) => `  - ${editGraphBeatId(index, beat.name)}: ${beat.name}`
+    ),
   ].join("\n");
 }
 
@@ -115,11 +115,6 @@ export async function selectClips(input: {
   goal?: string;
   storyContext?: StoryContext | null;
 }): Promise<Timeline> {
-  const story = storyPlanFromEditPlan({
-    goal: input.goal || "",
-    plan: input.plan,
-    storyContext: input.storyContext,
-  });
   const sys = `${PREAMBLE}
 
 CLIP CATALOG:
@@ -132,7 +127,7 @@ flow as a finished edit. Favor motivated cuts, pacing variation, clear
 information flow, and visual cohesion.`;
 
   const user = `Edit plan:
-${storyPlanText(input.plan, story)}
+${storyPlanText(input.plan)}
 
 Produce the edit decisions now.`;
 
@@ -156,25 +151,34 @@ Produce the edit decisions now.`;
   const showCaptions =
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
-  return compileEditGraphToTimeline({
-    graph: {
-      schemaVersion: "edit-graph.v1",
-      story,
-      decisions: raw.decisions.map((decision, index) => ({
-        id: `seg_${index + 1}`,
-        beatId: decision.beatId,
-        operation: "select_segment",
-        sourceClipId: decision.clipId,
-        sourceInMs: Math.round(decision.sourceInSec * 1000),
-        sourceOutMs: Math.round(decision.sourceOutSec * 1000),
-        rationale: decision.rationale,
-        ...(decision.caption ? { caption: decision.caption } : {}),
-      })),
-      ...(input.storyContext ? { storyContext: input.storyContext } : {}),
-    },
+  const beatsById = new Map(
+    input.plan.beats.map((beat, index) => [editGraphBeatId(index, beat.name), beat])
+  );
+  const timeline: Timeline = {
     aspectRatio: input.plan.aspectRatio,
     fps: 30,
-    showCaptions,
+    segments: raw.decisions.map((decision, index) => {
+      const beat = beatsById.get(decision.beatId);
+      return {
+        id: `seg_${index + 1}`,
+        clipId: decision.clipId,
+        sourceInSec: decision.sourceInSec,
+        sourceOutSec: decision.sourceOutSec,
+        role: beat?.name || decision.beatId,
+        reason: decision.rationale,
+        ...(decision.caption === undefined ? {} : { caption: decision.caption }),
+      };
+    }) as TimelineSegment[],
+    ...(showCaptions === undefined ? {} : { showCaptions }),
+  };
+
+  return compileTimelineViaEditGraph({
+    id: "rough_cut",
+    goal: input.goal || input.plan.beats.map((beat) => beat.intent).join(" "),
+    plan: input.plan,
+    timeline,
+    clips: input.clips,
+    storyContext: input.storyContext,
   });
 }
 

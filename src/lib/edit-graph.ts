@@ -1,182 +1,235 @@
 import {
+  AspectRatio,
   Clip,
-  EditDecision,
-  EditGraph,
   EditPlan,
-  StoryBeatRole,
   StoryContext,
-  StoryPlan,
   Timeline,
   TimelineSegment,
 } from "./types";
 
-function stableSlug(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return slug || "beat";
+export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
+
+export interface EditGraphAsset {
+  id: string;
+  uri: string;
+  type: "video" | "audio" | "image" | "generated";
+  durationMs?: number;
+  metadata: Record<string, never>;
+  generatedBy?: Clip["generatedBy"];
 }
 
-function storyBeatRole(name: string): StoryBeatRole {
-  const normalized = stableSlug(name);
-  if (normalized.includes("hook")) return "hook";
-  if (normalized.includes("context")) return "context";
-  if (normalized.includes("problem")) return "problem";
-  if (normalized.includes("setup")) return "setup";
-  if (normalized.includes("demo") || normalized.includes("solution")) return "demo";
-  if (normalized.includes("evidence") || normalized.includes("proof")) return "evidence";
-  if (normalized.includes("contrast")) return "contrast";
-  if (normalized.includes("payoff")) return "payoff";
-  if (normalized.includes("cta") || normalized.includes("call_to_action")) return "cta";
-  if (normalized.includes("outro")) return "outro";
-  return "custom";
+export interface EditGraphStoryBeat {
+  id: string;
+  role: string;
+  intent: string;
+  targetDurationMs?: number;
 }
 
-export function storyBeatId(name: string, index: number): string {
-  return `beat_${index + 1}_${stableSlug(name)}`;
+export interface EditGraphStoryPlan {
+  id: string;
+  objective: string;
+  targetDurationMs: number;
+  audience?: string;
+  tone?: string;
+  beats: EditGraphStoryBeat[];
 }
 
-export function storyPlanFromEditPlan(input: {
-  goal: string;
-  plan: EditPlan;
-  storyContext?: StoryContext | null;
-}): StoryPlan {
-  return {
-    id: "story_plan_v1",
-    objective: input.goal,
-    targetDurationMs: Math.round(input.plan.targetLengthSec * 1000),
-    audience: input.storyContext?.audience,
-    tone: input.plan.style,
-    beats: input.plan.beats.map((beat, index) => ({
-      id: storyBeatId(beat.name, index),
-      role: storyBeatRole(beat.name),
-      name: beat.name,
-      intent: beat.intent,
-      targetDurationMs: Math.round(beat.durationSec * 1000),
-    })),
+export interface EditGraphMediaSegment {
+  id: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  semanticTags: string[];
+}
+
+export interface EditGraphSelectSegmentDecision {
+  id: string;
+  operation: "select_segment";
+  beatId: string;
+  role: string;
+  sourceSegmentIds: string[];
+  timelineSegmentId?: string;
+  rationale?: string;
+  caption?: string;
+  confidence?: number;
+}
+
+export type EditGraphDecision = EditGraphSelectSegmentDecision;
+
+export interface EditGraph {
+  id: string;
+  schemaVersion: typeof EDIT_GRAPH_SCHEMA_VERSION;
+  assets: EditGraphAsset[];
+  analysis: {
+    segments: EditGraphMediaSegment[];
+  };
+  intent: {
+    goal: string;
+    audience?: string;
+    aspectRatio: AspectRatio;
+    tone?: string;
+    targetDurationMs?: number;
+  };
+  story: EditGraphStoryPlan;
+  edit: {
+    decisions: EditGraphDecision[];
+  };
+  timelineSettings: {
+    aspectRatio: AspectRatio;
+    fps: number;
+    showCaptions?: boolean;
   };
 }
 
-function secondsToMs(value: number): number {
-  return Math.round(value * 1000);
+export function msToSec(ms: number): number {
+  return ms / 1000;
 }
 
-function msToSeconds(value: number): number {
-  return value / 1000;
+export function secToMs(sec: number): number {
+  return Math.round(sec * 1000);
 }
 
-function decisionIdForSegment(segment: Pick<TimelineSegment, "id">, index: number): string {
-  return segment.id || `seg_${index + 1}`;
+function clipType(clip: Clip): EditGraphAsset["type"] {
+  if (clip.source === "generated") return "generated";
+  return clip.kind || "video";
 }
 
-function beatForDecision(story: StoryPlan, decision: EditDecision) {
-  return story.beats.find((beat) => beat.id === decision.beatId);
+export function editGraphBeatId(index: number, name: string): string {
+  return `beat_${index + 1}_${name || "untitled"}`;
 }
 
-export function editGraphFromTimeline(input: {
+function sourceSegmentId(segment: TimelineSegment, index: number): string {
+  return `media_${segment.id || index + 1}`;
+}
+
+export function synthesizeEditGraph(input: {
+  id: string;
   goal: string;
   plan: EditPlan;
   timeline: Timeline;
+  clips?: Clip[];
   storyContext?: StoryContext | null;
 }): EditGraph {
-  const story = storyPlanFromEditPlan({
-    goal: input.goal,
-    plan: input.plan,
-    storyContext: input.storyContext,
-  });
-
-  const beatsByName = new Map(story.beats.map((beat) => [beat.name, beat]));
-  const decisions = input.timeline.segments.map((segment, index): EditDecision => {
-    const fallbackBeat = story.beats[Math.min(index, story.beats.length - 1)];
-    const beat = beatsByName.get(segment.role) || fallbackBeat;
+  const beatIdsByRole = new Map<string, string>();
+  const beats = input.plan.beats.map((beat, index) => {
+    const id = editGraphBeatId(index, beat.name);
+    if (!beatIdsByRole.has(beat.name)) beatIdsByRole.set(beat.name, id);
     return {
-      id: decisionIdForSegment(segment, index),
-      beatId: beat?.id || storyBeatId(segment.role, index),
-      // Preserve the segment's authoritative role even when it does not match a
-      // beat name exactly, so recompiling the graph does not overwrite it with
-      // a fallback beat's name and corrupt the story link.
-      role: segment.role,
-      operation: "select_segment",
-      sourceClipId: segment.clipId,
-      sourceInMs: secondsToMs(segment.sourceInSec),
-      sourceOutMs: secondsToMs(segment.sourceOutSec),
-      rationale: segment.reason,
-      ...(segment.caption ? { caption: segment.caption } : {}),
+      id,
+      role: beat.name,
+      intent: beat.intent,
+      targetDurationMs: secToMs(beat.durationSec),
     };
   });
 
+  const fallbackBeatId = beats[0]?.id || editGraphBeatId(0, "timeline");
+  const clipsById = new Map((input.clips || []).map((clip) => [clip.id, clip]));
+  const timelineClipIds = new Set(input.timeline.segments.map((segment) => segment.clipId));
+  const clips: Clip[] =
+    input.clips?.filter((clip) => timelineClipIds.has(clip.id)) ||
+    [...timelineClipIds].map((clipId) => ({
+      id: clipId,
+      filename: clipId,
+      url: clipId,
+      durationSec: 0,
+      description: "",
+    }));
+
   return {
-    schemaVersion: "edit-graph.v1",
-    story,
-    decisions,
-    ...(input.storyContext ? { storyContext: input.storyContext } : {}),
+    id: input.id,
+    schemaVersion: EDIT_GRAPH_SCHEMA_VERSION,
+    assets: clips.map((clip) => ({
+      id: clip.id,
+      uri: clip.url,
+      type: clipType(clip),
+      durationMs: secToMs(clip.measuredDurationSec ?? clip.durationSec),
+      metadata: {},
+      ...(clip.generatedBy ? { generatedBy: clip.generatedBy } : {}),
+    })),
+    analysis: {
+      segments: input.timeline.segments.map((segment, index) => {
+        const clip = clipsById.get(segment.clipId);
+        return {
+          id: sourceSegmentId(segment, index),
+          assetId: segment.clipId,
+          startMs: secToMs(segment.sourceInSec),
+          endMs: secToMs(segment.sourceOutSec),
+          semanticTags: [segment.role, clip?.description || ""].filter(Boolean),
+        };
+      }),
+    },
+    intent: {
+      goal: input.goal,
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      aspectRatio: input.plan.aspectRatio,
+      tone: input.plan.style,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+    },
+    story: {
+      id: `${input.id}_story`,
+      objective: input.goal,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      tone: input.plan.style,
+      beats,
+    },
+    edit: {
+      decisions: input.timeline.segments.map((segment, index) => ({
+        id: `decision_${segment.id || index + 1}`,
+        operation: "select_segment",
+        beatId: beatIdsByRole.get(segment.role) || fallbackBeatId,
+        role: segment.role,
+        sourceSegmentIds: [sourceSegmentId(segment, index)],
+        ...(segment.id ? { timelineSegmentId: segment.id } : {}),
+        rationale: segment.reason,
+        ...(segment.caption === undefined ? {} : { caption: segment.caption }),
+      })),
+    },
+    timelineSettings: {
+      aspectRatio: input.timeline.aspectRatio,
+      fps: input.timeline.fps,
+      ...(input.timeline.showCaptions === undefined
+        ? {}
+        : { showCaptions: input.timeline.showCaptions }),
+    },
   };
 }
 
-export function editGraphForGeneratedBeatClips(input: {
-  goal: string;
-  plan: EditPlan;
-  clips: Clip[];
-  storyContext?: StoryContext | null;
-}): EditGraph {
-  const story = storyPlanFromEditPlan({
-    goal: input.goal,
-    plan: input.plan,
-    storyContext: input.storyContext,
-  });
+export function compileEditGraphToTimeline(graph: EditGraph): Timeline {
+  const segmentsById = new Map(
+    graph.analysis.segments.map((segment) => [segment.id, segment])
+  );
+  const beatsById = new Map(graph.story.beats.map((beat) => [beat.id, beat]));
+  const segments: TimelineSegment[] = [];
+
+  for (const decision of graph.edit.decisions) {
+    if (decision.operation !== "select_segment") continue;
+    const source = segmentsById.get(decision.sourceSegmentIds[0]);
+    if (!source) continue;
+    const beat = beatsById.get(decision.beatId);
+    segments.push({
+      ...(decision.timelineSegmentId ? { id: decision.timelineSegmentId } : {}),
+      clipId: source.assetId,
+      sourceInSec: msToSec(source.startMs),
+      sourceOutSec: msToSec(source.endMs),
+      role: decision.role || beat?.role || decision.beatId,
+      reason: decision.rationale || "",
+      ...(decision.caption === undefined ? {} : { caption: decision.caption }),
+    } as TimelineSegment);
+  }
 
   return {
-    schemaVersion: "edit-graph.v1",
-    story,
-    decisions: story.beats.flatMap((beat, index): EditDecision[] => {
-      const clip = input.clips[index];
-      if (!clip) return [];
-      return [
-        {
-          id: `seg_${index + 1}_${stableSlug(beat.name)}`,
-          beatId: beat.id,
-          operation: "select_segment",
-          sourceClipId: clip.id,
-          sourceInMs: 0,
-          sourceOutMs: secondsToMs(clip.durationSec),
-          rationale: beat.intent,
-        },
-      ];
-    }),
-    ...(input.storyContext ? { storyContext: input.storyContext } : {}),
-  };
-}
-
-export function compileEditGraphToTimeline(input: {
-  graph: EditGraph;
-  aspectRatio: Timeline["aspectRatio"];
-  fps?: number;
-  showCaptions?: boolean;
-}): Timeline {
-  const segments = input.graph.decisions
-    .filter((decision) => decision.operation === "select_segment")
-    .map((decision): TimelineSegment => {
-      const beat = beatForDecision(input.graph.story, decision);
-      return {
-        id: decision.id,
-        clipId: decision.sourceClipId,
-        sourceInSec: msToSeconds(decision.sourceInMs),
-        sourceOutSec: msToSeconds(decision.sourceOutMs),
-        // Prefer the decision's preserved original role; only derive a role from
-        // the associated beat when the decision has none (e.g. graphs authored
-        // directly from a story plan rather than reconstructed from a timeline).
-        role: decision.role ?? beat?.name ?? decision.beatId,
-        reason: decision.rationale || beat?.intent || "",
-        ...(decision.caption ? { caption: decision.caption } : {}),
-      };
-    });
-
-  return {
-    aspectRatio: input.aspectRatio,
-    fps: input.fps || 30,
+    aspectRatio: graph.timelineSettings.aspectRatio,
+    fps: graph.timelineSettings.fps,
     segments,
-    ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
+    ...(graph.timelineSettings.showCaptions === undefined
+      ? {}
+      : { showCaptions: graph.timelineSettings.showCaptions }),
   };
+}
+
+export function compileTimelineViaEditGraph(
+  input: Parameters<typeof synthesizeEditGraph>[0]
+): Timeline {
+  return compileEditGraphToTimeline(synthesizeEditGraph(input));
 }
