@@ -1,9 +1,10 @@
 import React from "react";
 import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence } from "remotion";
-import { Clip, Timeline } from "../lib/types";
+import { Clip, RenderPlan, Timeline } from "../lib/types";
 
 export interface VideoProps {
   timeline: Timeline | null;
+  renderPlan?: RenderPlan | null;
   clips: Clip[];
   baseUrl: string;
   includeAudio?: boolean;

@@ -15,13 +15,15 @@ export const RemotionRoot: React.FC = () => {
       defaultProps={{ timeline: null, clips: [], baseUrl: "" }}
       calculateMetadata={(data: any) => {
         const props = data.props as VideoProps;
-        const fps = props.timeline?.fps ?? 30;
-        const { width, height } = dims(
+        const fps = props.renderPlan?.output.fps ?? props.timeline?.fps ?? 30;
+        const { width, height } = props.renderPlan?.output ?? dims(
           props.timeline?.aspectRatio ?? "9:16"
         );
+        const durationSec =
+          props.renderPlan?.durationSec ?? timelineDurationSec(props.timeline);
         const durationInFrames = Math.max(
           1,
-          Math.round(timelineDurationSec(props.timeline) * fps)
+          Math.round(durationSec * fps)
         );
         return { durationInFrames, fps, width, height };
       }}

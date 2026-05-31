@@ -61,7 +61,7 @@ export function applyPatchesViaEditGraph(
   editGraph: EditGraph;
   graphOperations: EditGraphRevisionOperation[];
 } {
-  const graph = createEditGraphFromTimeline(timeline);
+  const graph = createEditGraphFromTimeline(timeline, clips);
   const graphOperations = patchesToEditGraphOperations({ timeline, patches });
   const revisedGraph = applyEditGraphRevisionOperations({
     graph,

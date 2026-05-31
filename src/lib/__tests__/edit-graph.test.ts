@@ -1,66 +1,195 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
 import {
   applyEditGraphRevisionOperations,
-  compileEditGraph,
+  compileEditGraphToTimeline,
+  compileTimelineViaEditGraph,
   createEditGraphFromTimeline,
   patchesToEditGraphOperations,
+  synthesizeEditGraph,
 } from "../edit-graph";
-import { applyPatches, applyPatchesViaEditGraph } from "../timeline";
-import { Clip, Patch, Timeline } from "../types";
+import { applyPatchesDirectly, applyPatchesViaEditGraph } from "../timeline";
+import { Clip, EditPlan, Patch, Timeline } from "../types";
+
+const plan: EditPlan = {
+  targetLengthSec: 7,
+  style: "punchy",
+  aspectRatio: "9:16",
+  beats: [
+    { name: "hook", durationSec: 3, intent: "open on the strongest moment" },
+    { name: "proof", durationSec: 4, intent: "show the product working" },
+  ],
+};
 
 const clips: Clip[] = [
   {
     id: "clip_a",
     filename: "a.mp4",
     url: "/uploads/a.mp4",
-    kind: "video",
-    durationSec: 10,
-    description: "",
+    durationSec: 5,
+    description: "strong opener",
   },
   {
     id: "clip_b",
     filename: "b.mp4",
     url: "/uploads/b.mp4",
-    kind: "video",
-    durationSec: 8,
-    description: "",
+    durationSec: 6,
+    description: "product proof",
   },
 ];
 
-const timeline: Timeline = {
-  aspectRatio: "9:16",
-  fps: 30,
-  showCaptions: true,
-  segments: [
-    {
-      id: "seg_1",
-      clipId: "clip_a",
-      sourceInSec: 0,
-      sourceOutSec: 4,
-      role: "hook",
-      reason: "Open with the strongest visual.",
-    },
-    {
-      id: "seg_2",
-      clipId: "clip_b",
-      sourceInSec: 1,
-      sourceOutSec: 5,
-      role: "payoff",
-      reason: "Show the result.",
-    },
-  ],
-};
+test("synthesized edit graph compiles back to today's timeline byte-for-byte", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0.25,
+        sourceOutSec: 2.75,
+        role: "hook",
+        reason: "best visual hook",
+        caption: "Watch this",
+      },
+      {
+        id: "seg_2",
+        clipId: "clip_b",
+        sourceInSec: 1,
+        sourceOutSec: 5,
+        role: "proof",
+        reason: "demonstrates the claim",
+      },
+    ],
+    showCaptions: true,
+  };
 
-test("timeline lifts into an edit graph and compiles back unchanged", () => {
-  const graph = createEditGraphFromTimeline(timeline);
-  assert.equal(graph.schemaVersion, "edit-graph.v1");
-  assert.equal(graph.edit.decisions[0].beatId, "hook");
-  assert.deepEqual(compileEditGraph(graph), timeline);
+  const graph = synthesizeEditGraph({
+    id: "graph_1",
+    goal: "make a short product demo",
+    plan,
+    timeline,
+    clips,
+  });
+
+  assert.equal(
+    JSON.stringify(compileEditGraphToTimeline(graph)),
+    JSON.stringify(timeline)
+  );
+});
+
+test("compiler preserves pre-sanitize planner output without segment ids", () => {
+  const timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 3,
+        role: "hook",
+        reason: "matches the first beat",
+      },
+    ],
+  } as Timeline;
+
+  assert.equal(
+    JSON.stringify(
+      compileTimelineViaEditGraph({
+        id: "graph_raw",
+        goal: "make a short product demo",
+        plan,
+        timeline,
+        clips,
+      })
+    ),
+    JSON.stringify(timeline)
+  );
+});
+
+test("compiler preserves segment roles that do not match a plan beat", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 3,
+        role: "product close-up",
+        reason: "descriptive role with no matching beat",
+      },
+    ],
+  };
+
+  assert.equal(
+    JSON.stringify(
+      compileTimelineViaEditGraph({
+        id: "graph_unmatched",
+        goal: "make a short product demo",
+        plan,
+        timeline,
+        clips,
+      })
+    ),
+    JSON.stringify(timeline)
+  );
+});
+
+test("compiler is pure and does not mutate the source graph", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 3,
+        role: "hook",
+        reason: "matches the first beat",
+      },
+    ],
+  };
+  const graph = synthesizeEditGraph({
+    id: "graph_pure",
+    goal: "make a short product demo",
+    plan,
+    timeline,
+    clips,
+  });
+  const before = JSON.stringify(graph);
+
+  compileEditGraphToTimeline(graph);
+
+  assert.equal(JSON.stringify(graph), before);
 });
 
 test("patches become ranked edit-graph operations before compilation", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    showCaptions: true,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 4,
+        role: "hook",
+        reason: "Open with the strongest visual.",
+      },
+      {
+        id: "seg_2",
+        clipId: "clip_b",
+        sourceInSec: 1,
+        sourceOutSec: 5,
+        role: "proof",
+        reason: "Show the result.",
+      },
+    ],
+  };
   const patches: Patch[] = [
     {
       op: "set_trim",
@@ -77,14 +206,14 @@ test("patches become ranked edit-graph operations before compilation", () => {
     },
   ];
 
-  const graph = createEditGraphFromTimeline(timeline);
+  const graph = createEditGraphFromTimeline(timeline, clips, plan);
   const operations = patchesToEditGraphOperations({ timeline, patches });
   const revisedGraph = applyEditGraphRevisionOperations({
     graph,
     operations,
     clips,
   });
-  const revisedTimeline = compileEditGraph(revisedGraph);
+  const revisedTimeline = compileEditGraphToTimeline(revisedGraph);
 
   assert.equal(operations[0].targetLayer, "edit");
   assert.equal(operations[0].alternatives.length, 2);
@@ -95,6 +224,28 @@ test("patches become ranked edit-graph operations before compilation", () => {
 });
 
 test("applyPatches compatibility uses the edit graph compiler", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 4,
+        role: "hook",
+        reason: "Open with the strongest visual.",
+      },
+      {
+        id: "seg_2",
+        clipId: "clip_b",
+        sourceInSec: 1,
+        sourceOutSec: 5,
+        role: "proof",
+        reason: "Show the result.",
+      },
+    ],
+  };
   const patches: Patch[] = [
     {
       op: "set_trim",
@@ -106,11 +257,10 @@ test("applyPatches compatibility uses the edit graph compiler", () => {
     { op: "remove_segment", segmentId: "seg_2", reason: "Remove the payoff." },
   ];
 
-  const direct = applyPatches(timeline, patches, clips);
+  const direct = applyPatchesDirectly(timeline, patches, clips);
   const viaGraph = applyPatchesViaEditGraph(timeline, patches, clips);
 
   assert.deepEqual(viaGraph.timeline, direct);
   assert.equal(viaGraph.editGraph.edit.decisions.length, 1);
   assert.equal(viaGraph.graphOperations.length, 2);
 });
-

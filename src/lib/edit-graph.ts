@@ -1,6 +1,14 @@
-import { Clip, Patch, Timeline, TimelineSegment } from "./types";
+import {
+  AspectRatio,
+  Clip,
+  EditPlan,
+  Patch,
+  StoryContext,
+  Timeline,
+  TimelineSegment,
+} from "./types";
 
-export const EDIT_GRAPH_SCHEMA_VERSION = "edit-graph.v1" as const;
+export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
 
 export type EditGraphLayer = "story" | "analysis" | "edit" | "timeline";
 
@@ -19,28 +27,124 @@ export interface EditGraphRevisionOperation {
   alternatives: EditGraphAlternative[];
 }
 
-export interface EditDecisionNode {
+export interface EditGraphAsset {
   id: string;
-  beatId: string;
+  uri: string;
+  type: "video" | "audio" | "image" | "generated";
+  durationMs?: number;
+  metadata: Record<string, never>;
+  generatedBy?: Clip["generatedBy"];
+}
+
+export interface EditGraphStoryBeat {
+  id: string;
+  role: string;
+  intent: string;
+  targetDurationMs?: number;
+}
+
+export interface EditGraphStoryPlan {
+  id: string;
+  objective: string;
+  targetDurationMs: number;
+  audience?: string;
+  tone?: string;
+  beats: EditGraphStoryBeat[];
+}
+
+export interface EditGraphMediaSegment {
+  id: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  semanticTags: string[];
+}
+
+export interface EditGraphSelectSegmentDecision {
+  id: string;
   operation: "select_segment";
+  beatId: string;
+  role: string;
   sourceSegmentIds: string[];
-  outputSegment: TimelineSegment;
+  timelineSegmentId?: string;
   rationale?: string;
+  caption?: string;
   confidence?: number;
   alternatives?: EditGraphAlternative[];
 }
 
+export type EditGraphDecision = EditGraphSelectSegmentDecision;
+
 export interface EditGraph {
+  id: string;
   schemaVersion: typeof EDIT_GRAPH_SCHEMA_VERSION;
-  timelineProjection: Pick<Timeline, "aspectRatio" | "fps" | "showCaptions">;
+  assets: EditGraphAsset[];
+  analysis: {
+    segments: EditGraphMediaSegment[];
+  };
+  intent: {
+    goal: string;
+    audience?: string;
+    aspectRatio: AspectRatio;
+    tone?: string;
+    targetDurationMs?: number;
+  };
+  story: EditGraphStoryPlan;
   edit: {
-    decisions: EditDecisionNode[];
+    decisions: EditGraphDecision[];
     revisionOperations: EditGraphRevisionOperation[];
   };
+  timelineSettings: {
+    aspectRatio: AspectRatio;
+    fps: number;
+    showCaptions?: boolean;
+  };
+}
+
+export function msToSec(ms: number): number {
+  return ms / 1000;
+}
+
+export function secToMs(sec: number): number {
+  return Math.round(sec * 1000);
 }
 
 function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
+}
+
+function clipType(clip: Clip): EditGraphAsset["type"] {
+  if (clip.source === "generated") return "generated";
+  return clip.kind || "video";
+}
+
+function beatId(index: number, name: string): string {
+  return `beat_${index + 1}_${name || "untitled"}`;
+}
+
+function sourceSegmentId(segment: TimelineSegment, index: number): string {
+  return `media_${segment.id || index + 1}`;
+}
+
+function defaultPlanForTimeline(timeline: Timeline): EditPlan {
+  const beatsByRole = new Map<string, number>();
+  for (const segment of timeline.segments) {
+    const durationSec = Math.max(0, segment.sourceOutSec - segment.sourceInSec);
+    beatsByRole.set(segment.role, (beatsByRole.get(segment.role) ?? 0) + durationSec);
+  }
+
+  const beats = [...beatsByRole.entries()].map(([role, durationSec]) => ({
+    name: role || "timeline",
+    durationSec,
+    intent: role || "Preserve the current edit.",
+  }));
+
+  return {
+    targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
+    style: "current",
+    aspectRatio: timeline.aspectRatio,
+    beats,
+  };
 }
 
 function segmentForPatch(
@@ -53,18 +157,8 @@ function segmentForPatch(
   return undefined;
 }
 
-function operationTargetLayer(patch: Patch): EditGraphLayer {
-  switch (patch.op) {
-    case "set_caption":
-      return "edit";
-    case "reorder":
-    case "add_segment":
-    case "remove_segment":
-    case "replace_clip":
-    case "set_trim":
-    default:
-      return "edit";
-  }
+function operationTargetLayer(_patch: Patch): EditGraphLayer {
+  return "edit";
 }
 
 function describePatch(patch: Patch): string {
@@ -129,42 +223,205 @@ function keepCurrentAlternative(
   };
 }
 
-export function createEditGraphFromTimeline(timeline: Timeline): EditGraph {
+function cloneGraph(graph: EditGraph): EditGraph {
   return {
-    schemaVersion: EDIT_GRAPH_SCHEMA_VERSION,
-    timelineProjection: {
-      aspectRatio: timeline.aspectRatio,
-      fps: timeline.fps,
-      ...(timeline.showCaptions === undefined
-        ? {}
-        : { showCaptions: timeline.showCaptions }),
+    ...graph,
+    assets: graph.assets.map((asset) => ({ ...asset })),
+    analysis: {
+      segments: graph.analysis.segments.map((segment) => ({ ...segment })),
     },
     edit: {
-      decisions: timeline.segments.map((segment) => ({
-        id: `decision_${segment.id}`,
-        beatId: segment.role || "unassigned",
-        operation: "select_segment",
-        sourceSegmentIds: [segment.id],
-        outputSegment: { ...segment },
-        rationale: segment.reason,
-        confidence: 1,
+      decisions: graph.edit.decisions.map((decision) => ({
+        ...decision,
+        sourceSegmentIds: [...decision.sourceSegmentIds],
+        alternatives: decision.alternatives?.map((alternative) => ({
+          ...alternative,
+        })),
       })),
-      revisionOperations: [],
+      revisionOperations: [...(graph.edit.revisionOperations ?? [])],
     },
   };
 }
 
-export function compileEditGraph(graph: EditGraph): Timeline {
+function addAssetIfMissing(graph: EditGraph, clip: Clip): void {
+  if (graph.assets.some((asset) => asset.id === clip.id)) return;
+  graph.assets.push({
+    id: clip.id,
+    uri: clip.url,
+    type: clipType(clip),
+    durationMs: secToMs(clip.measuredDurationSec ?? clip.durationSec),
+    metadata: {},
+    ...(clip.generatedBy ? { generatedBy: clip.generatedBy } : {}),
+  });
+}
+
+function findDecision(
+  graph: EditGraph,
+  segmentId: string
+): EditGraphDecision | undefined {
+  return graph.edit.decisions.find(
+    (decision) => decision.timelineSegmentId === segmentId
+  );
+}
+
+function sourceForDecision(
+  graph: EditGraph,
+  decision: EditGraphDecision
+): EditGraphMediaSegment | undefined {
+  return graph.analysis.segments.find(
+    (segment) => segment.id === decision.sourceSegmentIds[0]
+  );
+}
+
+export function synthesizeEditGraph(input: {
+  id: string;
+  goal: string;
+  plan: EditPlan;
+  timeline: Timeline;
+  clips?: Clip[];
+  storyContext?: StoryContext | null;
+}): EditGraph {
+  const beatIdsByRole = new Map<string, string>();
+  const beats = input.plan.beats.map((beat, index) => {
+    const id = beatId(index, beat.name);
+    if (!beatIdsByRole.has(beat.name)) beatIdsByRole.set(beat.name, id);
+    return {
+      id,
+      role: beat.name,
+      intent: beat.intent,
+      targetDurationMs: secToMs(beat.durationSec),
+    };
+  });
+
+  const fallbackBeatId = beats[0]?.id || beatId(0, "timeline");
+  const clipsById = new Map((input.clips || []).map((clip) => [clip.id, clip]));
+  const timelineClipIds = new Set(input.timeline.segments.map((segment) => segment.clipId));
+  const clips: Clip[] =
+    input.clips?.filter((clip) => timelineClipIds.has(clip.id)) ||
+    [...timelineClipIds].map((clipId) => ({
+      id: clipId,
+      filename: clipId,
+      url: clipId,
+      durationSec: 0,
+      description: "",
+    }));
+
   return {
-    aspectRatio: graph.timelineProjection.aspectRatio,
-    fps: graph.timelineProjection.fps,
-    segments: graph.edit.decisions.map((decision) => ({
-      ...decision.outputSegment,
+    id: input.id,
+    schemaVersion: EDIT_GRAPH_SCHEMA_VERSION,
+    assets: clips.map((clip) => ({
+      id: clip.id,
+      uri: clip.url,
+      type: clipType(clip),
+      durationMs: secToMs(clip.measuredDurationSec ?? clip.durationSec),
+      metadata: {},
+      ...(clip.generatedBy ? { generatedBy: clip.generatedBy } : {}),
     })),
-    ...(graph.timelineProjection.showCaptions === undefined
-      ? {}
-      : { showCaptions: graph.timelineProjection.showCaptions }),
+    analysis: {
+      segments: input.timeline.segments.map((segment, index) => {
+        const clip = clipsById.get(segment.clipId);
+        return {
+          id: sourceSegmentId(segment, index),
+          assetId: segment.clipId,
+          startMs: secToMs(segment.sourceInSec),
+          endMs: secToMs(segment.sourceOutSec),
+          semanticTags: [segment.role, clip?.description || ""].filter(Boolean),
+        };
+      }),
+    },
+    intent: {
+      goal: input.goal,
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      aspectRatio: input.plan.aspectRatio,
+      tone: input.plan.style,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+    },
+    story: {
+      id: `${input.id}_story`,
+      objective: input.goal,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      tone: input.plan.style,
+      beats,
+    },
+    edit: {
+      decisions: input.timeline.segments.map((segment, index) => ({
+        id: `decision_${segment.id || index + 1}`,
+        operation: "select_segment",
+        beatId: beatIdsByRole.get(segment.role) || fallbackBeatId,
+        role: segment.role,
+        sourceSegmentIds: [sourceSegmentId(segment, index)],
+        ...(segment.id ? { timelineSegmentId: segment.id } : {}),
+        rationale: segment.reason,
+        ...(segment.caption === undefined ? {} : { caption: segment.caption }),
+      })),
+      revisionOperations: [],
+    },
+    timelineSettings: {
+      aspectRatio: input.timeline.aspectRatio,
+      fps: input.timeline.fps,
+      ...(input.timeline.showCaptions === undefined
+        ? {}
+        : { showCaptions: input.timeline.showCaptions }),
+    },
   };
+}
+
+export function createEditGraphFromTimeline(
+  timeline: Timeline,
+  clips: Clip[] = [],
+  plan: EditPlan = defaultPlanForTimeline(timeline)
+): EditGraph {
+  return synthesizeEditGraph({
+    id: newId("graph"),
+    goal: "Revise timeline",
+    plan,
+    timeline,
+    clips,
+  });
+}
+
+export function compileEditGraphToTimeline(graph: EditGraph): Timeline {
+  const segmentsById = new Map(
+    graph.analysis.segments.map((segment) => [segment.id, segment])
+  );
+  const beatsById = new Map(graph.story.beats.map((beat) => [beat.id, beat]));
+  const segments: TimelineSegment[] = [];
+
+  for (const decision of graph.edit.decisions) {
+    if (decision.operation !== "select_segment") continue;
+    const source = segmentsById.get(decision.sourceSegmentIds[0]);
+    if (!source) continue;
+    const beat = beatsById.get(decision.beatId);
+    segments.push({
+      ...(decision.timelineSegmentId ? { id: decision.timelineSegmentId } : {}),
+      clipId: source.assetId,
+      sourceInSec: msToSec(source.startMs),
+      sourceOutSec: msToSec(source.endMs),
+      role: decision.role || beat?.role || decision.beatId,
+      reason: decision.rationale || "",
+      ...(decision.caption === undefined ? {} : { caption: decision.caption }),
+    } as TimelineSegment);
+  }
+
+  return {
+    aspectRatio: graph.timelineSettings.aspectRatio,
+    fps: graph.timelineSettings.fps,
+    segments,
+    ...(graph.timelineSettings.showCaptions === undefined
+      ? {}
+      : { showCaptions: graph.timelineSettings.showCaptions }),
+  };
+}
+
+export function compileEditGraph(graph: EditGraph): Timeline {
+  return compileEditGraphToTimeline(graph);
+}
+
+export function compileTimelineViaEditGraph(
+  input: Parameters<typeof synthesizeEditGraph>[0]
+): Timeline {
+  return compileEditGraphToTimeline(synthesizeEditGraph(input));
 }
 
 export function patchesToEditGraphOperations(input: {
@@ -194,122 +451,101 @@ export function applyEditGraphRevisionOperations(input: {
   operations: EditGraphRevisionOperation[];
   clips: Clip[];
 }): EditGraph {
-  const clipIds = new Set(input.clips.map((clip) => clip.id));
-  let decisions: EditDecisionNode[] = input.graph.edit.decisions.map((decision) => ({
-    ...decision,
-    outputSegment: { ...decision.outputSegment },
-    alternatives: decision.alternatives?.map((alternative) => ({ ...alternative })),
-  }));
+  const clipById = new Map(input.clips.map((clip) => [clip.id, clip]));
+  const graph = cloneGraph(input.graph);
 
   for (const operation of input.operations) {
     const patch = operation.patch;
     switch (patch.op) {
-      case "set_trim":
-        decisions = decisions.map((decision) =>
-          decision.outputSegment.id === patch.segmentId
-            ? {
-                ...decision,
-                outputSegment: {
-                  ...decision.outputSegment,
-                  sourceInSec: patch.sourceInSec,
-                  sourceOutSec: patch.sourceOutSec,
-                  reason: patch.reason,
-                },
-                rationale: patch.reason,
-                alternatives: operation.alternatives,
-              }
-            : decision
-        );
+      case "set_trim": {
+        const decision = findDecision(graph, patch.segmentId);
+        const source = decision ? sourceForDecision(graph, decision) : undefined;
+        if (!decision || !source) break;
+        source.startMs = secToMs(patch.sourceInSec);
+        source.endMs = secToMs(patch.sourceOutSec);
+        decision.alternatives = operation.alternatives;
         break;
-      case "replace_clip":
-        if (!clipIds.has(patch.newClipId)) break;
-        decisions = decisions.map((decision) =>
-          decision.outputSegment.id === patch.segmentId
-            ? {
-                ...decision,
-                sourceSegmentIds: [patch.segmentId],
-                outputSegment: {
-                  ...decision.outputSegment,
-                  clipId: patch.newClipId,
-                  sourceInSec: patch.sourceInSec,
-                  sourceOutSec: patch.sourceOutSec,
-                  reason: patch.reason,
-                },
-                rationale: patch.reason,
-                alternatives: operation.alternatives,
-              }
-            : decision
-        );
+      }
+      case "replace_clip": {
+        const clip = clipById.get(patch.newClipId);
+        const decision = findDecision(graph, patch.segmentId);
+        const source = decision ? sourceForDecision(graph, decision) : undefined;
+        if (!clip || !decision || !source) break;
+        addAssetIfMissing(graph, clip);
+        source.assetId = patch.newClipId;
+        source.startMs = secToMs(patch.sourceInSec);
+        source.endMs = secToMs(patch.sourceOutSec);
+        source.semanticTags = [decision.role, clip.description].filter(Boolean);
+        decision.rationale = patch.reason;
+        decision.alternatives = operation.alternatives;
         break;
+      }
       case "remove_segment":
-        decisions = decisions.filter(
-          (decision) => decision.outputSegment.id !== patch.segmentId
+        graph.edit.decisions = graph.edit.decisions.filter(
+          (decision) => decision.timelineSegmentId !== patch.segmentId
         );
         break;
-      case "set_caption":
-        decisions = decisions.map((decision) =>
-          decision.outputSegment.id === patch.segmentId
-            ? {
-                ...decision,
-                outputSegment: {
-                  ...decision.outputSegment,
-                  caption: patch.caption,
-                  reason: decision.outputSegment.reason || patch.reason,
-                },
-                rationale: patch.reason,
-                alternatives: operation.alternatives,
-              }
-            : decision
-        );
+      case "set_caption": {
+        const decision = findDecision(graph, patch.segmentId);
+        if (!decision) break;
+        decision.caption = patch.caption;
+        decision.alternatives = operation.alternatives;
         break;
+      }
       case "reorder": {
         const position = new Map(
           patch.segmentIdsInOrder.map((segmentId, index) => [segmentId, index])
         );
-        decisions = [...decisions].sort(
+        graph.edit.decisions = [...graph.edit.decisions].sort(
           (a, b) =>
-            (position.has(a.outputSegment.id)
-              ? position.get(a.outputSegment.id)!
+            (a.timelineSegmentId && position.has(a.timelineSegmentId)
+              ? position.get(a.timelineSegmentId)!
               : 1e9) -
-            (position.has(b.outputSegment.id)
-              ? position.get(b.outputSegment.id)!
+            (b.timelineSegmentId && position.has(b.timelineSegmentId)
+              ? position.get(b.timelineSegmentId)!
               : 1e9)
         );
         break;
       }
       case "add_segment": {
-        if (!clipIds.has(patch.clipId)) break;
-        const segment: TimelineSegment = {
-          id: newId("seg"),
-          clipId: patch.clipId,
-          sourceInSec: patch.sourceInSec,
-          sourceOutSec: patch.sourceOutSec,
-          role: patch.role,
-          reason: patch.reason,
-        };
-        const decision: EditDecisionNode = {
+        const clip = clipById.get(patch.clipId);
+        if (!clip) break;
+        addAssetIfMissing(graph, clip);
+        const segmentId = newId("seg");
+        const mediaSegmentId = newId("media");
+        const beat =
+          graph.story.beats.find((candidate) => candidate.role === patch.role) ??
+          graph.story.beats[0];
+        graph.analysis.segments.push({
+          id: mediaSegmentId,
+          assetId: patch.clipId,
+          startMs: secToMs(patch.sourceInSec),
+          endMs: secToMs(patch.sourceOutSec),
+          semanticTags: [patch.role, clip.description].filter(Boolean),
+        });
+        const decision: EditGraphDecision = {
           id: newId("decision"),
-          beatId: patch.role || "unassigned",
           operation: "select_segment",
-          sourceSegmentIds: [segment.id],
-          outputSegment: segment,
+          beatId: beat?.id ?? beatId(0, patch.role || "timeline"),
+          role: patch.role,
+          sourceSegmentIds: [mediaSegmentId],
+          timelineSegmentId: segmentId,
           rationale: patch.reason,
-          confidence: 1,
           alternatives: operation.alternatives,
         };
         if (patch.afterSegmentId === null) {
-          decisions = [decision, ...decisions];
+          graph.edit.decisions = [decision, ...graph.edit.decisions];
         } else {
-          const index = decisions.findIndex(
-            (candidate) => candidate.outputSegment.id === patch.afterSegmentId
+          const index = graph.edit.decisions.findIndex(
+            (candidate) => candidate.timelineSegmentId === patch.afterSegmentId
           );
-          decisions =
+          graph.edit.decisions =
             index === -1
-              ? [...decisions, decision]
+              ? [...graph.edit.decisions, decision]
               : [
-                  ...decisions.slice(0, index + 1),
+                  ...graph.edit.decisions.slice(0, index + 1),
                   decision,
-                  ...decisions.slice(index + 1),
+                  ...graph.edit.decisions.slice(index + 1),
                 ];
         }
         break;
@@ -317,14 +553,9 @@ export function applyEditGraphRevisionOperations(input: {
     }
   }
 
-  return {
-    ...input.graph,
-    edit: {
-      decisions,
-      revisionOperations: [
-        ...input.graph.edit.revisionOperations,
-        ...input.operations,
-      ],
-    },
-  };
+  graph.edit.revisionOperations = [
+    ...(graph.edit.revisionOperations ?? []),
+    ...input.operations,
+  ];
+  return graph;
 }

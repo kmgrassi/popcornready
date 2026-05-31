@@ -210,6 +210,9 @@ export interface GeneratedAssetResult {
   model?: string;
   prompt: string;
   durationSec?: number;
+  // Approximate USD cost for this generation. Populated by the provider via the
+  // pricing helper; see src/lib/generative/pricing.ts.
+  costUsd?: number;
   providerSettings?: {
     references: string[];
     mode: CharacterConsistencyMode;

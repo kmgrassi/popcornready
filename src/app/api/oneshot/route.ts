@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { saveProject } from "@/lib/store";
+import { getProject, saveProject } from "@/lib/store";
 import { critique, planEdit } from "@/lib/agent";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
+import { compileTimelineViaEditGraph } from "@/lib/edit-graph";
 import { providerFor } from "@/lib/generative/providers";
 import {
   AspectRatio,
   Beat,
   Clip,
+  CriticReport,
+  EditPlan,
+  Patch,
   Project,
   StoryContext,
   Timeline,
@@ -22,32 +26,21 @@ import { mergeStoryContext } from "@/lib/story-context";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 
 export const dynamic = "force-dynamic";
-// Per-beat video generation is slow. Clips are generated in parallel so the
-// wall-clock cost is ~the slowest single clip, but give the request headroom.
+// Per-beat video generation is slow. Give the request headroom while we move
+// toward the async run/polling pipeline.
 export const maxDuration = 800;
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
-type OneShotMode = "video" | "image";
+type VideoProvider = "openai" | "gemini";
 
 function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
 }
 
-// Operator kill switch. Defaults ON so early visitors get a real generated
-// video; set ONESHOT_VIDEO=off to fall back to cheap still-frame mode under
-// heavy traffic. Read per-request (the route is dynamic) so flipping the env
-// + restarting the server is enough to toggle it.
-function oneShotVideoEnabled(): boolean {
-  const v = (process.env.ONESHOT_VIDEO ?? "on").trim().toLowerCase();
-  return !["off", "false", "0", "no"].includes(v);
-}
-
-// Resolve the generation mode and provider from the kill switch and available
-// provider keys. One-shot explicitly does not support mock fallback.
-function resolveMode(body: any): {
-  mode: OneShotMode;
-  provider: "openai" | "gemini";
+function resolveVideoProviders(body: any): {
+  primary: VideoProvider;
+  fallback?: VideoProvider;
 } {
   const hasOpenAI = Boolean((process.env.OPENAI_API_KEY || "").trim());
   const hasGemini = Boolean((process.env.GEMINI_API_KEY || "").trim());
@@ -55,73 +48,48 @@ function resolveMode(body: any): {
     typeof body.provider === "string"
       ? body.provider.toLowerCase().trim()
       : undefined;
-  const requested =
-    body.mode === "image" || body.mode === "video"
-      ? (body.mode as OneShotMode)
-      : undefined;
-  const wantVideo = requested ? requested === "video" : oneShotVideoEnabled();
-
-  if (wantVideo) {
-    if (requestedProvider === "mock") {
-      throw new Error(
-        "Mock provider is disabled for one-shot. Remove provider='mock' to use real generation."
-      );
-    }
-    if (requestedProvider === "gemini") {
-      if (!hasGemini) {
-        throw new Error(
-          "One-shot video requested provider='gemini', but GEMINI_API_KEY is not configured."
-        );
-      }
-      return { mode: "video", provider: "gemini" };
-    }
-    if (requestedProvider && requestedProvider !== "openai" && requestedProvider !== "gemini") {
-      throw new Error(
-        `One-shot video currently supports only openai or gemini providers. Received: ${requestedProvider}`
-      );
-    }
-    if (requestedProvider === "openai") {
-      if (!hasOpenAI) {
-        throw new Error(
-          "One-shot video requested provider='openai', but OPENAI_API_KEY is not configured."
-        );
-      }
-      return { mode: "video", provider: "openai" };
-    }
-    if (hasGemini) return { mode: "video", provider: "gemini" };
-    if (hasOpenAI) return { mode: "video", provider: "openai" };
-    throw new Error(
-      "No video-capable provider is configured for one-shot. Set OPENAI_API_KEY or GEMINI_API_KEY."
-    );
-  }
 
   if (requestedProvider === "mock") {
     throw new Error(
-      "Mock provider is disabled for one-shot. Remove provider='mock' to use real image generation."
+      "Mock provider is disabled for one-shot. Remove provider='mock' to use real video generation."
     );
   }
-  if (requestedProvider && requestedProvider !== "openai") {
+  if (requestedProvider === "gemini") {
+    if (!hasGemini) {
+      throw new Error(
+        "One-shot video requested provider='gemini', but GEMINI_API_KEY is not configured."
+      );
+    }
+    return { primary: "gemini" };
+  }
+  if (
+    requestedProvider &&
+    requestedProvider !== "openai" &&
+    requestedProvider !== "gemini"
+  ) {
     throw new Error(
-      `One-shot image mode currently supports only openai provider. Received: ${requestedProvider}`
+      `One-shot video currently supports only openai or gemini providers. Received: ${requestedProvider}`
     );
   }
-  if (!hasOpenAI) {
-    throw new Error(
-      "One-shot image mode requires OPENAI_API_KEY, but it is not configured."
-    );
+  if (requestedProvider === "openai") {
+    if (!hasOpenAI) {
+      throw new Error(
+        "One-shot video requested provider='openai', but OPENAI_API_KEY is not configured."
+      );
+    }
+    return { primary: "openai" };
   }
-  const imageProvider = "openai";
-  return { mode: "image", provider: imageProvider };
+  if (hasGemini) {
+    return { primary: "gemini", fallback: hasOpenAI ? "openai" : undefined };
+  }
+  if (hasOpenAI) return { primary: "openai" };
+  throw new Error(
+    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY or OPENAI_API_KEY."
+  );
 }
 
 function parseShowCaptions(value: unknown): boolean {
   return value === true || value === "true";
-}
-
-function imageSizeForAspect(ar: AspectRatio): string {
-  if (ar === "16:9") return "1536x1024";
-  if (ar === "1:1") return "1024x1024";
-  return "1024x1536"; // 9:16
 }
 
 function videoSizeForAspect(ar: AspectRatio): string {
@@ -138,15 +106,10 @@ function beatPrompt(
   goal: string,
   beat: Beat,
   style: string,
-  ar: AspectRatio,
-  mode: OneShotMode
+  ar: AspectRatio
 ): string {
-  const medium =
-    mode === "video"
-      ? "cinematic live-action video clip with natural motion and camera movement"
-      : "cinematic still frame";
   return [
-    `${style} ${medium} for a ${ar} short-form video.`,
+    `${style} cinematic live-action video clip with natural motion and camera movement for a ${ar} short-form video.`,
     `Beat: ${beat.name} — ${beat.intent}.`,
     `Overall concept: ${goal}.`,
     `Production quality guidance: ${videoQualityContextForPrompt()}`,
@@ -154,44 +117,52 @@ function beatPrompt(
   ].join(" ");
 }
 
+function soundtrackPrompt(input: {
+  goal: string;
+  style: string;
+  targetLengthSec: number;
+  beats: Beat[];
+}): string {
+  const beatSummary = input.beats
+    .map((beat) => `${beat.name}: ${beat.intent}`)
+    .join(" / ");
+  return [
+    `Create an instrumental soundtrack for this ${input.targetLengthSec}-second video.`,
+    `Choose the musical style, instrumentation, tempo, and emotional arc that best fit the creative brief. Do not add vocals.`,
+    `Creative brief: ${input.goal}`,
+    `Visual style: ${input.style}`,
+    `Story beats: ${beatSummary}`,
+    `The music should support the edit, rise and fall with the scene progression, and leave room for future dialogue or narration.`,
+  ].join(" ");
+}
+
 async function generateBeatClip(input: {
-  mode: OneShotMode;
-  provider: "openai" | "gemini";
+  provider: VideoProvider;
   prompt: string;
   description: string;
   size: string;
   displaySec: number;
   seconds?: OpenAIVideoSeconds;
 }): Promise<Clip> {
-  const kind = input.mode === "video" ? "video" : "image";
   const provider = providerFor(input.provider);
-  let result;
-  if (input.mode === "video" && input.provider === "openai") {
-    result = await provider.generateAsset({
-      provider: "openai",
-      kind: "video",
-      prompt: input.prompt,
-      size: input.size,
-      seconds: input.seconds,
-    });
-  } else if (input.mode === "video" && input.provider === "gemini") {
-    result = await provider.generateAsset({
-      provider: "gemini",
-      kind: "video",
-      prompt: input.prompt,
-      size: input.size,
-      seconds: input.seconds,
-    });
-  } else {
-    result = await provider.generateAsset({
-      provider: "openai",
-      kind: "image",
-      prompt: input.prompt,
-      size: input.size,
-    });
-  }
+  const result =
+    input.provider === "openai"
+      ? await provider.generateAsset({
+          provider: "openai",
+          kind: "video",
+          prompt: input.prompt,
+          size: input.size,
+          seconds: input.seconds,
+        })
+      : await provider.generateAsset({
+          provider: "gemini",
+          kind: "video",
+          prompt: input.prompt,
+          size: input.size,
+          seconds: input.seconds,
+        });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
-  const id = newId(kind === "video" ? "vid" : "img");
+  const id = newId("vid");
   const filename = `${id}.${result.extension}`;
   await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
   return {
@@ -206,6 +177,122 @@ async function generateBeatClip(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
+    },
+  };
+}
+
+function isQuotaError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("429") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.toLowerCase().includes("quota") ||
+    message.toLowerCase().includes("rate limit")
+  );
+}
+
+async function optionalOneShotStep<T>(
+  label: string,
+  run: () => Promise<T>
+): Promise<T | null> {
+  try {
+    return await run();
+  } catch (err) {
+    console.warn(`[oneshot] optional step failed: ${label}`, err);
+    return null;
+  }
+}
+
+async function savePartialProject(input: {
+  goal: string;
+  storyContext: StoryContext;
+  plan: EditPlan;
+  aspectRatio: AspectRatio;
+  clips: Clip[];
+  showCaptions: boolean;
+}): Promise<void> {
+  const videoClips = input.clips.filter((clip) => clip.kind !== "audio");
+  const segments: TimelineSegment[] = videoClips.map((clip, i) => {
+    const beat = input.plan.beats[i];
+    return {
+      id: newId("seg"),
+      clipId: clip.id,
+      sourceInSec: 0,
+      sourceOutSec: clip.durationSec,
+      role: beat?.name || `beat ${i + 1}`,
+      reason: beat?.intent || clip.description,
+    };
+  });
+  const timeline =
+    segments.length > 0
+      ? sanitizeTimeline(
+          { aspectRatio: input.aspectRatio, fps: 30, segments },
+          input.clips
+        )
+      : null;
+  if (timeline) timeline.showCaptions = input.showCaptions;
+
+  await saveProject({
+    id: "default",
+    goal: input.goal,
+    storyContext: input.storyContext,
+    plan: input.plan,
+    timeline,
+    clips: input.clips,
+    characterProfiles: [],
+    characterReferences: [],
+    critic: null,
+    chat: [],
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function resumableClipsForGoal(goal: string): Promise<Clip[]> {
+  const existing = await getProject();
+  if (existing.goal !== goal || !existing.timeline) return [];
+  return existing.timeline.segments
+    .map((segment) => existing.clips.find((clip) => clip.id === segment.clipId))
+    .filter((clip): clip is Clip => Boolean(clip && clip.kind !== "audio"));
+}
+
+async function generateSoundtrack(input: {
+  goal: string;
+  style: string;
+  targetLengthSec: number;
+  beats: Beat[];
+}): Promise<Clip | null> {
+  if (!process.env.ELEVENLABS_API_KEY) return null;
+
+  const prompt = soundtrackPrompt(input);
+  const provider = providerFor("elevenlabs");
+  const result = await provider.generateAsset({
+    provider: "elevenlabs",
+    kind: "audio",
+    audioMode: "music",
+    prompt,
+    seconds: input.targetLengthSec,
+    forceInstrumental: true,
+  });
+
+  await fs.mkdir(GENERATED_DIR, { recursive: true });
+  const id = newId("aud");
+  const filename = `${id}_soundtrack.${result.extension}`;
+  await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
+
+  return {
+    id,
+    filename,
+    url: `/generated/${filename}`,
+    kind: "audio",
+    durationSec: result.durationSec || input.targetLengthSec,
+    description: "AI-selected instrumental soundtrack for the one-shot video.",
+    source: "generated",
+    generatedBy: {
+      provider: result.provider,
+      model: result.model,
+      prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -219,7 +306,7 @@ export async function POST(req: NextRequest) {
     const aspectRatio = (body.aspectRatio || "9:16") as AspectRatio;
     const showCaptions = parseShowCaptions(body.showCaptions);
     const storyContext = mergeStoryContext(body.storyContext as StoryContext);
-    const { mode, provider } = resolveMode(body);
+    const providers = resolveVideoProviders(body);
 
     if (!goal) {
       return NextResponse.json(
@@ -244,35 +331,80 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Generate a visual per beat from scratch (no uploads required). In
-    // video mode each beat becomes a short generated clip so the assembled
-    // result is a real moving video; in image mode each beat is a still frame.
-    const imageSize = imageSizeForAspect(aspectRatio);
+    // 2. Generate a video clip per beat from scratch (no uploads required).
     const videoSize = videoSizeForAspect(aspectRatio);
-    const clips = await Promise.all(
-      plan.beats.map((beat) => {
-        if (mode === "video") {
-          const seconds = clampSeconds(beat.durationSec);
-          return generateBeatClip({
-            mode,
-            provider,
-            prompt: beatPrompt(goal, beat, style, aspectRatio, mode),
-            description: `${beat.name}: ${beat.intent}`,
-            size: videoSize,
-            displaySec: seconds,
-            seconds,
-          });
-        }
-        return generateBeatClip({
-          mode,
-          provider,
-          prompt: beatPrompt(goal, beat, style, aspectRatio, mode),
-          description: `${beat.name}: ${beat.intent}`,
-          size: imageSize,
-          displaySec: Math.max(1.5, Number(beat.durationSec) || 4),
+    const clips: Clip[] = (await resumableClipsForGoal(goal)).slice(
+      0,
+      plan.beats.length
+    );
+    if (clips.length > 0) {
+      console.info(
+        `[oneshot] resuming with ${clips.length}/${plan.beats.length} existing generated clips`
+      );
+    }
+    let provider = providers.primary;
+    for (let index = clips.length; index < plan.beats.length; index += 1) {
+      const beat = plan.beats[index];
+      const seconds = clampSeconds(beat.durationSec);
+      const clipInput = {
+        prompt: beatPrompt(goal, beat, style, aspectRatio),
+        description: `${beat.name}: ${beat.intent}`,
+        size: videoSize,
+        displaySec: seconds,
+        seconds,
+      };
+      try {
+        console.info(
+          `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
+        );
+        clips.push(await generateBeatClip({ provider, ...clipInput }));
+        console.info(
+          `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
+        );
+        await savePartialProject({
+          goal,
+          storyContext,
+          plan,
+          aspectRatio,
+          clips,
+          showCaptions,
         });
+      } catch (err) {
+        if (
+          !providers.fallback ||
+          provider === providers.fallback ||
+          !isQuotaError(err)
+        ) {
+          throw err;
+        }
+        console.warn(
+          `[oneshot] ${provider} quota/rate-limit failure; retrying clip ${index + 1}/${plan.beats.length} with ${providers.fallback}`
+        );
+        provider = providers.fallback;
+        clips.push(await generateBeatClip({ provider, ...clipInput }));
+        console.info(
+          `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
+        );
+        await savePartialProject({
+          goal,
+          storyContext,
+          plan,
+          aspectRatio,
+          clips,
+          showCaptions,
+        });
+      }
+    }
+
+    const soundtrack = await optionalOneShotStep("soundtrack", () =>
+      generateSoundtrack({
+        goal,
+        style,
+        targetLengthSec,
+        beats: plan.beats,
       })
     );
+    if (soundtrack) clips.push(soundtrack);
 
     // 3. Assemble a beat-by-beat timeline from the generated clips.
     const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
@@ -284,20 +416,36 @@ export async function POST(req: NextRequest) {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: "oneshot_initial",
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       clips
     );
     timeline.showCaptions = showCaptions;
 
-    // 4. Critique once and apply patches — but never let it empty the cut.
-    const { report, patches } = await critique({
-      plan,
-      timeline,
-      clips,
-      storyContext,
-    });
-    const patched = applyPatches(timeline, patches, clips);
-    if (patched.segments.length > 0) timeline = patched;
+    // 4. Critique once and apply patches. Critique is useful polish, but it is
+    // optional: a critic failure should never discard generated clips.
+    let report: CriticReport | null = null;
+    let patches: Patch[] = [];
+    const critiqueResult = await optionalOneShotStep("critique", () =>
+      critique({
+        plan,
+        timeline,
+        clips,
+        storyContext,
+      })
+    );
+    if (critiqueResult) {
+      report = critiqueResult.report;
+      patches = critiqueResult.patches;
+      const patched = applyPatches(timeline, patches, clips);
+      if (patched.segments.length > 0) timeline = patched;
+    }
 
     const project: Project = {
       id: "default",
@@ -316,12 +464,14 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       project,
-      mode,
+      mode: "video",
       provider,
-      generatedClips: clips.length,
+      generatedClips: clips.filter((clip) => clip.kind !== "audio").length,
+      generatedSoundtrack: Boolean(soundtrack),
       appliedPatches: patches.length,
     });
   } catch (err: any) {
+    console.error("[oneshot] generation failed", err);
     return NextResponse.json(
       { error: err?.message || "One-shot generation failed" },
       { status: 500 }

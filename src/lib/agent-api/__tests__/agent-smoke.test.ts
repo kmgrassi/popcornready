@@ -101,7 +101,7 @@ test("revision worker produces a sibling timeline without mutating the base", as
   assert.equal(result.appliedPatches, 1);
   assert.equal(result.summary, "Added a caption.");
   assert.equal(result.timeline.segments[0].caption, "Hello");
-  assert.equal(result.editGraph.schemaVersion, "edit-graph.v1");
+  assert.equal(result.editGraph.schemaVersion, "editGraph.v1");
   assert.equal(result.graphOperations[0].targetLayer, "edit");
   assert.equal(result.graphOperations[0].alternatives.length, 2);
   // Base timeline is untouched — the revision is a sibling cut.
@@ -157,6 +157,31 @@ test("export worker emits a pending_render artifact under match_longest_media", 
 
 test("export worker fails on audio/timeline mismatch when policy is fail_on_mismatch", () => {
   const project = projectFixture();
+  assert.throws(
+    () =>
+      runExportJob({
+        project,
+        timelineId: "tl_requested",
+        options: { audioAssetIds: ["clip_audio"], durationPolicy: "fail_on_mismatch" },
+      }),
+    (err: unknown) => err instanceof ApiError && err.code === "audio_timeline_mismatch"
+  );
+});
+
+test("export worker fails on measured-duration mismatch under fail_on_mismatch", () => {
+  // The timeline is 5s and the audio is *registered* as 5s, so the earlier
+  // registered-duration check passes. But the measured duration is 12s, which
+  // the render plan aligns against — the export must still be rejected instead
+  // of emitting a successful artifact with a 12s render plan.
+  const project = projectFixture();
+  // Shrink the timeline to 5s so the registered audio duration matches it.
+  project.timeline!.segments = [
+    { id: "seg_1", clipId: "clip_a", sourceInSec: 0, sourceOutSec: 5, role: "hook", reason: "" },
+  ];
+  const audio = project.clips.find((c) => c.id === "clip_audio")!;
+  audio.durationSec = 5;
+  audio.measuredDurationSec = 12;
+
   assert.throws(
     () =>
       runExportJob({
