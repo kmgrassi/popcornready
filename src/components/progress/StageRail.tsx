@@ -52,8 +52,12 @@ export function StageRail({ stages, reviewGate }: StageRailProps) {
         return (
           <li
             key={stage.stageId}
-            className={`stage-row stage-${stage.status}`}
-            aria-current={stage.status === "running" ? "step" : undefined}
+            className={`stage-row stage-${stage.status}${
+              awaitingReview ? " awaiting-review" : ""
+            }`}
+            aria-current={
+              awaitingReview || stage.status === "running" ? "step" : undefined
+            }
           >
             <div className="stage-marker">
               <StatusGlyph status={stage.status} />
@@ -63,10 +67,16 @@ export function StageRail({ stages, reviewGate }: StageRailProps) {
               <div className="stage-title-row">
                 <span className="stage-title">{label}</span>
                 <span className={`stage-status-pill stage-status-${stage.status}`}>
-                  {awaitingReview ? "Ready for review" : STATUS_LABEL[stage.status]}
+                  {awaitingReview
+                    ? "Ready for review"
+                    : stage.reviewedAt
+                      ? "Reviewed"
+                      : STATUS_LABEL[stage.status]}
                 </span>
               </div>
-              {message ? (
+              {awaitingReview ? (
+                <p className="stage-message">Ready for your review.</p>
+              ) : message ? (
                 <p className="stage-message">{message}</p>
               ) : (
                 <p className="stage-message muted">

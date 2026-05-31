@@ -3,7 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { ProgressView } from "@/components/progress/ProgressView";
-import { GenerationRun, GenerationStage } from "@/lib/v1/types";
+import {
+  GenerationRun,
+  GenerationStage,
+  GenerationStageItem,
+} from "@/lib/v1/types";
 
 const POLL_INTERVAL_MS = 2000;
 const REVIEW_POLL_INTERVAL_MS = 15000;
@@ -11,6 +15,7 @@ const REVIEW_POLL_INTERVAL_MS = 15000;
 interface GenerationRunPayload {
   run: GenerationRun;
   stages: GenerationStage[];
+  stageItems?: GenerationStageItem[];
 }
 
 function isTerminal(status: GenerationRun["status"]): boolean {
@@ -144,6 +149,7 @@ export function RunProgress({
     <ProgressView
       run={payload.run}
       stages={payload.stages}
+      stageItems={payload.stageItems}
       reviewActions={
         payload.run.reviewGate
           ? {

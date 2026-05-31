@@ -1,7 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { GENERATION_STAGE_LABELS, GenerationRun, GenerationStage } from "@/lib/v1/types";
+import { useEffect, useState } from "react";
+import {
+  GENERATION_STAGE_LABELS,
+  GenerationRun,
+  GenerationStage,
+  GenerationStageItem,
+} from "@/lib/v1/types";
+import { StageItemCard } from "@/components/generation-progress/StageItemCard";
+import {
+  GenerationRunClient,
+  GenerationRunRequestError,
+} from "@/lib/v1/generation-runs/client";
 import { StageRail } from "./StageRail";
 import { StatusBanner } from "./StatusBanner";
 import { TerminalState } from "./TerminalState";
@@ -9,6 +20,7 @@ import { TerminalState } from "./TerminalState";
 interface ProgressViewProps {
   run: GenerationRun;
   stages: GenerationStage[];
+  stageItems?: GenerationStageItem[];
   reviewActions?: {
     pending?: "approve" | "reject" | "cancel";
     error?: string | null;
@@ -24,11 +36,92 @@ function isTerminal(status: GenerationRun["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "canceled";
 }
 
-export function ProgressView({ run, stages, reviewActions, alternateRuns }: ProgressViewProps) {
-  const terminal = isTerminal(run.status);
-  const reviewStage = run.reviewGate
-    ? stages.find((stage) => stage.stageId === run.reviewGate?.stageId)
+export function ProgressView({
+  run,
+  stages,
+  stageItems = [],
+  reviewActions,
+  alternateRuns,
+}: ProgressViewProps) {
+  const [detail, setDetail] = useState({ run, stages, stageItems });
+  const [fallbackApproving, setFallbackApproving] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDetail({ run, stages, stageItems });
+    setFallbackApproving(false);
+    setFallbackError(null);
+  }, [run, stages, stageItems]);
+
+  const terminal = isTerminal(detail.run.status);
+  const reviewStage = detail.run.reviewGate
+    ? detail.stages.find((stage) => stage.stageId === detail.run.reviewGate?.stageId)
     : undefined;
+  const reviewItems = detail.run.reviewGate
+    ? detail.stageItems.filter((item) => item.stageId === detail.run.reviewGate?.stageId)
+    : [];
+  const pending = reviewActions?.pending ?? (fallbackApproving ? "approve" : undefined);
+  const actionError = reviewActions?.error ?? fallbackError;
+
+  async function approveFallback() {
+    const reviewGate = detail.run.reviewGate;
+    if (!reviewGate || fallbackApproving) return;
+    setFallbackApproving(true);
+    setFallbackError(null);
+
+    if (detail.run.runId.startsWith("demo-")) {
+      const now = new Date().toISOString();
+      const ordered = [...detail.stages].sort((a, b) => a.order - b.order);
+      const gateIndex = ordered.findIndex((stage) => stage.stageId === reviewGate.stageId);
+      const next = ordered.slice(gateIndex + 1).find((stage) => stage.status === "queued");
+      setDetail((current) => ({
+        ...current,
+        run: {
+          ...current.run,
+          reviewGate: null,
+          currentStageType: next?.type ?? current.run.currentStageType,
+          message: next
+            ? `${GENERATION_STAGE_LABELS[next.type]} is in progress.`
+            : "Review approved. Continuing the run.",
+          updatedAt: now,
+        },
+        stages: current.stages.map((stage) => {
+          if (stage.stageId === reviewGate.stageId) return { ...stage, reviewedAt: now };
+          if (next && stage.stageId === next.stageId) {
+            return {
+              ...stage,
+              status: "running",
+              startedAt: now,
+              message: `${GENERATION_STAGE_LABELS[next.type]} started.`,
+            };
+          }
+          return stage;
+        }),
+      }));
+      setFallbackApproving(false);
+      return;
+    }
+
+    try {
+      const client = new GenerationRunClient();
+      const nextDetail = await client.approveRun(detail.run.projectId, detail.run.runId);
+      setDetail({
+        run: nextDetail.run,
+        stages: nextDetail.stages,
+        stageItems: nextDetail.stageItems,
+      });
+    } catch (err) {
+      setFallbackError(
+        err instanceof GenerationRunRequestError
+          ? err.message
+          : "Could not approve this review gate.",
+      );
+    } finally {
+      setFallbackApproving(false);
+    }
+  }
+
+  const onApprove = reviewActions?.onApprove ?? approveFallback;
 
   return (
     <div className="progress-shell">
@@ -36,10 +129,10 @@ export function ProgressView({ run, stages, reviewActions, alternateRuns }: Prog
         <div>
           <p className="progress-eyebrow">Generation run</p>
           <h1 className="progress-title">
-            {run.projectId === "demo-project" ? "Demo project" : run.projectId}
+            {detail.run.projectId === "demo-project" ? "Demo project" : detail.run.projectId}
           </h1>
           <p className="progress-subtitle muted">
-            Run <code>{run.runId}</code>
+            Run <code>{detail.run.runId}</code>
           </p>
         </div>
         {alternateRuns && alternateRuns.length > 0 ? (
@@ -49,9 +142,9 @@ export function ProgressView({ run, stages, reviewActions, alternateRuns }: Prog
               {alternateRuns.map((alt) => (
                 <li key={alt.runId}>
                   <Link
-                    href={`/projects/${run.projectId}/runs/${alt.runId}`}
+                    href={`/projects/${detail.run.projectId}/runs/${alt.runId}`}
                     className={`progress-alt-link${
-                      alt.runId === run.runId ? " active" : ""
+                      alt.runId === detail.run.runId ? " active" : ""
                     }`}
                   >
                     {alt.label}
@@ -65,49 +158,78 @@ export function ProgressView({ run, stages, reviewActions, alternateRuns }: Prog
 
       <div className="progress-body">
         <section className="progress-main">
-          {terminal ? <TerminalState run={run} /> : <StatusBanner run={run} />}
+          {terminal ? <TerminalState run={detail.run} /> : <StatusBanner run={detail.run} />}
 
-          {run.reviewGate ? (
-            <div className="progress-empty-card awaiting-review-card" role="status">
-              <h2 className="progress-card-heading">Ready for your review</h2>
-              <p className="muted">
-                {reviewStage?.label ?? GENERATION_STAGE_LABELS[run.reviewGate.stageType]} is paused
-                so you can inspect the output before the run continues.
-              </p>
-              {reviewActions ? (
+          {detail.run.reviewGate ? (
+            <section
+              className="review-gate-card awaiting-review-card"
+              aria-labelledby="review-gate-heading"
+            >
+              <div className="review-gate-head">
+                <div>
+                  <p className="progress-eyebrow">Awaiting review</p>
+                  <h2 id="review-gate-heading" className="progress-card-heading">
+                    {reviewStage?.label ??
+                      GENERATION_STAGE_LABELS[detail.run.reviewGate.stageType]}{" "}
+                    is ready
+                  </h2>
+                </div>
                 <div className="review-actions">
                   <button
                     type="button"
                     className="primary compact"
-                    onClick={reviewActions.onApprove}
-                    disabled={!!reviewActions.pending}
+                    onClick={onApprove}
+                    disabled={!!pending}
                   >
-                    {reviewActions.pending === "approve" ? "Approving..." : "Approve & continue"}
+                    {pending === "approve" ? "Approving..." : "Approve & continue"}
                   </button>
-                  <button
-                    type="button"
-                    className="secondary compact"
-                    onClick={reviewActions.onReject}
-                    disabled={!!reviewActions.pending}
-                  >
-                    {reviewActions.pending === "reject" ? "Regenerating..." : "Reject / regenerate"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary compact"
-                    onClick={reviewActions.onCancel}
-                    disabled={!!reviewActions.pending}
-                  >
-                    {reviewActions.pending === "cancel" ? "Canceling..." : "Cancel generation"}
-                  </button>
+                  {reviewActions ? (
+                    <>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={reviewActions.onReject}
+                      disabled={!!pending}
+                    >
+                      {pending === "reject"
+                        ? "Regenerating..."
+                        : "Reject / regenerate"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={reviewActions.onCancel}
+                      disabled={!!pending}
+                    >
+                      {pending === "cancel" ? "Canceling..." : "Cancel generation"}
+                    </button>
+                    </>
+                  ) : null}
                 </div>
-              ) : null}
-              {reviewActions?.error ? (
-                <p className="lp-prompt-error" role="alert">
-                  {reviewActions.error}
+              </div>
+              <p className="review-gate-copy">
+                {reviewStage?.message ??
+                  "Inspect this stage's output before the next generation stage starts."}
+              </p>
+              {actionError ? (
+                <p className="review-gate-error" role="alert">
+                  {actionError}
                 </p>
               ) : null}
-            </div>
+              {reviewItems.length > 0 ? (
+                <div className="stage-item-grid review-output-grid">
+                  {reviewItems.map((item) => (
+                    <StageItemCard key={item.itemId} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <div className="review-output-empty">
+                  <span className="muted">
+                    This stage has no itemized output yet. Review the stage summary above.
+                  </span>
+                </div>
+              )}
+            </section>
           ) : null}
 
           <div className="progress-empty-card">
@@ -121,7 +243,7 @@ export function ProgressView({ run, stages, reviewActions, alternateRuns }: Prog
 
         <aside className="progress-rail-pane" aria-label="Stage rail">
           <h2 className="progress-rail-heading">Stages</h2>
-          <StageRail stages={stages} reviewGate={run.reviewGate} />
+          <StageRail stages={detail.stages} reviewGate={detail.run.reviewGate} />
         </aside>
       </div>
     </div>

@@ -20,6 +20,7 @@ import {
 
 export type DemoRunId =
   | "demo-running"
+  | "demo-review"
   | "demo-queued"
   | "demo-succeeded"
   | "demo-failed"
@@ -27,6 +28,7 @@ export type DemoRunId =
 
 export const DEMO_RUN_IDS: DemoRunId[] = [
   "demo-running",
+  "demo-review",
   "demo-queued",
   "demo-succeeded",
   "demo-failed",
@@ -195,6 +197,76 @@ function buildQueued(now: Date): BuiltRun {
   };
 }
 
+function buildReview(now: Date): BuiltRun {
+  const runId = "demo-review";
+  const startedAt = offset(now, -2 * 60_000 - 15_000);
+  const gateEnteredAt = offset(now, -24_000);
+  const stages: GenerationStage[] = [
+    stage(runId, "brief_intake", {
+      status: "succeeded",
+      progressPercent: 100,
+      startedAt: iso(offset(now, -2 * 60_000 - 15_000)),
+      completedAt: iso(offset(now, -2 * 60_000 - 10_000)),
+      message: "Saved your brief.",
+    }),
+    stage(runId, "creative_plan", {
+      status: "succeeded",
+      progressPercent: 100,
+      startedAt: iso(offset(now, -2 * 60_000 - 8_000)),
+      completedAt: iso(gateEnteredAt),
+      message: "Planned 5 beats for a product launch cut.",
+      isReviewGate: true,
+    }),
+    stage(runId, "asset_generation", { status: "queued" }),
+    stage(runId, "audio_generation", { status: "queued" }),
+    stage(runId, "timeline_assembly", { status: "queued" }),
+    stage(runId, "quality_review", { status: "queued" }),
+    stage(runId, "export", { status: "queued" }),
+  ];
+  const items: GenerationStageItem[] = [
+    item({
+      itemId: `${runId}-plan-1`,
+      stageId: `${runId}-creative_plan`,
+      kind: "timeline",
+      label: "Creative plan",
+      status: "succeeded",
+      artifactId: "plan-review-1",
+    }),
+    item({
+      itemId: `${runId}-plan-2`,
+      stageId: `${runId}-creative_plan`,
+      kind: "caption",
+      label: "Narration direction",
+      status: "succeeded",
+      artifactId: "script-review-1",
+    }),
+  ];
+
+  return {
+    run: {
+      runId,
+      projectId: "demo-project",
+      briefVersionId: "brief-r",
+      status: "running",
+      currentStageType: "creative_plan",
+      progressPercent: 24,
+      message: "Creative plan is ready for review.",
+      createdAt: iso(offset(startedAt, -1_000)),
+      updatedAt: iso(gateEnteredAt),
+      startedAt: iso(startedAt),
+      reviewGates: ["creative_plan", "asset_generation"],
+      reviewGate: {
+        stageType: "creative_plan",
+        stageId: `${runId}-creative_plan`,
+        state: "awaiting_review",
+        enteredAt: iso(gateEnteredAt),
+      },
+    },
+    stages,
+    items,
+  };
+}
+
 function buildSucceeded(now: Date): BuiltRun {
   const runId = "demo-succeeded";
   const startedAt = offset(now, -8 * 60_000 - 14_000);
@@ -340,6 +412,7 @@ function buildCanceled(now: Date): BuiltRun {
 
 const BUILDERS: Record<DemoRunId, (now: Date) => BuiltRun> = {
   "demo-running": buildRunning,
+  "demo-review": buildReview,
   "demo-queued": buildQueued,
   "demo-succeeded": buildSucceeded,
   "demo-failed": buildFailed,

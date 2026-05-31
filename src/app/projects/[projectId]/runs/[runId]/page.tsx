@@ -6,6 +6,10 @@ import {
   buildDemoRun,
   isDemoRunId,
 } from "@/lib/generation-run/fixtures";
+import {
+  assemblePayload,
+  getGenerationRunStore,
+} from "@/lib/v1/generation-runs";
 
 // Per docs/scopes/generation-progress-ui.md, this route is the future home of
 // the live progress polling client. Until PRs #1–#5 land it renders against
@@ -13,6 +17,7 @@ import {
 
 const DEMO_LABELS: Record<DemoRunId, string> = {
   "demo-running": "Running",
+  "demo-review": "Awaiting review",
   "demo-queued": "Queued",
   "demo-succeeded": "Succeeded",
   "demo-failed": "Failed",
@@ -21,7 +26,7 @@ const DEMO_LABELS: Record<DemoRunId, string> = {
 
 export const dynamic = "force-dynamic";
 
-export default function GenerationRunPage({
+export default async function GenerationRunPage({
   params,
 }: {
   params: { projectId: string; runId: string };
@@ -33,6 +38,19 @@ export default function GenerationRunPage({
       const snapshot = buildDemoRun("demo-running", new Date());
       return renderShell(snapshot, params.projectId);
     }
+
+    const store = getGenerationRunStore();
+    const payload = await assemblePayload(store, params.runId);
+    if (payload?.run.projectId === params.projectId) {
+      return (
+        <ProgressView
+          run={payload.run}
+          stages={payload.stages}
+          stageItems={payload.stageItems}
+        />
+      );
+    }
+
     return (
       <div className="progress-shell">
         <header className="progress-header">
@@ -83,6 +101,7 @@ function renderShell(
     <ProgressView
       run={run}
       stages={snapshot.stages}
+      stageItems={snapshot.items}
       alternateRuns={alternateRuns}
     />
   );
