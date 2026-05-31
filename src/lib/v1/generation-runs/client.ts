@@ -28,6 +28,11 @@ export interface RetryGenerationRunOptions {
   itemId?: string;
 }
 
+export interface RejectGenerationRunOptions {
+  stageType?: string;
+  note?: string;
+}
+
 export class GenerationRunRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -117,6 +122,24 @@ export class GenerationRunClient {
       "POST",
       `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}/approve`,
       {},
+      signal,
+    );
+    return (await response.json()) as GenerationRunDetail;
+  }
+
+  async rejectRun(
+    projectId: string,
+    runId: string,
+    options: RejectGenerationRunOptions = {},
+    signal?: AbortSignal,
+  ): Promise<GenerationRunDetail> {
+    const body: Record<string, string> = {};
+    if (options.stageType) body.stageType = options.stageType;
+    if (options.note) body.note = options.note;
+    const response = await this.request(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}/reject`,
+      body,
       signal,
     );
     return (await response.json()) as GenerationRunDetail;

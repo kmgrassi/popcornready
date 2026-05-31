@@ -4,18 +4,19 @@ import { errorResponse, jsonResponse } from "@/lib/v1/http";
 import { requestId as newRequestId } from "@/lib/v1/ids";
 import {
   assemblePayload,
-  cancelGenerationRun,
   getGenerationRunStore,
+  rejectReviewGate,
   requireRun,
 } from "@/lib/v1/generation-runs";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/v1/projects/:projectId/generation-runs/:runId/cancel
-// Cancels an active or awaiting-review run. Terminal runs return
-// job_not_cancelable so late cancel/approve races preserve terminal state.
+// POST /api/v1/projects/:projectId/generation-runs/:runId/reject
+// Reuses the retry path semantics for an awaiting-review gate: the gated stage
+// is reset for regeneration (stale artifacts/items dropped) and the gate is
+// cleared, so the stage must actually re-run before it can re-pause for review.
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { projectId: string; runId: string } }
 ) {
   const requestId = newRequestId();
@@ -24,8 +25,15 @@ export async function POST(
     const payload = await assemblePayload(store, params.runId);
     requireRun(payload, params.runId, params.projectId);
 
-    const canceled = await cancelGenerationRun(store, params.runId);
-    return jsonResponse(canceled, requestId);
+    let body: unknown = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
+
+    const rejected = await rejectReviewGate(store, params.runId, body);
+    return jsonResponse(rejected, requestId);
   } catch (err) {
     return errorResponse(err, requestId);
   }

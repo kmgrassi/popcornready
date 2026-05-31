@@ -355,7 +355,7 @@ export interface GenerationStage {
   order: number;
   status: GenerationRunStatus;
   isReviewGate?: boolean;
-  reviewedAt?: string;
+  reviewedAt?: string | null;
   progressPercent?: number;
   message?: string;
   startedAt?: string;
