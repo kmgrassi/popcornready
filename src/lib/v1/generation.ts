@@ -1,5 +1,11 @@
 import { createHash } from "crypto";
 import { critique as realCritique, planEdit as realPlanEdit, selectClips as realSelectClips } from "../agent";
+import {
+  EDIT_GRAPH_COMPILER_VERSION,
+  buildEditGraphFromTimeline,
+  compileEditGraphToTimeline,
+  markGraphTimelineProjection,
+} from "../edit-graph";
 import { applyPatches, sanitizeTimeline } from "../timeline";
 import { mergeStoryContext } from "../story-context";
 import { Clip, StoryContext } from "../types";
@@ -615,16 +621,36 @@ export async function runGenerationJob(
     );
     await progress.updateRun({ progressPercent: 90, message: "Saving the timeline." });
     const now = new Date().toISOString();
+    const editGraph = buildEditGraphFromTimeline({
+      id: ids.editGraphId(),
+      projectId: job.projectId,
+      briefVersionId: input.briefVersionId,
+      ...(input.compositionId ? { compositionId: input.compositionId } : {}),
+      jobId: job.id,
+      goal: brief.brief.goal,
+      targetLengthSec: brief.brief.targetLengthSec,
+      aspectRatio: brief.brief.aspectRatio,
+      style: brief.brief.style,
+      storyContext,
+      plan,
+      clips,
+      timeline,
+      createdAt: now,
+    });
+    const compiledTimeline = compileEditGraphToTimeline(editGraph, {
+      fps: timeline.fps,
+      ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
+    });
     const versioned: VersionedTimeline = {
       id: ids.timelineId(),
       schemaVersion: SCHEMA.timeline,
       projectId: job.projectId,
       briefVersionId: input.briefVersionId,
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
-      aspectRatio: timeline.aspectRatio,
-      fps: timeline.fps,
+      aspectRatio: compiledTimeline.aspectRatio,
+      fps: compiledTimeline.fps,
       ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
-      segments: timeline.segments,
+      segments: compiledTimeline.segments,
       provenance: {
         briefVersionId: input.briefVersionId,
         ...(input.compositionId ? { compositionId: input.compositionId } : {}),
@@ -633,9 +659,15 @@ export async function runGenerationJob(
         criticReport: report,
         appliedPatchCount: patches.length,
       },
+      derivedFrom: {
+        editGraphId: editGraph.id,
+        compilerVersion: EDIT_GRAPH_COMPILER_VERSION,
+        compiledAt: now,
+      },
       createdBy: { jobId: job.id },
       createdAt: now,
     };
+    await store.saveEditGraph(markGraphTimelineProjection(editGraph, versioned.id, now));
     await store.saveTimeline(versioned);
 
     const finished = await saveJobUpdate(
@@ -644,7 +676,7 @@ export async function runGenerationJob(
       {
         status: "succeeded",
         progress: { currentStep: "saving_artifact", percent: 100 },
-        result: { timelineIds: [versioned.id] },
+        result: { timelineIds: [versioned.id], editGraphIds: [editGraph.id] },
       },
       logger
     );

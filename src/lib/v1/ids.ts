@@ -13,6 +13,7 @@ export const briefVersionId = () => newId("briefv");
 export const assetId = () => newId("asset");
 export const compositionId = () => newId("comp");
 export const jobId = () => newId("job");
+export const editGraphId = () => newId("eg");
 export const timelineId = () => newId("tl");
 export const requestId = () => newId("req");
 export const generationRunId = () => newId("genrun");
