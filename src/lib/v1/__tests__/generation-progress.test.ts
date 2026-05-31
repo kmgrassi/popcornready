@@ -73,7 +73,7 @@ function createRecordingEmitter(): { emitter: RunProgressEmitter; events: EventR
           itemId,
           code: error.code,
           message: error.message,
-          retryable: error.retryable,
+          retryable: error.retryable ?? false,
         });
       },
     };
@@ -107,7 +107,7 @@ function createRecordingEmitter(): { emitter: RunProgressEmitter; events: EventR
           type,
           code: error.code,
           message: error.message,
-          retryable: error.retryable,
+          retryable: error.retryable ?? false,
         });
       },
       async cancel(opts) {

@@ -30,14 +30,44 @@ export function PromptComposer() {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function start() {
+  async function start() {
     const goal = value.trim();
     if (!goal || submitting) return;
     setSubmitting(true);
-    router.push(
-      `/studio?goal=${encodeURIComponent(goal)}&length=30&autostart=1`
-    );
+    setError(null);
+    try {
+      // The landing prompt is "prompt-only": send the goal plus the same
+      // hidden advanced defaults the studio would have used, so the run is
+      // configured identically whether it is started from here or from the
+      // editor.
+      const response = await fetch(
+        "/api/v1/projects/default/generation-runs",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: goal,
+            targetLengthSec: 30,
+            style: "fast-paced social ad",
+            aspectRatio: "9:16",
+          }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok || !data.run?.runId) {
+        throw new Error(
+          data?.error?.message || "Unable to start video generation."
+        );
+      }
+      router.push(
+        `/studio?runId=${encodeURIComponent(data.run.runId)}&goal=${encodeURIComponent(goal)}&length=30`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -76,9 +106,14 @@ export function PromptComposer() {
         disabled={!value.trim() || submitting}
       >
         {submitting
-          ? "Opening the studio…"
+          ? "Starting your video…"
           : "Create my 30-second video →"}
       </button>
+      {error && (
+        <p className="lp-prompt-error" role="alert">
+          {error}
+        </p>
+      )}
       <p className="lp-prompt-hint">
         No clips needed — aividi generates the visuals and cuts the video for
         you. Bring your own keys for real footage, or preview with placeholders.
