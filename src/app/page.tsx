@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { promises as fs } from "fs";
 import path from "path";
+import { LogoMark } from "@/components/LogoMark";
 import { PromptComposer } from "@/components/PromptComposer";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -150,6 +151,16 @@ function heatmapTooltip(app: string, column: string, score: number) {
   return `${app}: ${column} is ${HEATMAP_LEVELS[score].toLowerCase()}. ${explanation}`;
 }
 
+function HeatLogoScale({ score }: { score: number }) {
+  return (
+    <span className={`lp-heat-scale count-${score}`} aria-hidden="true">
+      {Array.from({ length: score }, (_, index) => (
+        <LogoMark className="lp-heat-mark" key={index} />
+      ))}
+    </span>
+  );
+}
+
 const PRICING = [
   {
     name: "Self-host",
@@ -264,7 +275,10 @@ export default async function LandingPage() {
     <div className="landing">
       <header className="lp-nav">
         <div className="lp-nav-inner">
-          <span className="lp-logo">Popcorn Ready</span>
+          <span className="lp-logo">
+            <LogoMark className="lp-logo-mark" />
+            Popcorn Ready
+          </span>
           <nav className="lp-nav-links">
             <a href="#how">How it works</a>
             <a href="#pricing">Pricing</a>
@@ -358,7 +372,7 @@ export default async function LandingPage() {
                       )}
                     >
                       <em>{HEATMAP_COLUMNS[index]}</em>
-                      <i />
+                      <HeatLogoScale score={score} />
                       <span className="lp-heat-tip">
                         {heatmapTooltip(row.app, HEATMAP_COLUMNS[index], score)}
                       </span>
@@ -370,16 +384,28 @@ export default async function LandingPage() {
             </div>
             <div className="lp-heatmap-legend" aria-hidden="true">
               <span>
-                <i className="level-0" /> Minimal
+                <span className="lp-heat-scale count-0" /> Minimal
               </span>
               <span>
-                <i className="level-1" /> Light
+                <span className="lp-heat-scale count-1">
+                  <LogoMark className="lp-heat-mark" />
+                </span>
+                Light
               </span>
               <span>
-                <i className="level-2" /> Medium
+                <span className="lp-heat-scale count-2">
+                  <LogoMark className="lp-heat-mark" />
+                  <LogoMark className="lp-heat-mark" />
+                </span>
+                Medium
               </span>
               <span>
-                <i className="level-3" /> Strong
+                <span className="lp-heat-scale count-3">
+                  <LogoMark className="lp-heat-mark" />
+                  <LogoMark className="lp-heat-mark" />
+                  <LogoMark className="lp-heat-mark" />
+                </span>
+                Strong
               </span>
             </div>
           </div>
