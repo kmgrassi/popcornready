@@ -35,7 +35,19 @@ export async function POST(req: NextRequest) {
       patches,
       project.clips
     );
-    project.editGraph = revision.editGraph;
+    // applyPatchesViaEditGraph rebuilds the graph from the current timeline, so
+    // its revisionOperations only contain the patches applied this call. Seed
+    // them with any previously persisted history so earlier revisions survive.
+    project.editGraph = {
+      ...revision.editGraph,
+      edit: {
+        ...revision.editGraph.edit,
+        revisionOperations: [
+          ...(project.editGraph?.edit.revisionOperations ?? []),
+          ...revision.editGraph.edit.revisionOperations,
+        ],
+      },
+    };
     project.timeline = revision.timeline;
     project.chat.push({ role: "user", content: message });
     project.chat.push({
