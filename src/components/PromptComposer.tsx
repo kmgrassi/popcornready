@@ -235,19 +235,17 @@ export function PromptComposer() {
         }}
       />
       <div className="lp-templates">
-        <span className="lp-templates-label">
-          <span className="lp-template-icon" aria-hidden="true">
-            {activeTemplate.icon}
-          </span>
-          Template idea
-        </span>
+        <span className="lp-templates-label">Template idea</span>
         <div className="lp-template-roller" aria-label="Video templates">
           <div
             key={activeTemplate.label}
             className="lp-template-item"
             title={activeTemplate.prompt}
           >
-            <span>{activeTemplate.text}</span>
+            <span className="lp-template-icon" aria-hidden="true">
+              {activeTemplate.icon}
+            </span>
+            <span className="lp-template-text">{activeTemplate.text}</span>
           </div>
         </div>
         <button
