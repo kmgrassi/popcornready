@@ -46,6 +46,7 @@ export interface EditGraphSelectSegmentDecision {
   id: string;
   operation: "select_segment";
   beatId: string;
+  role: string;
   sourceSegmentIds: string[];
   timelineSegmentId?: string;
   rationale?: string;
@@ -177,6 +178,7 @@ export function synthesizeEditGraph(input: {
         id: `decision_${segment.id || index + 1}`,
         operation: "select_segment",
         beatId: beatIdsByRole.get(segment.role) || fallbackBeatId,
+        role: segment.role,
         sourceSegmentIds: [sourceSegmentId(segment, index)],
         ...(segment.id ? { timelineSegmentId: segment.id } : {}),
         rationale: segment.reason,
@@ -210,7 +212,7 @@ export function compileEditGraphToTimeline(graph: EditGraph): Timeline {
       clipId: source.assetId,
       sourceInSec: msToSec(source.startMs),
       sourceOutSec: msToSec(source.endMs),
-      role: beat?.role || decision.beatId,
+      role: decision.role || beat?.role || decision.beatId,
       reason: decision.rationale || "",
       ...(decision.caption === undefined ? {} : { caption: decision.caption }),
     } as TimelineSegment);

@@ -103,6 +103,36 @@ test("compiler preserves pre-sanitize planner output without segment ids", () =>
   );
 });
 
+test("compiler preserves segment roles that do not match a plan beat", () => {
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      {
+        id: "seg_1",
+        clipId: "clip_a",
+        sourceInSec: 0,
+        sourceOutSec: 3,
+        role: "product close-up",
+        reason: "descriptive role with no matching beat",
+      },
+    ],
+  };
+
+  assert.equal(
+    JSON.stringify(
+      compileTimelineViaEditGraph({
+        id: "graph_unmatched",
+        goal: "make a short product demo",
+        plan,
+        timeline,
+        clips,
+      })
+    ),
+    JSON.stringify(timeline)
+  );
+});
+
 test("compiler is pure and does not mutate the source graph", () => {
   const timeline: Timeline = {
     aspectRatio: "9:16",
