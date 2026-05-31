@@ -639,8 +639,8 @@ export function Editor({
   return (
     <div className="app">
       <div className="col">
-        <h1>aividi</h1>
-        <p className="sub">AI-native video editor — a goal → generated visuals → an editable cut.</p>
+        <h1>Popcorn Ready</h1>
+        <p className="sub">AI-native video editor — clips + a goal → an editable cut.</p>
 
         {error && <div className="error">{error}</div>}
         {busy && <div className="spinner">⏳ {busy}</div>}

@@ -21,7 +21,7 @@ import { resolveExportDuration, runExportJob, runRevisionJob } from "../workers"
 import { Patch, Project } from "../../types";
 
 async function tempStore(): Promise<AgentApiStore> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-jobs-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-jobs-"));
   return new AgentApiStore(dir);
 }
 

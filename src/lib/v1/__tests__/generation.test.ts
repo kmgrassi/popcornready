@@ -4,6 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+// Keep the v1 logger quiet so node:test output is not interleaved with the
+// structured JSON lines runGenerationJob emits on every step transition.
+const previousLogLevel = process.env.AIVIDI_LOG_LEVEL;
+test.before(() => {
+  process.env.AIVIDI_LOG_LEVEL = "silent";
+});
+
+test.after(() => {
+  if (previousLogLevel === undefined) {
+    delete process.env.AIVIDI_LOG_LEVEL;
+  } else {
+    process.env.AIVIDI_LOG_LEVEL = previousLogLevel;
+  }
+});
+
 import { resolveActor } from "../actor";
 import { ApiError } from "../errors";
 import {
@@ -69,7 +84,7 @@ const fakeDeps: GenerationDeps = {
 };
 
 async function withStore(fn: (store: V1Store) => Promise<void>): Promise<void> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-v1-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-"));
   try {
     await fn(createStore(dir));
   } finally {
@@ -340,6 +355,71 @@ test("idempotent retry replays the original job even if asset state changed", as
       idempotencyKey: "retry-key",
     });
     assert.equal(retry.id, first.id, "retry replays the original job, not asset_not_ready");
+  });
+});
+
+test("job persists requestId for correlation, and tracks stepStartedAt", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+      requestId: "req_observe_1",
+    });
+
+    assert.equal(job.requestId, "req_observe_1");
+    assert.equal(job.progress.currentStep, "validating_request");
+    assert.ok(job.progress.stepStartedAt, "stepStartedAt is set on creation");
+
+    const done = await runGenerationJob(store, job.id, fakeDeps);
+    assert.equal(done.status, "succeeded");
+    assert.equal(done.requestId, "req_observe_1");
+    assert.ok(done.progress.stepStartedAt, "stepStartedAt is preserved after run");
+
+    // The persisted job (loaded fresh) must keep the correlation ID so a poll
+    // after server restart still ties back to the originating request.
+    const reloaded = await store.getJob(job.id);
+    assert.equal(reloaded?.requestId, "req_observe_1");
+  });
+});
+
+test("provider errors are redacted before being persisted on the job", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const leakyDeps: GenerationDeps = {
+      ...fakeDeps,
+      async planEdit() {
+        throw new Error(
+          "OpenAI request failed (401): invalid Bearer sk-AbCdEfGhIjKlMnOpQrStUv12345678 token leaked"
+        );
+      },
+    };
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+      requestId: "req_redact_1",
+    });
+
+    const done = await runGenerationJob(store, job.id, leakyDeps);
+    assert.equal(done.status, "failed");
+    assert.ok(done.error, "job.error is populated");
+    assert.doesNotMatch(
+      done.error!.message,
+      /sk-AbCdEfGh/,
+      "secret-like token must not appear in persisted job error"
+    );
+    assert.match(done.error!.message, /\[REDACTED\]/);
   });
 });
 

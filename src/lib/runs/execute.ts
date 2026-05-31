@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { critique, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
+import { GenerativeProviderName } from "@/lib/generative/types";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
@@ -37,6 +38,7 @@ import { GenerationRun } from "./types";
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
 type Mode = "video" | "image";
+type VisualProvider = Extract<GenerativeProviderName, "openai" | "gemini" | "mock">;
 
 function newAssetId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
@@ -47,7 +49,7 @@ function oneShotVideoEnabled(): boolean {
   return !["off", "false", "0", "no"].includes(v);
 }
 
-function resolveMode(): { mode: Mode; provider: string } {
+function resolveMode(): { mode: Mode; provider: VisualProvider } {
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
   const hasGemini = !!process.env.GEMINI_API_KEY;
   if (oneShotVideoEnabled()) {
@@ -97,7 +99,7 @@ function beatPrompt(
 
 async function generateBeatClip(input: {
   mode: Mode;
-  provider: string;
+  provider: VisualProvider;
   prompt: string;
   description: string;
   size: string;
@@ -106,13 +108,29 @@ async function generateBeatClip(input: {
 }): Promise<Clip> {
   const kind = input.mode === "video" ? "video" : "image";
   const provider = providerFor(input.provider);
-  const result = await provider.generateAsset({
-    provider: provider.name,
-    kind,
+  const baseRequest = {
     prompt: input.prompt,
     size: input.size,
     ...(kind === "video" ? { seconds: input.seconds } : {}),
-  });
+  };
+  const result =
+    input.provider === "gemini"
+      ? await provider.generateAsset({
+          provider: "gemini",
+          kind: "video",
+          ...baseRequest,
+        })
+      : input.provider === "openai"
+        ? await provider.generateAsset({
+            provider: "openai",
+            kind,
+            ...baseRequest,
+          })
+        : await provider.generateAsset({
+            provider: "mock",
+            kind,
+            ...baseRequest,
+          });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newAssetId(kind === "video" ? "vid" : "img");
   const filename = `${id}.${result.extension}`;

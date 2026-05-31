@@ -48,7 +48,7 @@ export function PromptComposer() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goal,
+            prompt: goal,
             targetLengthSec: 30,
             style: "fast-paced social ad",
             aspectRatio: "9:16",

@@ -19,8 +19,8 @@ const localAuth: AuthContext = {
 };
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-v1-store-"));
-  sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-v1-src-"));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-store-"));
+  sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-src-"));
   process.env.AIVIDI_LOCAL_DIR = tmpDir;
   const created = await createProject({ workspaceId: "ws_local", name: "Host" });
   project = created.project;

@@ -169,6 +169,7 @@ export default async function LandingPage() {
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">
               GitHub
             </a>
+            <Link href="/admin">Admin</Link>
             <Link className="lp-nav-cta" href="/studio">
               Open studio
             </Link>

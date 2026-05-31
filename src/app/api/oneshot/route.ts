@@ -14,6 +14,10 @@ import {
   Timeline,
   TimelineSegment,
 } from "@/lib/types";
+import {
+  OpenAIVideoSeconds,
+  normalizeOpenAIVideoSeconds,
+} from "@/lib/generative/types";
 import { mergeStoryContext } from "@/lib/story-context";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 
@@ -39,12 +43,18 @@ function oneShotVideoEnabled(): boolean {
   return !["off", "false", "0", "no"].includes(v);
 }
 
-// Resolve the generation mode and provider from the kill switch, available
-// provider keys, and any explicit request override. Always degrades to a mode
-// that can actually run, so the one-shot never hard-fails on configuration.
-function resolveMode(body: any): { mode: OneShotMode; provider: string } {
-  const hasOpenAI = !!process.env.OPENAI_API_KEY;
-  const hasGemini = !!process.env.GEMINI_API_KEY;
+// Resolve the generation mode and provider from the kill switch and available
+// provider keys. One-shot explicitly does not support mock fallback.
+function resolveMode(body: any): {
+  mode: OneShotMode;
+  provider: "openai" | "gemini";
+} {
+  const hasOpenAI = Boolean((process.env.OPENAI_API_KEY || "").trim());
+  const hasGemini = Boolean((process.env.GEMINI_API_KEY || "").trim());
+  const requestedProvider =
+    typeof body.provider === "string"
+      ? body.provider.toLowerCase().trim()
+      : undefined;
   const requested =
     body.mode === "image" || body.mode === "video"
       ? (body.mode as OneShotMode)
@@ -52,20 +62,55 @@ function resolveMode(body: any): { mode: OneShotMode; provider: string } {
   const wantVideo = requested ? requested === "video" : oneShotVideoEnabled();
 
   if (wantVideo) {
-    if (body.provider === "gemini" && hasGemini) {
+    if (requestedProvider === "mock") {
+      throw new Error(
+        "Mock provider is disabled for one-shot. Remove provider='mock' to use real generation."
+      );
+    }
+    if (requestedProvider === "gemini") {
+      if (!hasGemini) {
+        throw new Error(
+          "One-shot video requested provider='gemini', but GEMINI_API_KEY is not configured."
+        );
+      }
       return { mode: "video", provider: "gemini" };
+    }
+    if (requestedProvider && requestedProvider !== "openai") {
+      throw new Error(
+        `One-shot video currently supports only openai or gemini providers. Received: ${requestedProvider}`
+      );
+    }
+    if (requestedProvider === "openai") {
+      if (!hasOpenAI) {
+        throw new Error(
+          "One-shot video requested provider='openai', but OPENAI_API_KEY is not configured."
+        );
+      }
+      return { mode: "video", provider: "openai" };
     }
     if (hasOpenAI) return { mode: "video", provider: "openai" };
     if (hasGemini) return { mode: "video", provider: "gemini" };
-    // No video-capable key — fall through to image mode below.
+    throw new Error(
+      "No video-capable provider is configured for one-shot. Set OPENAI_API_KEY or GEMINI_API_KEY."
+    );
   }
 
-  const imageProvider =
-    body.provider && body.provider !== "gemini"
-      ? String(body.provider)
-      : hasOpenAI
-        ? "openai"
-        : "mock";
+  if (requestedProvider === "mock") {
+    throw new Error(
+      "Mock provider is disabled for one-shot. Remove provider='mock' to use real image generation."
+    );
+  }
+  if (requestedProvider && requestedProvider !== "openai") {
+    throw new Error(
+      `One-shot image mode currently supports only openai provider. Received: ${requestedProvider}`
+    );
+  }
+  if (!hasOpenAI) {
+    throw new Error(
+      "One-shot image mode requires OPENAI_API_KEY, but it is not configured."
+    );
+  }
+  const imageProvider = "openai";
   return { mode: "image", provider: imageProvider };
 }
 
@@ -77,13 +122,12 @@ function imageSizeForAspect(ar: AspectRatio): string {
 
 function videoSizeForAspect(ar: AspectRatio): string {
   if (ar === "16:9") return "1280x720";
-  if (ar === "1:1") return "1024x1024";
+  if (ar === "1:1") return "1280x720";
   return "720x1280"; // 9:16
 }
 
-function clampSeconds(durationSec: number): number {
-  const s = Math.round(Number(durationSec) || 6);
-  return Math.min(8, Math.max(4, s));
+function clampSeconds(durationSec: number): OpenAIVideoSeconds {
+  return normalizeOpenAIVideoSeconds(durationSec);
 }
 
 function beatPrompt(
@@ -108,22 +152,40 @@ function beatPrompt(
 
 async function generateBeatClip(input: {
   mode: OneShotMode;
-  provider: string;
+  provider: "openai" | "gemini";
   prompt: string;
   description: string;
   size: string;
   displaySec: number;
-  seconds?: number;
+  seconds?: OpenAIVideoSeconds;
 }): Promise<Clip> {
   const kind = input.mode === "video" ? "video" : "image";
   const provider = providerFor(input.provider);
-  const result = await provider.generateAsset({
-    provider: provider.name,
-    kind,
-    prompt: input.prompt,
-    size: input.size,
-    ...(kind === "video" ? { seconds: input.seconds } : {}),
-  });
+  let result;
+  if (input.mode === "video" && input.provider === "openai") {
+    result = await provider.generateAsset({
+      provider: "openai",
+      kind: "video",
+      prompt: input.prompt,
+      size: input.size,
+      seconds: input.seconds,
+    });
+  } else if (input.mode === "video" && input.provider === "gemini") {
+    result = await provider.generateAsset({
+      provider: "gemini",
+      kind: "video",
+      prompt: input.prompt,
+      size: input.size,
+      seconds: input.seconds,
+    });
+  } else {
+    result = await provider.generateAsset({
+      provider: "openai",
+      kind: "image",
+      prompt: input.prompt,
+      size: input.size,
+    });
+  }
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newId(kind === "video" ? "vid" : "img");
   const filename = `${id}.${result.extension}`;

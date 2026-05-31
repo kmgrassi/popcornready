@@ -16,6 +16,7 @@ export type ErrorCode =
   | "render_failed"
   | "model_output_invalid"
   | "rate_limited"
+  | "not_implemented"
   | "internal_error";
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -33,6 +34,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   render_failed: 500,
   model_output_invalid: 502,
   rate_limited: 429,
+  not_implemented: 501,
   internal_error: 500,
 };
 
