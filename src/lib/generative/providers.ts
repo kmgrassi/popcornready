@@ -18,6 +18,7 @@ import {
   GenerativeProviderName,
 } from "./types";
 import { createElevenLabsAudio } from "./audio";
+import { estimateCostUsd } from "./pricing";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const GEMINI_DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
@@ -229,6 +230,11 @@ async function generateOpenAIImage(
       provider: "openai",
       model: payload.model,
       prompt: payload.prompt,
+      costUsd: estimateCostUsd({
+        provider: "openai",
+        kind: "image",
+        model: payload.model,
+      }),
       providerSettings: characterProviderSettings(input),
     };
   }
@@ -254,6 +260,11 @@ async function generateOpenAIImage(
     provider: "openai",
     model: payload.model,
     prompt: payload.prompt,
+    costUsd: estimateCostUsd({
+      provider: "openai",
+      kind: "image",
+      model: payload.model,
+    }),
     providerSettings: characterProviderSettings(input),
   };
 }
@@ -302,6 +313,12 @@ async function generateOpenAIVideo(
     provider: "openai",
     model: payload.model,
     prompt: payload.prompt,
+    costUsd: estimateCostUsd({
+      provider: "openai",
+      kind: "video",
+      model: payload.model,
+      durationSec: payload.seconds,
+    }),
     providerSettings: characterProviderSettings(input),
   };
 }
@@ -397,6 +414,12 @@ async function generateGeminiVideo(
     provider: "gemini",
     model,
     prompt,
+    costUsd: estimateCostUsd({
+      provider: "gemini",
+      kind: "video",
+      model,
+      durationSec: durationSeconds,
+    }),
     providerSettings: characterProviderSettings(input),
   };
 }
@@ -483,6 +506,11 @@ const mockProvider: GenerativeProvider = {
         provider: "mock",
         model: "mock-wav",
         prompt,
+        costUsd: estimateCostUsd({
+          provider: "mock",
+          kind: "audio",
+          durationSec: input.seconds || 8,
+        }),
         providerSettings: characterProviderSettings(input),
       };
     }
@@ -496,6 +524,11 @@ const mockProvider: GenerativeProvider = {
         provider: "mock",
         model: "mock-mp4",
         prompt,
+        costUsd: estimateCostUsd({
+          provider: "mock",
+          kind: "video",
+          durationSec: input.seconds,
+        }),
         providerSettings: characterProviderSettings(input),
       };
     }
@@ -513,6 +546,7 @@ const mockProvider: GenerativeProvider = {
       provider: "mock",
       model: "mock-svg",
       prompt,
+      costUsd: estimateCostUsd({ provider: "mock", kind: "image" }),
       providerSettings: characterProviderSettings(input),
     };
   },

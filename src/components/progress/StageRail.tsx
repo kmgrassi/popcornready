@@ -3,12 +3,13 @@
 import {
   GENERATION_STAGE_LABELS,
   GenerationRunStatus,
+  RunReviewGate,
   GenerationStage,
 } from "@/lib/v1/types";
 
 interface StageRailProps {
   stages: GenerationStage[];
-  reviewStageId?: string;
+  reviewGate?: RunReviewGate | null;
 }
 
 const STATUS_LABEL: Record<GenerationRunStatus, string> = {
@@ -37,7 +38,7 @@ function StatusGlyph({ status }: { status: GenerationRunStatus }) {
   );
 }
 
-export function StageRail({ stages, reviewStageId }: StageRailProps) {
+export function StageRail({ stages, reviewGate }: StageRailProps) {
   const ordered = [...stages].sort((a, b) => a.order - b.order);
 
   return (
@@ -46,17 +47,16 @@ export function StageRail({ stages, reviewStageId }: StageRailProps) {
         const isLast = idx === ordered.length - 1;
         const label = stage.label || GENERATION_STAGE_LABELS[stage.type];
         const message = stage.error?.message ?? stage.message;
+        const awaitingReview = reviewGate?.stageId === stage.stageId;
 
         return (
           <li
             key={stage.stageId}
             className={`stage-row stage-${stage.status}${
-              stage.stageId === reviewStageId ? " awaiting-review" : ""
+              awaitingReview ? " awaiting-review" : ""
             }`}
             aria-current={
-              stage.stageId === reviewStageId || stage.status === "running"
-                ? "step"
-                : undefined
+              awaitingReview || stage.status === "running" ? "step" : undefined
             }
           >
             <div className="stage-marker">
@@ -67,14 +67,14 @@ export function StageRail({ stages, reviewStageId }: StageRailProps) {
               <div className="stage-title-row">
                 <span className="stage-title">{label}</span>
                 <span className={`stage-status-pill stage-status-${stage.status}`}>
-                  {stage.stageId === reviewStageId
-                    ? "Review"
+                  {awaitingReview
+                    ? "Ready for review"
                     : stage.reviewedAt
                       ? "Reviewed"
                       : STATUS_LABEL[stage.status]}
                 </span>
               </div>
-              {stage.stageId === reviewStageId ? (
+              {awaitingReview ? (
                 <p className="stage-message">Ready for your review.</p>
               ) : message ? (
                 <p className="stage-message">{message}</p>

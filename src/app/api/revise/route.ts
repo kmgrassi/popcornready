@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/store";
 import { revise } from "@/lib/agent";
-import { applyPatches } from "@/lib/timeline";
+import { applyPatchesViaEditGraph } from "@/lib/timeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,7 +30,25 @@ export async function POST(req: NextRequest) {
       storyContext: project.storyContext,
     });
 
-    project.timeline = applyPatches(project.timeline, patches, project.clips);
+    const revision = applyPatchesViaEditGraph(
+      project.timeline,
+      patches,
+      project.clips
+    );
+    // applyPatchesViaEditGraph rebuilds the graph from the current timeline, so
+    // its revisionOperations only contain the patches applied this call. Seed
+    // them with any previously persisted history so earlier revisions survive.
+    project.editGraph = {
+      ...revision.editGraph,
+      edit: {
+        ...revision.editGraph.edit,
+        revisionOperations: [
+          ...(project.editGraph?.edit.revisionOperations ?? []),
+          ...revision.editGraph.edit.revisionOperations,
+        ],
+      },
+    };
+    project.timeline = revision.timeline;
     project.chat.push({ role: "user", content: message });
     project.chat.push({
       role: "assistant",
@@ -38,7 +56,11 @@ export async function POST(req: NextRequest) {
     });
     await saveProject(project);
 
-    return NextResponse.json({ project, appliedPatches: patches.length });
+    return NextResponse.json({
+      project,
+      appliedPatches: patches.length,
+      graphOperations: revision.graphOperations,
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Revision failed" },

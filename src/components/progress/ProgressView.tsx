@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   GenerationRun,
@@ -21,6 +21,13 @@ interface ProgressViewProps {
   run: GenerationRun;
   stages: GenerationStage[];
   stageItems?: GenerationStageItem[];
+  reviewActions?: {
+    pending?: "approve" | "reject" | "cancel";
+    error?: string | null;
+    onApprove: () => void;
+    onReject: () => void;
+    onCancel: () => void;
+  };
   /** Optional list of other demo runs to link to from the header. */
   alternateRuns?: { runId: string; label: string }[];
 }
@@ -33,37 +40,34 @@ export function ProgressView({
   run,
   stages,
   stageItems = [],
+  reviewActions,
   alternateRuns,
 }: ProgressViewProps) {
   const [detail, setDetail] = useState({ run, stages, stageItems });
-  const [approving, setApproving] = useState(false);
-  const [approveError, setApproveError] = useState<string | null>(null);
+  const [fallbackApproving, setFallbackApproving] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
 
-  // Sync derived state when the router passes a different run into this same
-  // client component (e.g. navigating between alternate run links).
   useEffect(() => {
     setDetail({ run, stages, stageItems });
-    setApproving(false);
-    setApproveError(null);
+    setFallbackApproving(false);
+    setFallbackError(null);
   }, [run, stages, stageItems]);
 
   const terminal = isTerminal(detail.run.status);
-  const reviewGate = detail.run.reviewGate ?? null;
-  const reviewStage = reviewGate
-    ? detail.stages.find((stage) => stage.stageId === reviewGate.stageId)
+  const reviewStage = detail.run.reviewGate
+    ? detail.stages.find((stage) => stage.stageId === detail.run.reviewGate?.stageId)
     : undefined;
-  const reviewItems = useMemo(
-    () =>
-      reviewGate
-        ? detail.stageItems.filter((item) => item.stageId === reviewGate.stageId)
-        : [],
-    [detail.stageItems, reviewGate],
-  );
+  const reviewItems = detail.run.reviewGate
+    ? detail.stageItems.filter((item) => item.stageId === detail.run.reviewGate?.stageId)
+    : [];
+  const pending = reviewActions?.pending ?? (fallbackApproving ? "approve" : undefined);
+  const actionError = reviewActions?.error ?? fallbackError;
 
-  async function approveReview() {
-    if (!reviewGate || approving) return;
-    setApproving(true);
-    setApproveError(null);
+  async function approveFallback() {
+    const reviewGate = detail.run.reviewGate;
+    if (!reviewGate || fallbackApproving) return;
+    setFallbackApproving(true);
+    setFallbackError(null);
 
     if (detail.run.runId.startsWith("demo-")) {
       const now = new Date().toISOString();
@@ -94,7 +98,7 @@ export function ProgressView({
           return stage;
         }),
       }));
-      setApproving(false);
+      setFallbackApproving(false);
       return;
     }
 
@@ -107,15 +111,17 @@ export function ProgressView({
         stageItems: nextDetail.stageItems,
       });
     } catch (err) {
-      setApproveError(
+      setFallbackError(
         err instanceof GenerationRunRequestError
           ? err.message
           : "Could not approve this review gate.",
       );
     } finally {
-      setApproving(false);
+      setFallbackApproving(false);
     }
   }
+
+  const onApprove = reviewActions?.onApprove ?? approveFallback;
 
   return (
     <div className="progress-shell">
@@ -154,31 +160,60 @@ export function ProgressView({
         <section className="progress-main">
           {terminal ? <TerminalState run={detail.run} /> : <StatusBanner run={detail.run} />}
 
-          {reviewGate && reviewStage ? (
-            <section className="review-gate-card" aria-labelledby="review-gate-heading">
+          {detail.run.reviewGate ? (
+            <section
+              className="review-gate-card awaiting-review-card"
+              aria-labelledby="review-gate-heading"
+            >
               <div className="review-gate-head">
                 <div>
                   <p className="progress-eyebrow">Awaiting review</p>
                   <h2 id="review-gate-heading" className="progress-card-heading">
-                    {GENERATION_STAGE_LABELS[reviewGate.stageType]} is ready
+                    {reviewStage?.label ??
+                      GENERATION_STAGE_LABELS[detail.run.reviewGate.stageType]}{" "}
+                    is ready
                   </h2>
                 </div>
-                <button
-                  type="button"
-                  className="primary review-approve-button"
-                  onClick={approveReview}
-                  disabled={approving}
-                >
-                  {approving ? "Approving..." : "Approve & continue"}
-                </button>
+                <div className="review-actions">
+                  <button
+                    type="button"
+                    className="primary compact"
+                    onClick={onApprove}
+                    disabled={!!pending}
+                  >
+                    {pending === "approve" ? "Approving..." : "Approve & continue"}
+                  </button>
+                  {reviewActions ? (
+                    <>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={reviewActions.onReject}
+                      disabled={!!pending}
+                    >
+                      {pending === "reject"
+                        ? "Regenerating..."
+                        : "Reject / regenerate"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={reviewActions.onCancel}
+                      disabled={!!pending}
+                    >
+                      {pending === "cancel" ? "Canceling..." : "Cancel generation"}
+                    </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
               <p className="review-gate-copy">
-                {reviewStage.message ??
+                {reviewStage?.message ??
                   "Inspect this stage's output before the next generation stage starts."}
               </p>
-              {approveError ? (
+              {actionError ? (
                 <p className="review-gate-error" role="alert">
-                  {approveError}
+                  {actionError}
                 </p>
               ) : null}
               {reviewItems.length > 0 ? (
@@ -195,20 +230,20 @@ export function ProgressView({
                 </div>
               )}
             </section>
-          ) : (
-            <div className="progress-empty-card">
-              <h2 className="progress-card-heading">Generated assets</h2>
-              <p className="muted">
-                Generated visuals, audio, and timeline beats will appear here as
-                each stage produces them.
-              </p>
-            </div>
-          )}
+          ) : null}
+
+          <div className="progress-empty-card">
+            <h2 className="progress-card-heading">Generated assets</h2>
+            <p className="muted">
+              Generated visuals, audio, and timeline beats will appear here as
+              each stage produces them.
+            </p>
+          </div>
         </section>
 
         <aside className="progress-rail-pane" aria-label="Stage rail">
           <h2 className="progress-rail-heading">Stages</h2>
-          <StageRail stages={detail.stages} reviewStageId={reviewGate?.stageId} />
+          <StageRail stages={detail.stages} reviewGate={detail.run.reviewGate} />
         </aside>
       </div>
     </div>
