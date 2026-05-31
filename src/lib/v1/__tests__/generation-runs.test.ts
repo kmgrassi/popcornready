@@ -9,7 +9,7 @@ import {
   GenerationRunsStore,
   approveGenerationRunGate,
   assemblePayload,
-  completeStageAndMaybePauseAtGate,
+  createPersistedRunProgressEmitter,
   createGenerationRunsStore,
   createRunWithSeedStages,
   requireRun,
@@ -40,6 +40,49 @@ test("createRun persists with assigned runId and timestamps", async () => {
 
   const read = await store.getRun(run.runId);
   assert.deepEqual(read, run);
+});
+
+test("review gate fields are optional and persist when present", async () => {
+  const run = await store.createRun({
+    projectId: "proj_a",
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGates: ["creative_plan"],
+  });
+  const stage = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Planning beats and shots",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: [],
+    isReviewGate: true,
+  });
+  const enteredAt = new Date().toISOString();
+
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt,
+    },
+  });
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(stage.stageId, { reviewedAt });
+
+  const payload = await assemblePayload(store, run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, ["creative_plan"]);
+  assert.deepEqual(payload!.run.reviewGate, {
+    stageType: "creative_plan",
+    stageId: stage.stageId,
+    state: "awaiting_review",
+    enteredAt,
+  });
+  assert.equal(payload!.stages[0].isReviewGate, true);
+  assert.equal(payload!.stages[0].reviewedAt, reviewedAt);
 });
 
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {
@@ -399,18 +442,37 @@ test("createRunWithSeedStages persists run + stages so polling sees the same dat
   );
 });
 
-test("createRunWithSeedStages marks selected review gates", async () => {
-  const payload = await createRunWithSeedStages({
+test("createRunWithSeedStages marks requested review gates", async () => {
+  const created = await createRunWithSeedStages({
     store,
     projectId: "proj_gates",
-    body: { reviewGates: ["creative_plan", "asset_generation", "creative_plan"] },
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "creative_plan"],
+    },
   });
 
-  assert.deepEqual(payload.run.reviewGates, ["creative_plan", "asset_generation"]);
-  assert.deepEqual(
-    payload.stages.filter((stage) => stage.isReviewGate).map((stage) => stage.type),
-    ["creative_plan", "asset_generation"]
-  );
+  assert.deepEqual(created.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(created.run.reviewGate, null);
+
+  const gated = created.stages
+    .filter((stage) => stage.isReviewGate)
+    .map((stage) => stage.type);
+  assert.deepEqual(gated, ["creative_plan", "asset_generation"]);
+});
+
+test("createRunWithSeedStages omits reviewGates for YOLO runs", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_yolo",
+    body: {},
+  });
+
+  assert.equal(created.run.reviewGates, undefined);
+  assert.equal(created.run.reviewGate, null);
+  assert.equal(created.stages.some((stage) => stage.isReviewGate), false);
 });
 
 test("createRunWithSeedStages rejects invalid and non-gateable review gates", async () => {
@@ -418,49 +480,67 @@ test("createRunWithSeedStages rejects invalid and non-gateable review gates", as
     () =>
       createRunWithSeedStages({
         store,
-        projectId: "proj_bad_gates",
+        projectId: "proj_bad_gate",
         body: { reviewGates: ["ready"] },
       }),
     (err) => err instanceof ApiError && err.code === "validation_failed"
   );
+
   await assert.rejects(
     () =>
       createRunWithSeedStages({
         store,
-        projectId: "proj_bad_gates",
+        projectId: "proj_bad_gate_type",
         body: { reviewGates: "creative_plan" },
       }),
     (err) => err instanceof ApiError && err.code === "validation_failed"
   );
 });
 
-test("completeStageAndMaybePauseAtGate pauses a gated run", async () => {
+test("persisted progress emitter pauses a run after a gated stage succeeds", async () => {
   const created = await createRunWithSeedStages({
     store,
     projectId: "proj_pause",
     body: { reviewGates: ["creative_plan"] },
   });
-  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  const stage = await emitter.beginStage("creative_plan");
 
-  const paused = await completeStageAndMaybePauseAtGate({
+  await assert.rejects(
+    () => stage.succeed(),
+    /paused for review after creative_plan/
+  );
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.equal(payload!.run.status, "running");
+  assert.equal(payload!.run.currentStageType, "creative_plan");
+  assert.equal(payload!.run.reviewGate?.state, "awaiting_review");
+  assert.equal(payload!.run.reviewGate?.stageType, "creative_plan");
+  assert.equal(payload!.run.reviewGate?.stageId, payload!.stages[1].stageId);
+  assert.equal(payload!.stages[1].status, "succeeded");
+});
+
+test("persisted progress emitter does not pause YOLO runs or skipped gates", async () => {
+  const yolo = await createRunWithSeedStages({
     store,
-    runId: created.run.runId,
-    stageId: planStage.stageId,
-    message: "Plan ready.",
+    projectId: "proj_no_pause",
+    body: {},
   });
+  const yoloEmitter = createPersistedRunProgressEmitter(store, yolo.run.runId);
+  await (await yoloEmitter.beginStage("creative_plan")).succeed();
+  const yoloPayload = await assemblePayload(store, yolo.run.runId);
+  assert.equal(yoloPayload!.run.reviewGate, null);
 
-  assert.equal(paused.run.status, "running");
-  assert.equal(paused.run.reviewGate?.stageType, "creative_plan");
-  assert.equal(paused.run.reviewGate?.stageId, planStage.stageId);
-  assert.equal(paused.run.reviewGate?.state, "awaiting_review");
-  assert.equal(
-    paused.stages.find((stage) => stage.stageId === planStage.stageId)?.status,
-    "succeeded"
-  );
-  assert.equal(
-    paused.stages.find((stage) => stage.type === "asset_generation")?.status,
-    "queued"
-  );
+  const skipped = await createRunWithSeedStages({
+    store,
+    projectId: "proj_skipped_gate",
+    body: { reviewGates: ["asset_generation"] },
+  });
+  const skippedEmitter = createPersistedRunProgressEmitter(store, skipped.run.runId);
+  await (await skippedEmitter.beginStage("creative_plan")).succeed();
+  const skippedPayload = await assemblePayload(store, skipped.run.runId);
+  assert.equal(skippedPayload!.run.reviewGate, null);
 });
 
 test("approveGenerationRunGate clears the gate, marks the stage reviewed, and starts the next stage", async () => {
@@ -469,12 +549,11 @@ test("approveGenerationRunGate clears the gate, marks the stage reviewed, and st
     projectId: "proj_approve",
     body: { reviewGates: ["creative_plan"] },
   });
-  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
-  await completeStageAndMaybePauseAtGate({
-    store,
-    runId: created.run.runId,
-    stageId: planStage.stageId,
-  });
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  await assert.rejects(
+    () => emitter.beginStage("creative_plan").then((stage) => stage.succeed()),
+    /paused for review after creative_plan/
+  );
 
   const approved = await approveGenerationRunGate({
     store,
@@ -482,13 +561,13 @@ test("approveGenerationRunGate clears the gate, marks the stage reviewed, and st
     runId: created.run.runId,
   });
 
-  const reviewedStage = approved.stages.find((stage) => stage.stageId === planStage.stageId)!;
+  const planStage = approved.stages.find((stage) => stage.type === "creative_plan")!;
   const nextStage = approved.stages.find((stage) => stage.type === "asset_generation")!;
   assert.equal(approved.run.reviewGate, null);
   assert.equal(approved.run.currentStageType, "asset_generation");
   assert.equal(nextStage.status, "running");
-  assert.equal(reviewedStage.status, "succeeded");
-  assert.match(reviewedStage.reviewedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(planStage.status, "succeeded");
+  assert.match(planStage.reviewedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test("approveGenerationRunGate is a no-op for duplicate approval on an active run", async () => {
@@ -538,29 +617,26 @@ test("a run with multiple gates can pause again after approval resumes it", asyn
     projectId: "proj_multi_gate",
     body: { reviewGates: ["creative_plan", "asset_generation"] },
   });
-  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
-  const assetStage = created.stages.find((stage) => stage.type === "asset_generation")!;
-
-  await completeStageAndMaybePauseAtGate({
-    store,
-    runId: created.run.runId,
-    stageId: planStage.stageId,
-  });
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  await assert.rejects(
+    () => emitter.beginStage("creative_plan").then((stage) => stage.succeed()),
+    /paused for review after creative_plan/
+  );
   await approveGenerationRunGate({
     store,
     projectId: "proj_multi_gate",
     runId: created.run.runId,
   });
-  const pausedAgain = await completeStageAndMaybePauseAtGate({
-    store,
-    runId: created.run.runId,
-    stageId: assetStage.stageId,
-  });
+  await assert.rejects(
+    () => emitter.beginStage("asset_generation").then((stage) => stage.succeed()),
+    /paused for review after asset_generation/
+  );
 
-  assert.equal(pausedAgain.run.reviewGate?.stageType, "asset_generation");
-  assert.equal(pausedAgain.run.reviewGate?.stageId, assetStage.stageId);
+  const pausedAgain = await assemblePayload(store, created.run.runId);
+  assert.ok(pausedAgain);
+  assert.equal(pausedAgain!.run.reviewGate?.stageType, "asset_generation");
   assert.equal(
-    pausedAgain.stages.find((stage) => stage.type === "audio_generation")?.status,
+    pausedAgain!.stages.find((stage) => stage.type === "audio_generation")?.status,
     "queued"
   );
 });

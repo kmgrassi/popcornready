@@ -7,7 +7,8 @@
 // asset, generated-asset, composition, generation, and audio-alignment
 // surfaces) and are marked accordingly where referenced.
 
-import { Patch, Timeline } from "../types";
+import type { EditGraph, EditGraphRevisionOperation } from "../edit-graph";
+import { Patch, RenderPlan, Timeline } from "../types";
 
 export type JobType =
   | "asset_ingest" // PR1
@@ -64,6 +65,8 @@ export interface RevisionJobResult {
   // resources (with stable ids and sibling lineage) require PR4. TODO(PR4):
   // persist this as a sibling Timeline and return a timelineId instead.
   timeline: Timeline;
+  editGraph: EditGraph;
+  graphOperations: EditGraphRevisionOperation[];
   appliedPatches: number;
   patches: Patch[];
   summary: string;
@@ -93,12 +96,9 @@ export const DURATION_POLICIES = [
 
 export type DurationPolicy = (typeof DURATION_POLICIES)[number];
 
-export interface ExportRenderPlan {
-  durationPolicy: DurationPolicy;
-  durationSec: number;
-  timelineDurationSec: number;
-  audioDurationSec: number;
-  audioAssetIds: string[];
+export interface ExportRenderPlan extends RenderPlan {
+  // Backward-compatible aliases for the existing /api/v1 artifact shape. New
+  // renderer integrations should read output.format and output.quality.
   format: "mp4";
   quality: string;
 }

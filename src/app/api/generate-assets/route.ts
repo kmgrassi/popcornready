@@ -306,6 +306,7 @@ export async function POST(req: NextRequest) {
       result = await provider.generateAsset({
         provider: "elevenlabs",
         kind: "audio",
+        seconds,
         ...baseRequest,
       });
     } else if (providerName === "mock" && kind === "image") {
@@ -352,6 +353,9 @@ export async function POST(req: NextRequest) {
         model: result.model,
         prompt: preflight.finalPrompt,
         providerPrompt: result.prompt,
+        ...(typeof result.costUsd === "number"
+          ? { costUsd: result.costUsd }
+          : {}),
         originalPrompt:
           preflight.originalPrompt === preflight.finalPrompt
             ? undefined

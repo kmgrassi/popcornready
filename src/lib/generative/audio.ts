@@ -3,6 +3,8 @@ import {
   GenerateAssetRequest,
   GeneratedAssetResult,
 } from "./types";
+import { measureAudioDurationSec } from "./audio-duration";
+import { estimateCostUsd } from "./pricing";
 
 const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
 const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
@@ -21,6 +23,7 @@ interface ElevenLabsAudioResultInput {
   outputFormat?: string;
   model: string;
   prompt: string;
+  requestedSeconds?: number;
 }
 
 function requireElevenLabsKey(): string {
@@ -52,9 +55,9 @@ function measuredAudioDurationSec(
   bytes: Buffer,
   outputFormat = DEFAULT_AUDIO_FORMAT
 ): number | undefined {
-  return audioExtension(outputFormat) === "mp3"
-    ? estimateMp3DurationSec(bytes)
-    : undefined;
+  // Delegate to the unified measurer so WAV outputs (and any other container
+  // it learns to parse) measure correctly — not just MP3.
+  return measureAudioDurationSec(bytes, audioExtension(outputFormat)) ?? undefined;
 }
 
 function elevenLabsAudioResult({
@@ -62,7 +65,9 @@ function elevenLabsAudioResult({
   outputFormat,
   model,
   prompt,
+  requestedSeconds,
 }: ElevenLabsAudioResultInput): GeneratedAssetResult {
+  const durationSec = measuredAudioDurationSec(bytes, outputFormat);
   return {
     kind: "audio",
     bytes,
@@ -71,7 +76,13 @@ function elevenLabsAudioResult({
     provider: "elevenlabs",
     model,
     prompt,
-    durationSec: measuredAudioDurationSec(bytes, outputFormat),
+    durationSec,
+    costUsd: estimateCostUsd({
+      provider: "elevenlabs",
+      kind: "audio",
+      model,
+      durationSec: durationSec ?? requestedSeconds,
+    }),
   };
 }
 
@@ -206,6 +217,7 @@ export async function createSpeechAudio(
     outputFormat,
     model,
     prompt: text,
+    requestedSeconds: input.seconds,
   });
 }
 
@@ -255,6 +267,7 @@ export async function createDialogueAudio(
     outputFormat,
     model,
     prompt: dialogueInputs.map((line) => line.text).join("\n"),
+    requestedSeconds: input.seconds,
   });
 }
 
@@ -287,6 +300,7 @@ export async function createSoundEffectAudio(
     outputFormat,
     model,
     prompt: text,
+    requestedSeconds: input.seconds,
   });
 }
 
@@ -320,6 +334,7 @@ export async function createMusicAudio(
     outputFormat,
     model,
     prompt,
+    requestedSeconds: input.seconds,
   });
 }
 

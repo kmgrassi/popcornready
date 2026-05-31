@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import { promises as fs } from "fs";
 import { getProject } from "@/lib/store";
-import { Clip, dims, timelineDurationSec } from "@/lib/types";
+import { Clip } from "@/lib/types";
 import {
   DEFAULT_DURATION_POLICY,
-  DURATION_POLICIES,
   DurationPolicy,
-  evaluateExportPolicy,
 } from "@/lib/audio-alignment";
+import {
+  createRenderPlanFromTimeline,
+  isRenderDurationPolicy,
+} from "@/lib/render-plan";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
@@ -22,14 +24,8 @@ function publicPathForClip(url: string): string | null {
   return filePath.startsWith(publicRoot) ? filePath : null;
 }
 
-function audioClipDurationSec(clip: Clip): number {
-  return clip.measuredDurationSec && clip.measuredDurationSec > 0
-    ? clip.measuredDurationSec
-    : clip.durationSec || 0;
-}
-
 function parseDurationPolicy(value: unknown): DurationPolicy {
-  return DURATION_POLICIES.includes(value as DurationPolicy)
+  return isRenderDurationPolicy(value)
     ? (value as DurationPolicy)
     : DEFAULT_DURATION_POLICY;
 }
@@ -74,18 +70,12 @@ export async function POST(req: NextRequest) {
       audioClips.push(clip);
     }
 
-    // Alignment validation step: compare the timeline against the longest
-    // selected audio clip (overlays play concurrently from t=0) and apply the
-    // requested duration policy before we spend time rendering.
-    const tlDurationSec = timelineDurationSec(project.timeline);
-    const audioDurationSec = audioClips.reduce(
-      (max, clip) => Math.max(max, audioClipDurationSec(clip)),
-      0
-    );
-    const alignment = evaluateExportPolicy({
-      policy: durationPolicy,
-      timelineDurationSec: tlDurationSec,
-      audioDurationSec,
+    // Build the declarative render plan before invoking Remotion. The plan is
+    // the renderer contract; Remotion is only the current backend.
+    const { renderPlan, alignment } = createRenderPlanFromTimeline({
+      timeline: project.timeline,
+      audioClips,
+      durationPolicy,
       maxDeltaSec,
     });
 
@@ -112,15 +102,14 @@ export async function POST(req: NextRequest) {
 
     // Clips are served by this same Next server; Chromium needs absolute URLs.
     const origin = new URL(req.url).origin;
-    const fps = project.timeline.fps || 30;
-    const { width, height } = dims(project.timeline.aspectRatio);
     const durationInFrames = Math.max(
       1,
-      Math.round(alignment.exportDurationSec * fps)
+      Math.round(renderPlan.durationSec * renderPlan.output.fps)
     );
 
     const baseInputProps = {
       timeline: project.timeline,
+      renderPlan,
       clips: project.clips,
       baseUrl: origin,
     };
@@ -142,9 +131,15 @@ export async function POST(req: NextRequest) {
     const silentOutputLocation = path.join(EXPORT_DIR, silentName);
 
     await renderMedia({
-      composition: { ...silentComposition, durationInFrames, fps, width, height },
+      composition: {
+        ...silentComposition,
+        durationInFrames,
+        fps: renderPlan.output.fps,
+        width: renderPlan.output.width,
+        height: renderPlan.output.height,
+      },
       serveUrl,
-      codec: "h264",
+      codec: renderPlan.output.codec,
       outputLocation: silentOutputLocation,
       inputProps: silentInputProps,
       muted: true,
@@ -183,9 +178,15 @@ export async function POST(req: NextRequest) {
         inputProps: overlayInputProps,
       });
       await renderMedia({
-        composition: { ...overlayComposition, durationInFrames, fps, width, height },
+        composition: {
+          ...overlayComposition,
+          durationInFrames,
+          fps: renderPlan.output.fps,
+          width: renderPlan.output.width,
+          height: renderPlan.output.height,
+        },
         serveUrl,
-        codec: "h264",
+        codec: renderPlan.output.codec,
         outputLocation: overlayOutputLocation,
         inputProps: overlayInputProps,
       });
@@ -199,6 +200,7 @@ export async function POST(req: NextRequest) {
       overlayUrl,
       audioUrls: audioClips.map((clip) => clip.url),
       alignment,
+      renderPlan,
     });
   } catch (err: any) {
     return NextResponse.json(

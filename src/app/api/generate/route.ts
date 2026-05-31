@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/store";
 import { critique, planEdit, selectClips } from "@/lib/agent";
+import { synthesizeEditGraph } from "@/lib/edit-graph";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
 import { AspectRatio, StoryContext } from "@/lib/types";
 import { mergeStoryContext } from "@/lib/story-context";
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Select: beats + clips -> rough cut (v0)
     let timeline = sanitizeTimeline(
-      await selectClips({ plan, clips: project.clips }),
+      await selectClips({ plan, clips: project.clips, goal, storyContext }),
       project.clips
     );
     timeline.showCaptions = showCaptions;
@@ -63,6 +64,14 @@ export async function POST(req: NextRequest) {
 
     project.goal = goal;
     project.storyContext = storyContext;
+    project.editGraph = synthesizeEditGraph({
+      id: "generate_final",
+      goal,
+      plan,
+      timeline,
+      clips: project.clips,
+      storyContext,
+    });
     project.plan = plan;
     project.timeline = timeline;
     project.critic = report;

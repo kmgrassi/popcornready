@@ -4,7 +4,8 @@
 // finished video. The UI polls a run to render a progress view; later PRs will
 // add finer-grained stage items (per-beat asset cards, audio playback, etc.).
 // Run state reuses the existing job state vocabulary so we do not maintain a
-// second status taxonomy.
+// second status taxonomy. Review checkpoints are represented by reviewGate, not
+// by adding an "awaiting_review" status.
 
 export type GenerationRunStatus =
   | "queued"
@@ -22,6 +23,17 @@ export type GenerationStageType =
   | "quality_review"
   | "export"
   | "ready";
+
+export interface ReviewGateConfig {
+  gatedStages: GenerationStageType[];
+}
+
+export interface RunReviewGate {
+  stageType: GenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
 
 export interface GenerationErrorSummary {
   code: string;
@@ -57,6 +69,8 @@ export interface GenerationStage {
   completedAt?: string;
   jobIds: string[];
   artifactIds: string[];
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   items: GenerationStageItem[];
   error?: GenerationErrorSummary;
 }
@@ -77,6 +91,8 @@ export interface GenerationRun {
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
+  reviewGates?: GenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
