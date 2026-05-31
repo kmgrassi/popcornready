@@ -19,6 +19,7 @@ import {
   GenerativeProviderName,
 } from "@/lib/generative/types";
 import type { GeneratedAssetCharacterBinding } from "@/lib/types";
+import { buildSemanticAnalysis } from "@/lib/edit-graph/semantic-analysis";
 import {
   RunStageHandle,
   RunStageItemHandle,
@@ -425,6 +426,7 @@ async function runGeneration(
   };
 
   const now = new Date().toISOString();
+  const context = parsed.description ? { summary: parsed.description } : undefined;
   const asset: V1Asset = {
     id: assetId,
     schemaVersion: SCHEMA_VERSIONS.asset,
@@ -436,7 +438,16 @@ async function runGeneration(
     source: { type: "generated", generatedAssetId: assetId },
     storageKey,
     durationSec,
-    context: parsed.description ? { summary: parsed.description } : undefined,
+    context,
+    semanticAnalysis: buildSemanticAnalysis({
+      id: assetId,
+      kind: result.kind as AssetKind,
+      durationSec,
+      filename,
+      source: { type: "generated" },
+      context,
+      provenance,
+    }),
     provenance,
     createdAt: now,
     updatedAt: now,

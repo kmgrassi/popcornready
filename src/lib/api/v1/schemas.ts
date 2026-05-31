@@ -96,6 +96,7 @@ export type AgentAssetSource =
 export interface AssetContext {
   summary?: string;
   recommendedRoles?: string[];
+  transcriptText?: string;
   moments?: { startSec: number; endSec: number; label?: string }[];
 }
 
@@ -403,6 +404,52 @@ function parseAssetSource(input: unknown, fields: FieldError[]): AgentAssetSourc
   }
 }
 
+function optionalMomentArray(
+  value: unknown,
+  path: string,
+  fields: FieldError[]
+): { startSec: number; endSec: number; label?: string }[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    fields.push({ path, message: "Must be an array of moments." });
+    return undefined;
+  }
+
+  const moments: { startSec: number; endSec: number; label?: string }[] = [];
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    if (!isPlainObject(item)) {
+      fields.push({ path: itemPath, message: "Must be an object." });
+      return;
+    }
+    if (
+      typeof item.startSec !== "number" ||
+      !Number.isFinite(item.startSec) ||
+      item.startSec < 0
+    ) {
+      fields.push({ path: `${itemPath}.startSec`, message: "Must be a non-negative number." });
+      return;
+    }
+    if (
+      typeof item.endSec !== "number" ||
+      !Number.isFinite(item.endSec) ||
+      item.endSec < item.startSec
+    ) {
+      fields.push({
+        path: `${itemPath}.endSec`,
+        message: "Must be a number greater than or equal to startSec.",
+      });
+      return;
+    }
+    moments.push({
+      startSec: item.startSec,
+      endSec: item.endSec,
+      label: optionalString(item.label, `${itemPath}.label`, fields),
+    });
+  });
+  return moments;
+}
+
 export function parseRegisterAsset(input: unknown): RegisterAssetInput {
   if (!isPlainObject(input)) {
     throw validationError("The request body is invalid.", [
@@ -435,6 +482,12 @@ export function parseRegisterAsset(input: unknown): RegisterAssetInput {
           "context.recommendedRoles",
           fields
         ),
+        transcriptText: optionalString(
+          input.context.transcriptText,
+          "context.transcriptText",
+          fields
+        ),
+        moments: optionalMomentArray(input.context.moments, "context.moments", fields),
       };
     }
   }
