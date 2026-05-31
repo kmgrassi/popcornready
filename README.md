@@ -95,13 +95,13 @@ from), lists hosted pricing, and links to GitHub for self-hosting. Submitting th
 prompt opens the studio (`/studio`) and **one-shots** the video: it plans beats,
 generates a visual for each beat, and cuts a timeline — no uploads required.
 
-By default the one-shot generates a real **video clip per beat** (OpenAI Sora
-when `OPENAI_API_KEY` is set, Gemini Veo when `GEMINI_API_KEY` is set), so you
-get an actual moving 30-second video. This is expensive, so it is gated by a kill
-switch: set `ONESHOT_VIDEO=off` to fall back to fast still-frame generation under
-load. With no video-capable key it uses still images (real with `OPENAI_API_KEY`,
-placeholder frames without) so the flow always completes. You can also go
-straight to `/studio` to bring your own clips with the full editor below.
+The one-shot generates a real **video clip per beat** (Gemini Veo when
+`GEMINI_API_KEY` is set, OpenAI Sora when `OPENAI_API_KEY` is set), so you get an
+actual moving 30-second video. With no video-capable provider key, the request
+returns a clear configuration error instead of falling back to still images. If
+`ELEVENLABS_API_KEY` is set, one-shot also generates an AI-selected instrumental
+music bed for the cut. You can also go straight to `/studio` to bring your own
+clips with the full editor below.
 
 1. Upload a handful of video or image assets. Add a short description for each —
    in this MVP the AI reasons over the **filename + your description + duration**

@@ -38,12 +38,21 @@ export default function Preview({
     1,
     Math.round(timelineDurationSec(timeline) * fps)
   );
+  const audioClipIds = clips
+    .filter((clip) => clip.kind === "audio")
+    .map((clip) => clip.id);
 
   return (
     <div className="player-wrap">
       <Player
         component={VideoComposition as React.FC}
-        inputProps={{ timeline, clips, baseUrl: "" }}
+        inputProps={{
+          timeline,
+          clips,
+          baseUrl: "",
+          includeAudio: audioClipIds.length > 0,
+          audioClipIds,
+        }}
         durationInFrames={durationInFrames}
         fps={fps}
         compositionWidth={width}
