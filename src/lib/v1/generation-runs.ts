@@ -509,28 +509,46 @@ export async function rejectReviewGate(
     throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
   }
   const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
-  const enteredAt = new Date().toISOString();
+  const requeuedAt = new Date().toISOString();
+
+  // Rejecting a gate must actually force the stage back through generation:
+  // drop the rejected artifacts/items so they are no longer served as the
+  // current output, reset the stage to a non-terminal state, and clear the
+  // gate so the run is no longer "awaiting review" on stale results. The run
+  // re-enters awaiting_review only after the stage successfully re-runs (via
+  // pauseAfterStageIfReviewGate), reusing the existing retry/orchestration path.
+  const items = await store.listStageItemsForStage(stage.stageId);
+  await Promise.all(
+    items.map((item) =>
+      store.updateStageItem(item.itemId, {
+        status: "queued",
+        progressPercent: 0,
+        assetId: undefined,
+        artifactId: undefined,
+        error: undefined,
+      })
+    )
+  );
 
   await store.updateStage(stage.stageId, {
-    status: "succeeded",
-    progressPercent: 100,
+    status: "queued",
+    progressPercent: 0,
+    artifactIds: [],
     reviewedAt: undefined,
-    completedAt: enteredAt,
+    startedAt: undefined,
+    completedAt: undefined,
     error: undefined,
     message: note
-      ? `Regenerated after feedback: ${note}`
-      : "Regenerated after review feedback.",
+      ? `Regenerating after feedback: ${note}`
+      : "Regenerating after review feedback.",
   });
   await store.updateRun(run.runId, {
     status: "running",
     currentStageType: stage.type,
-    reviewGate: {
-      stageType: stage.type as GateableGenerationStageType,
-      stageId: stage.stageId,
-      state: "awaiting_review",
-      enteredAt,
-    },
-    message: `${stage.label} regenerated and ready for review.`,
+    reviewGate: null,
+    message: note
+      ? `Regenerating ${stage.label} after feedback: ${note}`
+      : `Regenerating ${stage.label} after review feedback.`,
   });
 
   return requireExistingPayload(await assemblePayload(store, runId), runId);

@@ -448,16 +448,26 @@ test("approveReviewGate rejects canceled runs", async () => {
   );
 });
 
-test("rejectReviewGate regenerates the gated stage and re-pauses", async () => {
+test("rejectReviewGate resets the gated stage for regeneration and drops stale output", async () => {
   const created = await createRunWithSeedStages({
     store,
     projectId: "proj_reject",
     body: { reviewGates: ["asset_generation"] },
   });
   const gateStage = created.stages.find((stage) => stage.type === "asset_generation")!;
+  const staleItem = await store.saveStageItem({
+    stageId: gateStage.stageId,
+    kind: "image",
+    label: "Shot 1",
+    status: "succeeded",
+    progressPercent: 100,
+    assetId: "asset_old",
+    artifactId: "art_old",
+  });
   await store.updateStage(gateStage.stageId, {
     status: "succeeded",
     progressPercent: 100,
+    artifactIds: ["art_old"],
     completedAt: new Date().toISOString(),
   });
   await store.updateRun(created.run.runId, {
@@ -476,11 +486,21 @@ test("rejectReviewGate regenerates the gated stage and re-pauses", async () => {
     note: "too dark",
   });
 
-  assert.equal(rejected.run.reviewGate?.stageType, "asset_generation");
+  // The gate is cleared: the run must actually re-run the stage before it can
+  // re-pause for review, rather than re-presenting the rejected output.
+  assert.equal(rejected.run.reviewGate, null);
   assert.equal(rejected.run.status, "running");
   const updatedStage = rejected.stages.find((stage) => stage.stageId === gateStage.stageId)!;
-  assert.equal(updatedStage.status, "succeeded");
+  assert.equal(updatedStage.status, "queued");
+  assert.equal(updatedStage.progressPercent, 0);
+  assert.deepEqual(updatedStage.artifactIds, []);
   assert.match(updatedStage.message ?? "", /too dark/);
+  // The previously rejected artifacts are no longer served as current output.
+  assert.equal(rejected.resultArtifacts.length, 0);
+  const updatedItem = rejected.stageItems.find((item) => item.itemId === staleItem.itemId)!;
+  assert.equal(updatedItem.status, "queued");
+  assert.equal(updatedItem.artifactId, undefined);
+  assert.equal(updatedItem.assetId, undefined);
 });
 
 test("pauseAfterStageIfReviewGate ignores skipped or unfinished gated stages", async () => {

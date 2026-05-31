@@ -12,8 +12,9 @@ import {
 export const dynamic = "force-dynamic";
 
 // POST /api/v1/projects/:projectId/generation-runs/:runId/reject
-// Reuses the retry path semantics for an awaiting-review gate: the current
-// stage is regenerated and the run re-enters awaiting review at the same gate.
+// Reuses the retry path semantics for an awaiting-review gate: the gated stage
+// is reset for regeneration (stale artifacts/items dropped) and the gate is
+// cleared, so the stage must actually re-run before it can re-pause for review.
 export async function POST(
   req: NextRequest,
   { params }: { params: { projectId: string; runId: string } }
