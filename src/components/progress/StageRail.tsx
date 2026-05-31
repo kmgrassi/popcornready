@@ -3,11 +3,13 @@
 import {
   GENERATION_STAGE_LABELS,
   GenerationRunStatus,
+  RunReviewGate,
   GenerationStage,
 } from "@/lib/v1/types";
 
 interface StageRailProps {
   stages: GenerationStage[];
+  reviewGate?: RunReviewGate | null;
 }
 
 const STATUS_LABEL: Record<GenerationRunStatus, string> = {
@@ -36,7 +38,7 @@ function StatusGlyph({ status }: { status: GenerationRunStatus }) {
   );
 }
 
-export function StageRail({ stages }: StageRailProps) {
+export function StageRail({ stages, reviewGate }: StageRailProps) {
   const ordered = [...stages].sort((a, b) => a.order - b.order);
 
   return (
@@ -45,6 +47,7 @@ export function StageRail({ stages }: StageRailProps) {
         const isLast = idx === ordered.length - 1;
         const label = stage.label || GENERATION_STAGE_LABELS[stage.type];
         const message = stage.error?.message ?? stage.message;
+        const awaitingReview = reviewGate?.stageId === stage.stageId;
 
         return (
           <li
@@ -60,7 +63,7 @@ export function StageRail({ stages }: StageRailProps) {
               <div className="stage-title-row">
                 <span className="stage-title">{label}</span>
                 <span className={`stage-status-pill stage-status-${stage.status}`}>
-                  {STATUS_LABEL[stage.status]}
+                  {awaitingReview ? "Ready for review" : STATUS_LABEL[stage.status]}
                 </span>
               </div>
               {message ? (

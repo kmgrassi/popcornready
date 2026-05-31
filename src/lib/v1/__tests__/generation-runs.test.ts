@@ -7,9 +7,14 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../errors";
 import {
   GenerationRunsStore,
+  approveReviewGate,
   assemblePayload,
+  cancelGenerationRun,
+  createPersistedRunProgressEmitter,
   createGenerationRunsStore,
   createRunWithSeedStages,
+  pauseAfterStageIfReviewGate,
+  rejectReviewGate,
   requireRun,
 } from "../generation-runs";
 
@@ -38,6 +43,49 @@ test("createRun persists with assigned runId and timestamps", async () => {
 
   const read = await store.getRun(run.runId);
   assert.deepEqual(read, run);
+});
+
+test("review gate fields are optional and persist when present", async () => {
+  const run = await store.createRun({
+    projectId: "proj_a",
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGates: ["creative_plan"],
+  });
+  const stage = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Planning beats and shots",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: [],
+    isReviewGate: true,
+  });
+  const enteredAt = new Date().toISOString();
+
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt,
+    },
+  });
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(stage.stageId, { reviewedAt });
+
+  const payload = await assemblePayload(store, run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, ["creative_plan"]);
+  assert.deepEqual(payload!.run.reviewGate, {
+    stageType: "creative_plan",
+    stageId: stage.stageId,
+    state: "awaiting_review",
+    enteredAt,
+  });
+  assert.equal(payload!.stages[0].isReviewGate, true);
+  assert.equal(payload!.stages[0].reviewedAt, reviewedAt);
 });
 
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {
@@ -108,6 +156,51 @@ test("listRunsForProject returns only that project's runs, newest first", async 
 
   const cList = await store.listRunsForProject("proj_missing");
   assert.deepEqual(cList, []);
+});
+
+test("createRunWithSeedStages persists selected review gates on the run and stages", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_a",
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "creative_plan"],
+    },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(payload.run.reviewGate, null);
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "creative_plan")?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "asset_generation")
+      ?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "ready")?.isReviewGate,
+    undefined
+  );
+});
+
+test("createRunWithSeedStages rejects invalid review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_a",
+        body: { reviewGates: ["ready", "not_a_stage"] },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.code, "validation_failed");
+      return true;
+    }
+  );
 });
 
 test("stages are scoped by runId and listed in order", async () => {
@@ -397,6 +490,240 @@ test("createRunWithSeedStages persists run + stages so polling sees the same dat
   );
 });
 
+test("createRunWithSeedStages marks requested review gates", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_gates",
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "creative_plan"],
+    },
+  });
+
+  assert.deepEqual(created.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(created.run.reviewGate, null);
+
+  const gated = created.stages
+    .filter((stage) => stage.isReviewGate)
+    .map((stage) => stage.type);
+  assert.deepEqual(gated, ["creative_plan", "asset_generation"]);
+});
+
+test("createRunWithSeedStages omits reviewGates for YOLO runs", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_yolo",
+    body: {},
+  });
+
+  assert.equal(created.run.reviewGates, undefined);
+  assert.equal(created.run.reviewGate, null);
+  assert.equal(created.stages.some((stage) => stage.isReviewGate), false);
+});
+
+test("createRunWithSeedStages rejects invalid and non-gateable review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_bad_gate",
+        body: { reviewGates: ["ready"] },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_bad_gate_type",
+        body: { reviewGates: "creative_plan" },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+});
+
+test("persisted progress emitter pauses a run after a gated stage succeeds", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_pause",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  const stage = await emitter.beginStage("creative_plan");
+
+  await assert.rejects(
+    () => stage.succeed(),
+    /paused for review after creative_plan/
+  );
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.equal(payload!.run.status, "running");
+  assert.equal(payload!.run.currentStageType, "creative_plan");
+  assert.equal(payload!.run.reviewGate?.state, "awaiting_review");
+  assert.equal(payload!.run.reviewGate?.stageType, "creative_plan");
+  assert.equal(payload!.run.reviewGate?.stageId, payload!.stages[1].stageId);
+  assert.equal(payload!.stages[1].status, "succeeded");
+});
+
+test("persisted progress emitter does not pause YOLO runs or skipped gates", async () => {
+  const yolo = await createRunWithSeedStages({
+    store,
+    projectId: "proj_no_pause",
+    body: {},
+  });
+  const yoloEmitter = createPersistedRunProgressEmitter(store, yolo.run.runId);
+  await (await yoloEmitter.beginStage("creative_plan")).succeed();
+  const yoloPayload = await assemblePayload(store, yolo.run.runId);
+  assert.equal(yoloPayload!.run.reviewGate, null);
+
+  const skipped = await createRunWithSeedStages({
+    store,
+    projectId: "proj_skipped_gate",
+    body: { reviewGates: ["asset_generation"] },
+  });
+  const skippedEmitter = createPersistedRunProgressEmitter(store, skipped.run.runId);
+  await (await skippedEmitter.beginStage("creative_plan")).succeed();
+  const skippedPayload = await assemblePayload(store, skipped.run.runId);
+  assert.equal(skippedPayload!.run.reviewGate, null);
+});
+
+test("approveReviewGate rejects canceled runs", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_approve_cancel",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+  await cancelGenerationRun(store, created.run.runId);
+
+  await assert.rejects(
+    () => approveReviewGate(store, created.run.runId),
+    (err) => err instanceof ApiError && err.code === "job_not_cancelable"
+  );
+});
+
+test("rejectReviewGate resets the gated stage for regeneration and drops stale output", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_reject",
+    body: { reviewGates: ["asset_generation"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "asset_generation")!;
+  const staleItem = await store.saveStageItem({
+    stageId: gateStage.stageId,
+    kind: "image",
+    label: "Shot 1",
+    status: "succeeded",
+    progressPercent: 100,
+    assetId: "asset_old",
+    artifactId: "art_old",
+  });
+  await store.updateStage(gateStage.stageId, {
+    status: "succeeded",
+    progressPercent: 100,
+    artifactIds: ["art_old"],
+    completedAt: new Date().toISOString(),
+  });
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "asset_generation",
+    reviewGate: {
+      stageType: "asset_generation",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const rejected = await rejectReviewGate(store, created.run.runId, {
+    stageType: "asset_generation",
+    note: "too dark",
+  });
+
+  assert.equal(rejected.run.reviewGate, null);
+  assert.equal(rejected.run.status, "running");
+  const updatedStage = rejected.stages.find((stage) => stage.stageId === gateStage.stageId)!;
+  assert.equal(updatedStage.status, "queued");
+  assert.equal(updatedStage.progressPercent, 0);
+  assert.deepEqual(updatedStage.artifactIds, []);
+  assert.match(updatedStage.message ?? "", /too dark/);
+  assert.equal(rejected.resultArtifacts.length, 0);
+  const updatedItem = rejected.stageItems.find((item) => item.itemId === staleItem.itemId)!;
+  assert.equal(updatedItem.status, "queued");
+  assert.equal(updatedItem.artifactId, undefined);
+  assert.equal(updatedItem.assetId, undefined);
+});
+
+test("pauseAfterStageIfReviewGate ignores skipped or unfinished gated stages", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_skipped_gate_helper",
+    body: { reviewGates: ["audio_generation"] },
+  });
+  const skippedGate = created.stages.find((stage) => stage.type === "audio_generation")!;
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "timeline_assembly",
+  });
+
+  const unchanged = await pauseAfterStageIfReviewGate(
+    store,
+    created.run.runId,
+    skippedGate.stageId
+  );
+
+  assert.equal(unchanged.run.reviewGate, null);
+
+  await store.updateStage(skippedGate.stageId, {
+    status: "succeeded",
+    completedAt: new Date().toISOString(),
+  });
+  const paused = await pauseAfterStageIfReviewGate(
+    store,
+    created.run.runId,
+    skippedGate.stageId
+  );
+
+  assert.equal(paused.run.reviewGate?.stageType, "audio_generation");
+});
+
+test("cancelGenerationRun cancels a paused run cleanly", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_cancel_paused",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const canceled = await cancelGenerationRun(store, created.run.runId);
+
+  assert.equal(canceled.run.status, "canceled");
+  assert.equal(canceled.run.reviewGate, null);
+  assert.ok(canceled.run.completedAt);
+});
+
 test("assemblePayload collects result artifacts from stages and matches stage items", async () => {
   const created = await createRunWithSeedStages({
     store,
@@ -443,6 +770,86 @@ test("assemblePayload collects result artifacts from stages and matches stage it
   assert.ok(exportArt, "export artifact should be in result list");
   assert.equal(exportArt!.kind, "export");
   assert.equal(exportArt!.itemId, undefined);
+});
+
+test("assemblePayload surfaces current review gate state for a paused run", async () => {
+  const run = await store.createRun({
+    projectId: "proj_gate",
+    status: "running",
+    currentStageType: "asset_generation",
+    progressPercent: 38,
+    reviewGates: ["creative_plan", "asset_generation"],
+  });
+  const planStage = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Plan",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: ["art_plan"],
+    isReviewGate: true,
+    reviewedAt: "2026-05-31T15:00:00.000Z",
+  });
+  const assetStage = await store.saveStage({
+    runId: run.runId,
+    type: "asset_generation",
+    label: "Visuals",
+    order: 2,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: ["art_visuals"],
+    isReviewGate: true,
+  });
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "asset_generation",
+      stageId: assetStage.stageId,
+      state: "awaiting_review",
+      enteredAt: "2026-05-31T15:05:00.000Z",
+    },
+  });
+
+  const payload = await assemblePayload(store, run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, ["creative_plan", "asset_generation"]);
+  assert.deepEqual(payload!.run.reviewGate, {
+    stageType: "asset_generation",
+    stageId: assetStage.stageId,
+    state: "awaiting_review",
+    enteredAt: "2026-05-31T15:05:00.000Z",
+  });
+
+  const surfacedPlanStage = payload!.stages.find((s) => s.stageId === planStage.stageId);
+  assert.ok(surfacedPlanStage);
+  assert.equal(surfacedPlanStage!.isReviewGate, true);
+  assert.equal(surfacedPlanStage!.reviewedAt, "2026-05-31T15:00:00.000Z");
+
+  const surfacedAssetStage = payload!.stages.find((s) => s.stageId === assetStage.stageId);
+  assert.ok(surfacedAssetStage);
+  assert.equal(surfacedAssetStage!.isReviewGate, true);
+  assert.equal(surfacedAssetStage!.reviewedAt, null);
+});
+
+test("assemblePayload surfaces YOLO defaults when a run has no review gates", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_yolo",
+    body: {},
+  });
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, []);
+  assert.equal(payload!.run.reviewGate, null);
+  assert.equal(
+    payload!.stages.every((stage) => stage.isReviewGate === false),
+    true
+  );
+  assert.equal(
+    payload!.stages.every((stage) => stage.reviewedAt === null),
+    true
+  );
 });
 
 test("requireRun returns the payload for a matching project", async () => {

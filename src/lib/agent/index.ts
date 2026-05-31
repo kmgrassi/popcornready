@@ -9,6 +9,7 @@ import {
   TimelineSegment,
 } from "../types";
 import { clipCatalog, timelineForPrompt } from "../timeline";
+import { compileTimelineViaEditGraph, editGraphBeatId } from "../edit-graph";
 import { storyContextForPrompt } from "../story-context";
 import {
   estimateWordsForDuration,
@@ -17,10 +18,10 @@ import {
 import { videoQualityContextForPrompt } from "../video-quality-context";
 import {
   criticSchema,
+  editDecisionTimelineSchema,
   narrationRewriteSchema,
   planSchema,
   reviseSchema,
-  timelineSchema,
 } from "./schemas";
 
 // Shared, stable preamble. Goes in the cached system block so the four agent
@@ -63,6 +64,16 @@ function planText(p: EditPlan): string {
   ].join("\n");
 }
 
+function storyPlanText(p: EditPlan): string {
+  return [
+    planText(p),
+    "story beat ids:",
+    ...p.beats.map(
+      (beat, index) => `  - ${editGraphBeatId(index, beat.name)}: ${beat.name}`
+    ),
+  ].join("\n");
+}
+
 export async function planEdit(input: {
   goal: string;
   targetLengthSec: number;
@@ -101,41 +112,74 @@ Produce the edit plan.`;
 export async function selectClips(input: {
   plan: EditPlan;
   clips: Clip[];
+  goal?: string;
+  storyContext?: StoryContext | null;
 }): Promise<Timeline> {
   const sys = `${PREAMBLE}
 
 CLIP CATALOG:
 ${clipCatalog(input.clips)}
 
-TASK: Build the first rough cut. For each beat, pick the best-matching clip(s)
-and choose tight in/out points. Cover every beat; you may use multiple
-segments per beat. Order segments to flow as a finished edit. Favor motivated
-cuts, pacing variation, clear information flow, and visual cohesion.`;
+TASK: Build the first rough cut as edit decisions. For each story beat id, pick
+the best-matching clip(s), choose tight in/out points, and explain the rationale.
+Cover every beat; you may use multiple decisions per beat. Order decisions to
+flow as a finished edit. Favor motivated cuts, pacing variation, clear
+information flow, and visual cohesion.`;
 
   const user = `Edit plan:
-${planText(input.plan)}
+${storyPlanText(input.plan)}
 
-Produce the timeline segments now.`;
+Produce the edit decisions now.`;
 
   const raw = await structuredCall<{
     showCaptions?: boolean;
-    segments: Omit<TimelineSegment, "id">[];
+    decisions: {
+      beatId: string;
+      clipId: string;
+      sourceInSec: number;
+      sourceOutSec: number;
+      rationale: string;
+      caption?: string;
+    }[];
   }>({
     cachedSystem: sys,
     user,
-    schema: timelineSchema,
+    schema: editDecisionTimelineSchema,
     maxTokens: 8000,
   });
 
   const showCaptions =
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
-  return {
+  const beatsById = new Map(
+    input.plan.beats.map((beat, index) => [editGraphBeatId(index, beat.name), beat])
+  );
+  const timeline: Timeline = {
     aspectRatio: input.plan.aspectRatio,
     fps: 30,
-    segments: raw.segments as TimelineSegment[],
+    segments: raw.decisions.map((decision, index) => {
+      const beat = beatsById.get(decision.beatId);
+      return {
+        id: `seg_${index + 1}`,
+        clipId: decision.clipId,
+        sourceInSec: decision.sourceInSec,
+        sourceOutSec: decision.sourceOutSec,
+        role: beat?.name || decision.beatId,
+        reason: decision.rationale,
+        ...(decision.caption === undefined ? {} : { caption: decision.caption }),
+      };
+    }) as TimelineSegment[],
     ...(showCaptions === undefined ? {} : { showCaptions }),
   };
+
+  return compileTimelineViaEditGraph({
+    id: "rough_cut",
+    goal: input.goal || input.plan.beats.map((beat) => beat.intent).join(" "),
+    plan: input.plan,
+    timeline,
+    clips: input.clips,
+    storyContext: input.storyContext,
+  });
 }
 
 export async function critique(input: {

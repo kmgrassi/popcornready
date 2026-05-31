@@ -1,3 +1,5 @@
+import type { EditGraph } from "./edit-graph";
+
 // Core domain types. The whole product revolves around the Timeline — the AI
 // never touches raw video, it only edits this structured representation.
 
@@ -93,6 +95,7 @@ export interface Clip {
     characterBinding?: GeneratedAssetCharacterBinding;
     originalPrompt?: string;
     preflight?: GenerationPreflightResult;
+    costUsd?: number;
   };
   characterBinding?: GeneratedAssetCharacterBinding;
 }
@@ -147,6 +150,33 @@ export interface Timeline {
   segments: TimelineSegment[];
   // When true, captions generated on segments are rendered as on-screen overlays.
   showCaptions?: boolean;
+}
+
+export type RenderEngine = "remotion";
+export type RenderOutputFormat = "mp4";
+export type RenderVideoCodec = "h264";
+export type RenderDurationPolicy =
+  | "timeline_only"
+  | "match_longest_media"
+  | "fail_on_mismatch";
+
+export interface RenderPlan {
+  schemaVersion: "render-plan.v1";
+  engine: RenderEngine;
+  timelineId?: string;
+  durationPolicy: RenderDurationPolicy;
+  durationSec: number;
+  timelineDurationSec: number;
+  audioDurationSec: number;
+  audioAssetIds: string[];
+  output: {
+    format: RenderOutputFormat;
+    codec: RenderVideoCodec;
+    width: number;
+    height: number;
+    fps: number;
+    quality: string;
+  };
 }
 
 export interface CriticScores {
@@ -307,7 +337,9 @@ export interface Project {
   goal: string;
   storyContext?: StoryContext;
   plan: EditPlan | null;
+  editGraph?: EditGraph;
   timeline: Timeline | null;
+  renderPlan?: RenderPlan | null;
   clips: Clip[];
   characterProfiles?: CharacterProfile[];
   characterReferences?: CharacterReference[];

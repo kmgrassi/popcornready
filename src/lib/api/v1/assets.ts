@@ -11,6 +11,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { AuthContext } from "./auth";
+import { buildSemanticAnalysis } from "../../edit-graph/semantic-analysis";
 import { ApiError } from "./errors";
 import { newId } from "./ids";
 import {
@@ -71,6 +72,14 @@ export async function registerAsset(
       remoteUrl: input.source.url,
       durationSec: input.durationSec,
       context: input.context,
+      semanticAnalysis: buildSemanticAnalysis({
+        id,
+        kind,
+        durationSec: input.durationSec,
+        filename,
+        source: input.source,
+        context: input.context,
+      }),
       createdAt: now,
       updatedAt: now,
     };
@@ -117,6 +126,14 @@ export async function registerAsset(
       storageKey,
       durationSec: input.durationSec,
       context: input.context,
+      semanticAnalysis: buildSemanticAnalysis({
+        id,
+        kind,
+        durationSec: input.durationSec,
+        filename,
+        source: { type: "local_path" },
+        context: input.context,
+      }),
       createdAt: now,
       updatedAt: now,
     };

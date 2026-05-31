@@ -4,6 +4,7 @@ import path from "path";
 import { getProject, saveProject } from "@/lib/store";
 import { critique, planEdit } from "@/lib/agent";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
+import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { providerFor } from "@/lib/generative/providers";
 import {
   AspectRatio,
@@ -260,6 +261,7 @@ async function generateBeatClip(input: {
       model: result.model,
       prompt: result.prompt,
       characterBinding,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
     characterBinding,
   };
@@ -324,6 +326,16 @@ async function savePartialProject(input: {
     id: "default",
     goal: input.goal,
     storyContext: input.storyContext,
+    editGraph: timeline
+      ? synthesizeEditGraph({
+          id: "oneshot_partial",
+          goal: input.goal,
+          plan: input.plan,
+          timeline,
+          clips: input.clips,
+          storyContext: input.storyContext,
+        })
+      : undefined,
     plan: input.plan,
     timeline,
     clips,
@@ -524,6 +536,7 @@ async function generateSoundtrack(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -711,7 +724,14 @@ export async function POST(req: NextRequest) {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: "oneshot_initial",
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       projectClips
     );
     timeline.showCaptions = showCaptions;
@@ -739,6 +759,14 @@ export async function POST(req: NextRequest) {
       id: "default",
       goal,
       storyContext,
+      editGraph: synthesizeEditGraph({
+        id: "oneshot_final",
+        goal,
+        plan,
+        timeline,
+        clips,
+        storyContext,
+      }),
       plan,
       timeline,
       clips: projectClips,
