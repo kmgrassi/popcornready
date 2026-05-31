@@ -29,6 +29,53 @@ function baseExportId(filename: string): string {
   return filename.replace(/_overlay\.mp4$/, ".mp4").replace(/\.mp4$/, "");
 }
 
+function readMp4DurationSec(bytes: Buffer): number | undefined {
+  function visit(start: number, end: number): number | undefined {
+    for (let pos = start; pos + 8 <= end; ) {
+      let size = bytes.readUInt32BE(pos);
+      const type = bytes.toString("ascii", pos + 4, pos + 8);
+      let headerSize = 8;
+      if (size === 1 && pos + 16 <= end) {
+        size = Number(bytes.readBigUInt64BE(pos + 8));
+        headerSize = 16;
+      }
+      if (size === 0) size = end - pos;
+      if (size < headerSize || pos + size > end) break;
+
+      if (type === "mvhd") {
+        const version = bytes[pos + headerSize];
+        const offset = pos + headerSize + (version === 1 ? 20 : 12);
+        if (offset + (version === 1 ? 12 : 8) > pos + size) return undefined;
+        const timescale = bytes.readUInt32BE(offset);
+        const duration =
+          version === 1
+            ? Number(bytes.readBigUInt64BE(offset + 4))
+            : bytes.readUInt32BE(offset + 4);
+        return timescale > 0 ? duration / timescale : undefined;
+      }
+
+      if (type === "moov") {
+        const found = visit(pos + headerSize, pos + size);
+        if (found !== undefined) return found;
+      }
+
+      pos += size;
+    }
+    return undefined;
+  }
+
+  return visit(0, bytes.length);
+}
+
+async function durationFor(filePath: string): Promise<number | undefined> {
+  try {
+    const bytes = await fs.readFile(filePath);
+    const duration = readMp4DurationSec(bytes);
+    return duration === undefined ? undefined : Math.round(duration * 10) / 10;
+  } catch {
+    return undefined;
+  }
+}
 export async function GET() {
   try {
     await fs.mkdir(EXPORT_DIR, { recursive: true });
@@ -49,6 +96,7 @@ export async function GET() {
         filename: entry.name,
         createdAt: stat.mtime.toISOString(),
         sizeBytes: stat.size,
+        durationSec: await durationFor(filePath),
         hasAudioOverlay: isOverlay,
       };
 

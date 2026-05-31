@@ -21,7 +21,7 @@ import {
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcorn-ready-v1-"));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-"));
   process.env.POPCORN_READY_LOCAL_DIR = tmpDir;
 });
 

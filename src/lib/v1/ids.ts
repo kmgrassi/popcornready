@@ -15,3 +15,6 @@ export const compositionId = () => newId("comp");
 export const jobId = () => newId("job");
 export const timelineId = () => newId("tl");
 export const requestId = () => newId("req");
+export const generationRunId = () => newId("genrun");
+export const generationStageId = () => newId("genstage");
+export const generationStageItemId = () => newId("genitem");

@@ -6,13 +6,28 @@ export const metadata: Metadata = {
   description: "Upload clips, give a goal, get an editable AI rough cut.",
 };
 
+const themeInitScript = `
+(() => {
+  try {
+    const theme = window.localStorage.getItem("popcorn-ready-theme");
+    const validThemes = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
+    if (validThemes.has(theme)) {
+      document.documentElement.dataset.theme = theme;
+    }
+  } catch {}
+})();
+`;
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

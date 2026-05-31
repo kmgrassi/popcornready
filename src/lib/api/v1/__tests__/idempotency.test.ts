@@ -9,7 +9,7 @@ import { runIdempotent } from "../idempotency";
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcorn-ready-v1-idem-"));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-idem-"));
   process.env.POPCORN_READY_LOCAL_DIR = tmpDir;
 });
 

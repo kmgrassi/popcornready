@@ -4,7 +4,7 @@ import path from "path";
 import { PromptComposer } from "@/components/PromptComposer";
 import ThemeToggle from "@/components/ThemeToggle";
 
-const GITHUB_URL = "https://github.com/kmgrassi/popcorn-ready";
+const GITHUB_URL = "https://github.com/kmgrassi/popcornready";
 const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
 
 const STEPS = [
@@ -271,6 +271,7 @@ export default async function LandingPage() {
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">
               GitHub
             </a>
+            <Link href="/admin">Admin</Link>
             <Link className="lp-nav-cta" href="/studio">
               Open studio
             </Link>
@@ -476,7 +477,7 @@ export default async function LandingPage() {
           <pre className="lp-code">
             <code>
               git clone {GITHUB_URL}.git{"\n"}
-              cd popcorn-ready && npm install && npm run dev
+              cd popcornready && npm install && npm run dev
             </code>
           </pre>
           <div className="lp-cta-buttons">
