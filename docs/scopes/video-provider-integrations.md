@@ -34,6 +34,8 @@ Supported:
   reference path is present
 - Polling `GET /v1/tasks/:id`
 - Downloading the first returned output URL into Popcorn Ready storage
+- Duration normalization to 5 or 10 seconds for the current Gen-4.5 endpoint
+  limits
 
 Default model:
 

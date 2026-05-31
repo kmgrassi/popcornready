@@ -35,8 +35,7 @@ function normalizeRunwayVideoSeconds(value?: number): number {
   const candidate = Math.round(Number(value));
   if (!Number.isFinite(candidate)) return 5;
   if (candidate <= 5) return 5;
-  if (candidate <= 10) return 10;
-  return 15;
+  return 10;
 }
 
 function runwayFetch(pathName: string, init: RequestInit): Promise<Response> {
