@@ -352,6 +352,9 @@ export async function POST(req: NextRequest) {
         model: result.model,
         prompt: preflight.finalPrompt,
         providerPrompt: result.prompt,
+        ...(typeof result.costUsd === "number"
+          ? { costUsd: result.costUsd }
+          : {}),
         originalPrompt:
           preflight.originalPrompt === preflight.finalPrompt
             ? undefined

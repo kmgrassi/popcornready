@@ -176,6 +176,7 @@ async function generateBeatClip(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -290,6 +291,7 @@ async function generateSoundtrack(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
