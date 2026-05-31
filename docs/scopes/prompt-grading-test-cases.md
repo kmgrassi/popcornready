@@ -331,13 +331,21 @@ the rubric anchors or system prompt need tightening before Track A goes out.
 
 ## Baseline Results
 
-| Model | Date | Verdict | Attribution | Hard-floor | Self-report | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `gpt-4o` | 2026-05-31 (initial) | 27/27 (100%) | 17/17 (100%) | 3/3 (100%) | n/a | Pre-Track-A baseline. Identified `production_quality` / `specificity` correlation in vague-prompt fail cases. |
-| `gpt-4o` | 2026-05-31 (tightened anchors) | 27/27 (100%) | 17/17 (100%) | 3/3 (100%) | **1/27 mismatch** | Sharpened anchors (craft vs. subject) held verdicts. Surfaced a model-compliance bug on I-FAIL-COMPOSITION: model returned `passed: true` with two dimensions at 7. Led to the **"recompute verdict server-side"** rule now in `prompt-grading.md`. Also fixed A-PASS-01: removed "headroom for narration" from a context that said "no narration." |
+| Model | Date | Verdict | Attribution | Hard-floor | Self-report | Schema | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `gpt-4o` | 2026-05-31 (initial) | 27/27 (100%) | 17/17 (100%) | 3/3 (100%) | n/a | n/a | Pre-Track-A baseline. Identified `production_quality` / `specificity` correlation. |
+| `gpt-4o` | 2026-05-31 (tightened anchors) | 27/27 (100%) | 17/17 (100%) | 3/3 (100%) | **1/27 mismatch** | n/a | Sharpened anchors held verdicts. Surfaced model-compliance bug on I-FAIL-COMPOSITION (`passed: true` with two dims at 7), drove the "recompute server-side" rule. Fixed A-PASS-01 to remove a "narration headroom" line that contradicted its "no narration" context. |
+| `gpt-4o` | 2026-05-31 (schema validation) | 27/27 (100%) | 17/17 (100%) | 3/3 (100%) | 1/27 mismatch | **0/27 invalid** | Added per-modality dimension-set validation. gpt-4o always returned the full key set on this run, but the check now exists to catch any future model that drops a dimension. A missing-dimension response is treated as a grader failure, never a stealth pass. |
 
 Re-run after any rubric-anchor or grader-system-prompt change and append a
-row. The **self-report** column counts cases where the model's `passed` field
-disagreed with the deterministic verdict computed from dimension scores — a
-non-zero number is expected and is exactly why the production grader doesn't
-trust that field.
+row. Two diagnostic columns:
+
+- **Self-report** counts cases where the model's `passed` field disagreed
+  with the deterministic verdict computed from dimension scores. A non-zero
+  number is expected and is exactly why the production grader doesn't trust
+  that field.
+- **Schema** counts cases where the model omitted one or more rubric
+  dimensions. These are errored out rather than scored, so a high count means
+  the grader model needs a stricter prompt or a JSON-schema-enforcing API
+  (e.g. Anthropic's `output_config.format` or OpenAI's structured outputs
+  with a strict schema).

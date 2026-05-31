@@ -531,6 +531,8 @@ interface CaseResult {
   lowestDimension?: string;
   /** Verdict computed server-side from dimension scores (ignore graded.passed). */
   computedPassed?: boolean;
+  /** Dimensions the model omitted from the response. Empty = schema valid. */
+  missingDimensions?: string[];
 }
 
 function lowestDim(g: GraderOutput): string {
@@ -546,22 +548,52 @@ function lowestDim(g: GraderOutput): string {
 }
 
 /**
+ * Validate that the grader returned every dimension expected for the
+ * modality. `response_format: json_object` only guarantees parseable JSON,
+ * not a key set — a model that drops a rubric dimension would otherwise
+ * stealth-pass via `computePassed` only seeing the dimensions that ARE
+ * present. Returns the list of missing/non-numeric dimension names.
+ */
+function validateGradeSchema(modality: Modality, graded: GraderOutput): string[] {
+  const expected = dimensionsFor(modality);
+  return expected.filter(
+    (dim) => typeof graded.dimensions?.[dim] !== "number"
+  );
+}
+
+/**
  * Compute the verdict deterministically from the dimension scores. Do NOT
  * trust `graded.passed` — gpt-4o has been observed to set passed=true while
  * dimensions are below threshold (e.g. I-FAIL-COMPOSITION returning
  * composition_intent=7, specificity=7, passed=true). The production grader
  * should do the same: ignore the model's verdict and recompute from the
- * scores.
+ * scores. Assumes `validateGradeSchema` has already passed; if a dimension
+ * is missing, returns false (a malformed grade is never a pass).
  */
-function computePassed(graded: GraderOutput, threshold = 8): boolean {
-  const dims = Object.values(graded.dimensions);
-  if (dims.some((v) => typeof v !== "number" || v < threshold)) return false;
-  return true;
+function computePassed(modality: Modality, graded: GraderOutput, threshold = 8): boolean {
+  const expected = dimensionsFor(modality);
+  return expected.every((dim) => {
+    const v = graded.dimensions?.[dim];
+    return typeof v === "number" && v >= threshold;
+  });
 }
 
 function evalCase(tc: TestCase, graded: GraderOutput): CaseResult {
+  // Schema validation FIRST. If the grader returned an incomplete dimension
+  // set, the eval reports it as an error rather than scoring the partial.
+  const missingDimensions = validateGradeSchema(tc.modality, graded);
+  if (missingDimensions.length > 0) {
+    return {
+      tc,
+      graded,
+      missingDimensions,
+      error: `Grader schema invalid: missing ${missingDimensions.join(", ")}`,
+      verdictMatch: false,
+    };
+  }
+
   // Recompute verdict server-side; do not trust the model's `passed` field.
-  const computedPassed = computePassed(graded);
+  const computedPassed = computePassed(tc.modality, graded);
   const verdictMatch = computedPassed === tc.expectedPassed;
   const lowest = lowestDim(graded);
 
@@ -595,6 +627,7 @@ function evalCase(tc: TestCase, graded: GraderOutput): CaseResult {
     hardFloorHandled,
     lowestDimension: lowest,
     computedPassed,
+    missingDimensions,
   };
 }
 
@@ -665,7 +698,10 @@ async function main() {
   const hfCases = results.filter((r) => r.hardFloorHandled !== undefined);
   const hfPass = hfCases.filter((r) => r.hardFloorHandled).length;
   const selfReportDisagrees = results.filter(
-    (r) => r.graded && r.graded.passed !== r.computedPassed
+    (r) => r.graded && r.computedPassed !== undefined && r.graded.passed !== r.computedPassed
+  ).length;
+  const schemaInvalid = results.filter(
+    (r) => r.missingDimensions && r.missingDimensions.length > 0
   ).length;
 
   console.log("\n--- SUMMARY ---");
@@ -674,6 +710,7 @@ async function main() {
   console.log(`Failure attribution:    ${attrPass}/${attrCases.length}  (${attrCases.length ? Math.round((100 * attrPass) / attrCases.length) : 0}%)`);
   console.log(`Hard-floor handling:    ${hfPass}/${hfCases.length}  (${hfCases.length ? Math.round((100 * hfPass) / hfCases.length) : 0}%)`);
   console.log(`Self-report mismatches: ${selfReportDisagrees}/${total}  (model said 'passed' contradicted dimension floor)`);
+  console.log(`Schema invalid:         ${schemaInvalid}/${total}  (model omitted one or more rubric dimensions)`);
 
   console.log("\n--- TARGETS (per docs/scopes/prompt-grading-test-cases.md) ---");
   console.log(`Verdict >= 80%:         ${verdictPass / total >= 0.8 ? "MET" : "MISS"}`);

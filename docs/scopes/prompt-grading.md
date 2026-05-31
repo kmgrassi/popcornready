@@ -215,9 +215,9 @@ type Modality = "video" | "image" | "audio";
 interface PromptGrade {
   modality: Modality;
   schemaVersion: 1;
-  overall: number;             // 0–10, integer, weighted average of dimensions
-  dimensions: Record<string, number>; // keys per rubric above
-  passed: boolean;             // overall >= threshold AND no hard-floor caps tripped
+  overall: number;             // 0–10, integer, weighted average of dimensions (reported only, NOT gating)
+  dimensions: Record<string, number>; // MUST include every key in the modality's rubric — see DIMENSIONS_BY_MODALITY
+  passed: boolean;             // every dimension >= threshold AND no hard-floor caps tripped — wrapper recomputes this; do not trust the model's value
   threshold: number;           // echoed so logs are self-describing
   strengths: string[];         // 1–3 short bullets
   weaknesses: string[];        // 1–3 short bullets, only if !passed
@@ -243,20 +243,61 @@ interface GradedPrompt {
 [`prompt-grading-test-cases.md`](./prompt-grading-test-cases.md) baseline
 results), strong models will occasionally return `passed: true` while one or
 more dimensions are below the threshold — i.e. they violate their own pass
-rule. The grader wrapper **must recompute `passed` deterministically** from
-the dimension scores and the threshold:
+rule. The grader wrapper **must (1) validate the dimension set, then (2)
+recompute `passed` deterministically** from the dimension scores and the
+threshold:
 
 ```ts
+// Per-modality canonical dimension set. The wrapper validates that the model
+// returned ALL of these keys before scoring anything.
+const DIMENSIONS_BY_MODALITY: Record<Modality, readonly string[]> = {
+  video: [
+    "brief_alignment", "beat_fit", "storyboard_cohesion",
+    "character_consistency", "production_quality",
+    "constraint_compliance", "specificity",
+  ],
+  image: [
+    "brief_alignment", "beat_fit", "character_consistency",
+    "production_quality", "constraint_compliance",
+    "specificity", "composition_intent",
+  ],
+  audio: [
+    "brief_alignment", "arc_fit", "mood_specificity",
+    "mix_constraints", "safety_compliance",
+  ],
+  storyboard: [
+    "arc_continuity", "visual_through_line", "pacing_distribution",
+    "outlier_detection", "redundancy",
+  ],
+};
+
+function validateGradeSchema(grade: PromptGrade): string[] {
+  const expected = DIMENSIONS_BY_MODALITY[grade.modality];
+  return expected.filter((dim) => typeof grade.dimensions?.[dim] !== "number");
+}
+
 function computePassed(grade: PromptGrade, threshold: number): boolean {
-  return Object.values(grade.dimensions).every((v) => v >= threshold);
+  const expected = DIMENSIONS_BY_MODALITY[grade.modality];
+  // Treat a missing/non-numeric dimension as failed grading, NOT as a pass.
+  return expected.every((dim) => {
+    const v = grade.dimensions?.[dim];
+    return typeof v === "number" && v >= threshold;
+  });
 }
 ```
 
-The model still returns `passed` in its JSON (it's useful as a sanity check
-and shows up in logs as a self-report mismatch metric), but the wrapper
-overwrites it before storing or routing. This is the rule that prevents the
-"average-gaming via self-report" failure mode from ever reaching the
-provider call.
+**Missing dimensions are a grader failure, not a prompt failure.** Because
+`response_format: { type: "json_object" }` (OpenAI) and prefill (Anthropic)
+guarantee parseable JSON but do **not** enforce a key set, a misbehaving model
+could omit a rubric dimension and ship a half-evaluated prompt to the
+provider. The wrapper must call `validateGradeSchema` first; if any expected
+dimension is missing or non-numeric, the grade is rejected as malformed,
+counted against the model in the eval harness, and retried per the
+"invalid grader output is a grader failure" rule in **Acceptance Criteria**.
+The model still returns `passed` in its JSON, but the wrapper overwrites it
+before storing or routing. This is the rule that prevents the
+"average-gaming via self-report" and "stealth pass from omitted dimensions"
+failure modes from ever reaching the provider call.
 
 ## Revision Loop
 

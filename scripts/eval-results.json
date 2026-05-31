@@ -1,6 +1,6 @@
 {
   "model": "gpt-4o",
-  "timestamp": "2026-05-31T13:46:43.049Z",
+  "timestamp": "2026-05-31T13:56:53.363Z",
   "totals": {
     "total": 27,
     "verdict": {
@@ -30,16 +30,16 @@
           "storyboard_cohesion": 10,
           "character_consistency": 10,
           "production_quality": 9,
-          "constraint_compliance": 10,
+          "constraint_compliance": 9,
           "specificity": 9
         },
         "overall": 9,
         "passed": true,
         "threshold": 8,
         "strengths": [
-          "brief_alignment",
-          "beat_fit",
-          "constraint_compliance"
+          "specificity",
+          "production_quality",
+          "brief_alignment"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -60,7 +60,7 @@
           "beat_fit": 10,
           "storyboard_cohesion": 10,
           "character_consistency": 10,
-          "production_quality": 10,
+          "production_quality": 9,
           "constraint_compliance": 10,
           "specificity": 10
         },
@@ -68,16 +68,16 @@
         "passed": true,
         "threshold": 8,
         "strengths": [
-          "clear character consistency",
-          "strong production quality",
-          "excellent brief alignment"
+          "character_consistency",
+          "specificity",
+          "brief_alignment"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
-      "lowestDimension": "brief_alignment"
+      "lowestDimension": "production_quality"
     },
     {
       "id": "V-PASS-03",
@@ -92,7 +92,7 @@
           "storyboard_cohesion": 9,
           "character_consistency": 10,
           "production_quality": 9,
-          "constraint_compliance": 10,
+          "constraint_compliance": 9,
           "specificity": 9
         },
         "overall": 9,
@@ -101,7 +101,7 @@
         "strengths": [
           "specificity",
           "production_quality",
-          "constraint_compliance"
+          "storyboard_cohesion"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -127,7 +127,7 @@
           "constraint_compliance": 8,
           "specificity": 8
         },
-        "overall": 3,
+        "overall": 4,
         "passed": false,
         "threshold": 8,
         "strengths": [
@@ -139,7 +139,7 @@
           "beat_fit",
           "storyboard_cohesion"
         ],
-        "rewriteGuidance": "Focus on the daily commute pain theme by depicting a relatable commuting scenario, such as a person stuck in traffic or waiting for a delayed train. Ensure the setting and action align with the concept of commuting rather than a restaurant kitchen.",
+        "rewriteGuidance": "Align the scene with the theme of daily commute pain, ensuring it fits the hook beat of the ad. Consider a setting or action that directly relates to commuting challenges, such as a crowded subway or traffic jam, to better fit the storyboard and brief.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -155,12 +155,12 @@
         "modality": "video",
         "schemaVersion": 1,
         "dimensions": {
-          "brief_alignment": 9,
-          "beat_fit": 7,
+          "brief_alignment": 7,
+          "beat_fit": 6,
           "storyboard_cohesion": 8,
           "character_consistency": 10,
           "production_quality": 9,
-          "constraint_compliance": 9,
+          "constraint_compliance": 8,
           "specificity": 9
         },
         "overall": 7,
@@ -168,13 +168,13 @@
         "threshold": 8,
         "strengths": [
           "production_quality",
-          "specificity",
-          "brief_alignment"
+          "specificity"
         ],
         "weaknesses": [
+          "brief_alignment",
           "beat_fit"
         ],
-        "rewriteGuidance": "Focus more on the pain of the daily commute rather than the positive aspects of using the scooter.",
+        "rewriteGuidance": "Adjust the prompt to better convey the daily commute pain rather than a positive experience. Consider depicting a more relatable struggle or inconvenience associated with commuting.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -190,13 +190,13 @@
         "modality": "video",
         "schemaVersion": 1,
         "dimensions": {
-          "brief_alignment": 4,
-          "beat_fit": 5,
+          "brief_alignment": 5,
+          "beat_fit": 4,
           "storyboard_cohesion": 3,
           "character_consistency": 10,
-          "production_quality": 9,
+          "production_quality": 8,
           "constraint_compliance": 8,
-          "specificity": 8
+          "specificity": 9
         },
         "overall": 5,
         "passed": false,
@@ -210,7 +210,7 @@
           "beat_fit",
           "storyboard_cohesion"
         ],
-        "rewriteGuidance": "Adjust the setting to match the bright morning sun on a sidewalk as in previous and subsequent beats. Ensure the scene aligns with the solution aspect of the ad, possibly showing the scooter in use or highlighting its features in a relevant context.",
+        "rewriteGuidance": "Adjust the setting to match the bright morning sun on a sidewalk to ensure cohesion with other beats. Align the scene with the solution aspect of the ad, possibly showing the scooter in use or highlighting its features in a relevant context.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -244,10 +244,9 @@
         "weaknesses": [
           "brief_alignment",
           "beat_fit",
-          "storyboard_cohesion",
-          "character_consistency"
+          "storyboard_cohesion"
         ],
-        "rewriteGuidance": "Revise the prompt to align with the character profile of Maya, ensuring she is in a sunlit kitchen wearing an oatmeal cable-knit sweater and gold hoop earrings. Adjust the setting to fit the Hearth coffee subscription theme and ensure the scene matches the payoff beat in a cohesive manner with the surrounding storyboard.",
+        "rewriteGuidance": "Align the character's wardrobe and setting with the character profile and context. Ensure the scene fits the 'payoff' beat and maintains cohesion with the surrounding storyboard elements.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -268,25 +267,23 @@
         "schemaVersion": 1,
         "dimensions": {
           "brief_alignment": 5,
-          "beat_fit": 4,
+          "beat_fit": 5,
           "storyboard_cohesion": 6,
           "character_consistency": 10,
-          "production_quality": 5,
+          "production_quality": 4,
           "constraint_compliance": 8,
           "specificity": 3
         },
         "overall": 5,
         "passed": false,
         "threshold": 8,
-        "strengths": [
-          "character_consistency"
-        ],
+        "strengths": [],
         "weaknesses": [
-          "specificity",
-          "production_quality",
-          "brief_alignment"
+          "vague description",
+          "lacks specific visual elements",
+          "insufficient production details"
         ],
-        "rewriteGuidance": "Specify concrete details about the person, scooter, and city setting. Include camera angles, lighting, and motion to enhance the cinematic quality. Align more closely with the 'hook' beat by creating an engaging and attention-grabbing scene.",
+        "rewriteGuidance": "Specify concrete visual elements such as the setting, time of day, and specific actions of the person on the scooter. Include production details like camera angles, lighting, and motion to enhance the cinematic quality.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -323,7 +320,7 @@
           "brief_alignment",
           "beat_fit"
         ],
-        "rewriteGuidance": "Adjust the aspect ratio to 9:16 vertical and remove the request for on-screen text. Ensure the clip aligns with the user's goal of a 30s ad for Drift scooters.",
+        "rewriteGuidance": "Adjust the aspect ratio to 9:16 vertical and remove any on-screen text to comply with StoryContext constraints. Ensure the prompt aligns with the user's goal for a 30s ad and fits the beat's intent.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -346,7 +343,7 @@
         "dimensions": {
           "brief_alignment": 4,
           "beat_fit": 5,
-          "storyboard_cohesion": 6,
+          "storyboard_cohesion": 5,
           "character_consistency": 10,
           "production_quality": 3,
           "constraint_compliance": 8,
@@ -355,15 +352,13 @@
         "overall": 5,
         "passed": false,
         "threshold": 8,
-        "strengths": [
-          "constraint_compliance"
-        ],
+        "strengths": [],
         "weaknesses": [
-          "lack of specificity",
-          "poor production quality",
-          "weak brief alignment"
+          "vague_subject",
+          "low_production_quality",
+          "poor_beat_fit"
         ],
-        "rewriteGuidance": "Include specific visual elements such as people riding Drift scooters in an urban setting, with clear descriptions of camera angles, lighting, and motion to convey the joy and freedom of modern transportation.",
+        "rewriteGuidance": "Specify concrete visual elements such as people using Drift scooters in an urban setting, include camera angles and lighting details, and ensure the scene aligns with the solution beat by showing how the scooters solve a problem.",
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
@@ -384,7 +379,7 @@
           "storyboard_cohesion": 8,
           "character_consistency": 10,
           "production_quality": 9,
-          "constraint_compliance": 10,
+          "constraint_compliance": 9,
           "specificity": 9
         },
         "overall": 9,
@@ -393,7 +388,7 @@
         "strengths": [
           "specificity",
           "production_quality",
-          "constraint_compliance"
+          "brief_alignment"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -413,10 +408,10 @@
         "dimensions": {
           "brief_alignment": 9,
           "beat_fit": 9,
-          "storyboard_cohesion": 8,
+          "storyboard_cohesion": 9,
           "character_consistency": 10,
           "production_quality": 9,
-          "constraint_compliance": 8,
+          "constraint_compliance": 9,
           "specificity": 9
         },
         "overall": 9,
@@ -432,7 +427,7 @@
         "rubricVersion": "video.v1"
       },
       "verdictMatch": true,
-      "lowestDimension": "storyboard_cohesion"
+      "lowestDimension": "brief_alignment"
     },
     {
       "id": "I-PASS-01",
@@ -442,7 +437,7 @@
         "modality": "image",
         "schemaVersion": 1,
         "dimensions": {
-          "brief_alignment": 10,
+          "brief_alignment": 9,
           "beat_fit": 10,
           "character_consistency": 10,
           "production_quality": 9,
@@ -456,7 +451,7 @@
         "strengths": [
           "specificity",
           "composition_intent",
-          "brief_alignment"
+          "production_quality"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -545,9 +540,9 @@
         "passed": true,
         "threshold": 8,
         "strengths": [
-          "Clear mix constraints",
-          "Specific instrumentation and mood",
-          "Strong arc fit with rise for CTA"
+          "Detailed instrumentation and tempo",
+          "Clear mix constraints for narration",
+          "Strong safety compliance"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -565,24 +560,25 @@
         "modality": "audio",
         "schemaVersion": 1,
         "dimensions": {
-          "brief_alignment": 0,
+          "brief_alignment": 1,
           "arc_fit": 2,
-          "mood_specificity": 9,
+          "mood_specificity": 8,
           "mix_constraints": 8,
-          "safety_compliance": 10
+          "safety_compliance": 8
         },
         "overall": 5,
         "passed": false,
         "threshold": 8,
         "strengths": [
           "mood_specificity",
-          "safety_compliance"
+          "mix_constraints"
         ],
         "weaknesses": [
           "brief_alignment",
           "arc_fit"
         ],
-        "rewriteGuidance": "The prompt should align with the calm and meditative style of the 'Stillwater' app. Consider using descriptors like 'slow', 'soft', 'breathy', and avoid high-energy elements like EDM festival drops. Focus on gentle instrumentation and a soothing tempo."
+        "rewriteGuidance": "Adjust the prompt to match the calm and soft style of the meditation app. Consider using slow, soft, and breathy instrumentation, such as ambient pads, gentle piano, or soft strings. Ensure the tempo and dynamics align with a relaxing and meditative atmosphere.",
+        "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
       "attributionMatch": true,
@@ -615,7 +611,7 @@
           "arc_fit",
           "mood_specificity"
         ],
-        "rewriteGuidance": "Incorporate dynamic changes to match the ad's escalation structure. Specify instrumentation details beyond 'acoustic guitar' and consider adding elements to enhance mood specificity.",
+        "rewriteGuidance": "Add dynamic changes to match the ad's escalation. Specify more concrete instrumentation details and adjust the structure to fit the ad's beats.",
         "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
@@ -632,7 +628,7 @@
         "schemaVersion": 1,
         "dimensions": {
           "brief_alignment": 8,
-          "arc_fit": 6,
+          "arc_fit": 5,
           "mood_specificity": 5,
           "mix_constraints": 8,
           "safety_compliance": 10
@@ -649,12 +645,12 @@
           "arc_fit",
           "mood_specificity"
         ],
-        "rewriteGuidance": "Specify the rise and fall of the track to match the ad's narrative arc. Provide more concrete details on instrumentation, tempo, and key to enhance mood specificity.",
+        "rewriteGuidance": "Specify the rise and fall or tension in the track to match the beat structure. Provide more concrete details on instrumentation, tempo, and key to enhance mood specificity.",
         "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
       "attributionMatch": true,
-      "lowestDimension": "mood_specificity"
+      "lowestDimension": "arc_fit"
     },
     {
       "id": "A-FAIL-MIX",
@@ -666,7 +662,7 @@
         "schemaVersion": 1,
         "dimensions": {
           "brief_alignment": 5,
-          "arc_fit": 5,
+          "arc_fit": 4,
           "mood_specificity": 7,
           "mix_constraints": 3,
           "safety_compliance": 8
@@ -682,7 +678,7 @@
           "arc_fit",
           "mix_constraints"
         ],
-        "rewriteGuidance": "Remove vocals to avoid clashing with narration. Specify instrumental elements and ensure the track supports the explainer's narrative arc. Consider specifying a dynamic range that allows for voiceover clarity.",
+        "rewriteGuidance": "Remove vocals to accommodate voiceover narration. Specify instrumental elements and ensure the track supports the explainer's narrative arc. Consider specifying a key or feel to enhance mood specificity.",
         "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
@@ -699,8 +695,8 @@
         "modality": "audio",
         "schemaVersion": 1,
         "dimensions": {
-          "brief_alignment": 6,
-          "arc_fit": 5,
+          "brief_alignment": 5,
+          "arc_fit": 6,
           "mood_specificity": 5,
           "mix_constraints": 4,
           "safety_compliance": 3
@@ -710,11 +706,11 @@
         "threshold": 8,
         "strengths": [],
         "weaknesses": [
-          "Named artist reference",
-          "Recognizable motif",
-          "Lacks specific tempo and key"
+          "References named artist and specific score",
+          "Lacks detailed instrumentation and tempo",
+          "Does not specify vocal constraints"
         ],
-        "rewriteGuidance": "Remove references to Hans Zimmer and specific motifs like 'BRAAAM'. Instead, describe the desired mood and instrumentation without using specific artist or song references. Specify the tempo, key, and whether vocals are needed. Ensure the track fits the 30-second duration and allows for any necessary narration.",
+        "rewriteGuidance": "Remove references to Hans Zimmer and specific scores. Provide detailed instrumentation, tempo, and specify if vocals are needed. Ensure compliance with safety guidelines.",
         "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
@@ -743,11 +739,11 @@
         "threshold": 8,
         "strengths": [],
         "weaknesses": [
-          "Includes brand audio/jingle",
+          "Uses brand audio/jingle",
           "Lacks concrete instrumentation and tempo",
-          "Does not specify rise/fall/tension"
+          "Insufficient arc description"
         ],
-        "rewriteGuidance": "Remove any references to brand audio or jingles like the McDonald's motif. Specify the desired mood, instrumentation, and tempo more concretely. Ensure the audio structure matches the intended arc of the ad.",
+        "rewriteGuidance": "Remove any references to brand audio or jingles. Specify the desired mood, instrumentation, and tempo more concretely. Describe the rise and fall of the music to match the ad's structure.",
         "rubricVersion": "audio.v1"
       },
       "verdictMatch": true,
@@ -774,9 +770,9 @@
         "passed": true,
         "threshold": 8,
         "strengths": [
-          "mood_specificity",
-          "mix_constraints",
-          "safety_compliance"
+          "Clear mood and instrumentation",
+          "Specific tempo and style",
+          "No safety compliance issues"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -805,7 +801,7 @@
         "strengths": [
           "coherent story arc",
           "consistent visual theme",
-          "effective pacing"
+          "varied shot pacing"
         ],
         "weaknesses": [],
         "rewriteGuidance": "",
@@ -834,15 +830,14 @@
         "passed": false,
         "threshold": 8,
         "strengths": [
-          "clear beat structure",
-          "varied shot types"
+          "redundancy"
         ],
         "weaknesses": [
-          "inconsistent setting",
-          "disjointed narrative",
-          "unrelated solution beat"
+          "arc_continuity",
+          "visual_through_line",
+          "outlier_detection"
         ],
-        "rewriteGuidance": "Ensure all beats are set in the same morning city setting and maintain a coherent narrative arc. Replace the sunset yoga scene with a solution that fits the urban context and addresses the problem of traffic congestion.",
+        "rewriteGuidance": "Ensure all beats are set in the same morning city setting. Replace the sunset yoga scene with a solution that fits the urban context. Maintain continuity in lighting and location across all beats.",
         "rubricVersion": "storyboard.v1",
         "outlierBeatIndices": [
           2
@@ -864,26 +859,26 @@
           "arc_continuity": 5,
           "visual_through_line": 7,
           "pacing_distribution": 6,
-          "outlier_detection": 5,
-          "redundancy": 4
+          "outlier_detection": 4,
+          "redundancy": 3
         },
         "overall": 5,
         "passed": false,
         "threshold": 8,
         "strengths": [
-          "consistent visual theme",
-          "clear CTA"
+          "consistent visual theme"
         ],
         "weaknesses": [
-          "arc discontinuity",
+          "arc continuity issues",
           "redundant shots",
           "pacing imbalance"
         ],
-        "rewriteGuidance": "Ensure a coherent story arc by clearly defining the problem before presenting the solution. Avoid redundancy by combining similar shots. Balance pacing by varying shot types and durations.",
+        "rewriteGuidance": "Ensure the beats follow a coherent story arc from problem to solution. Avoid redundant shots by combining similar scenes. Balance pacing by varying shot types and durations.",
         "rubricVersion": "storyboard.v1",
         "outlierBeatIndices": [
           0,
-          2
+          2,
+          3
         ]
       },
       "verdictMatch": true,
@@ -913,14 +908,15 @@
         "passed": false,
         "threshold": 8,
         "strengths": [
-          "consistent visual theme"
+          "consistent location",
+          "clear visual theme"
         ],
         "weaknesses": [
-          "lack of narrative progression",
-          "redundant shot types",
+          "lack of narrative arc",
+          "redundant wide static shots",
           "poor pacing distribution"
         ],
-        "rewriteGuidance": "Introduce variety in shot types and camera movements to enhance engagement. Ensure each beat contributes to a coherent narrative arc. Avoid redundancy by varying the composition and focus of each shot.",
+        "rewriteGuidance": "Introduce variety in shot types and camera movements to enhance pacing and engagement. Ensure each beat contributes to a coherent narrative arc, with clear escalation and payoff. Avoid redundancy by varying shot composition and focus.",
         "rubricVersion": "storyboard.v1",
         "outlierBeatIndices": []
       },
