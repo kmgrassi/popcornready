@@ -1,4 +1,4 @@
-# Aividi Productionization Scope
+# Popcorn Ready Productionization Scope
 
 This document scopes the work needed to turn the current MVP into a reliable
 video editing product and agent-operable API. The MVP proves the core loop:
@@ -9,19 +9,19 @@ deterministic and inspectable.
 
 ## North Star
 
-Aividi should become the AI-native production studio where users and agents turn
+Popcorn Ready should become the AI-native production studio where users and agents turn
 raw or generated media into finished cinematic videos through structured intent,
 editable timelines, and deterministic rendering.
 
 The product should act as the system of record and control plane for
 AI-assisted video production. External APIs can generate, analyze, or transform
-media, but Aividi owns the project model, creative brief, asset context,
+media, but Popcorn Ready owns the project model, creative brief, asset context,
 timeline structure, revision history, validation, rendering, exports, feedback,
 and operational reliability.
 
 The durable product principle is:
 
-> AI plans and patches structured timelines; Aividi validates, versions,
+> AI plans and patches structured timelines; Popcorn Ready validates, versions,
 > renders, learns from feedback, and stores the result.
 
 The first production target is a reliable workflow where a browser user or

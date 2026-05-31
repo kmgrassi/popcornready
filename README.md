@@ -17,6 +17,21 @@
 
 Popcorn Ready is a content production workflow:
 
+```
+goal + clips
+   |
+   ↓
+planEdit()      goal → beats              (Claude, structured JSON)
+   ↓
+selectClips()   beats + clips → timeline  (Claude, structured JSON)
+   ↓
+critique()      timeline → scores + patches → applied  (Claude)
+   ↓
+revise()        chat message → patches → applied        (Claude)
+   ↓
+Remotion        timeline → <Player> preview + MP4 export
+```
+
 1. Upload your video and image assets with short descriptions.
 2. Give the app a creative goal, target length, and style.
 3. Generate a first-pass timeline and a critic response.
@@ -89,8 +104,9 @@ placeholder frames without) so the flow always completes. You can also go
 straight to `/studio` to bring your own clips with the full editor below.
 
 1. Upload a handful of video or image assets. Add a short description for each —
-   in this MVP the AI reasons over the **filename + your description + duration** (real
-   transcription/vision analysis is the documented next step, not in this slice).
+   in this MVP the AI reasons over the **filename + your description + duration**
+   (real transcription/vision analysis is the documented next step, not in this
+   slice).
 2. If the library is missing a visual, use **Generate missing asset** to create
    an image or short video asset. OpenAI is live when `OPENAI_API_KEY` is set;
    Gemini video generation is live when `GEMINI_API_KEY` is set. ElevenLabs
@@ -105,8 +121,8 @@ straight to `/studio` to bring your own clips with the full editor below.
 ## Scope / limitations (deliberate, for the MVP)
 
 - Clip understanding is description-based — no FFmpeg proxies, Whisper
-  transcription, vision tagging, or embeddings yet (those are the "real
-  analysis" extension from the architecture doc).
+  transcription, vision tagging, or embeddings yet. Those are the "real
+  analysis" extension from the architecture doc.
 - Single project, file-based store (no Postgres/pgvector, no auth, no queue).
 - Critic runs one pass on generate; the full critique→re-render loop and
   multiple rough-cut variants are future work.
@@ -149,9 +165,9 @@ src/
   lib/
     agent/            planEdit / selectClips / critique / revise + JSON schemas
     anthropic.ts      Claude client + structured JSON call helper
-    timeline.ts       Patch engine + prompt formatting
+    timeline.ts       patch engine + prompt formatting
     types.ts          Timeline / Plan / Patch / Clip types
     store.ts          JSON-file project store
-    generative/       Provider abstraction + OpenAI and Gemini adapters
+    generative/       provider abstraction + OpenAI and Gemini adapters
   remotion/           VideoComposition + registered root for render/preview
 ```

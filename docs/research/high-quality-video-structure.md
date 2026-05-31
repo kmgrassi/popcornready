@@ -39,7 +39,7 @@ Common amateur signals:
 - No payoff
 - No emotional or informational arc
 
-**Key question:**  
+**Key question:**
 What should the viewer understand, feel, or do by the end?
 
 ---
@@ -67,7 +67,7 @@ Common amateur signals:
 - Shaky camera movement without purpose
 - Everything shot from the same distance
 
-**Key question:**  
+**Key question:**
 Does every shot look designed, or does it look merely captured?
 
 ---
@@ -95,7 +95,7 @@ Common amateur signals:
 - Muddy shadows
 - No separation from the background
 
-**Key question:**  
+**Key question:**
 Is the subject being sculpted by light?
 
 ---
@@ -123,7 +123,7 @@ Common amateur signals:
 - Abrupt audio cuts
 - Distracting background noise
 
-**Key question:**  
+**Key question:**
 Could the video still work if the viewer only listened to it?
 
 ---
@@ -153,7 +153,7 @@ Common amateur signals:
 - No rhythm
 - Hard-to-follow sequencing
 
-**Key question:**  
+**Key question:**
 Does the edit create momentum?
 
 ---
@@ -181,7 +181,7 @@ Common amateur signals:
 - Jarring shifts in tone
 - Default templates used without adaptation
 
-**Key question:**  
+**Key question:**
 Does the video feel like one complete piece?
 
 ---
@@ -394,7 +394,7 @@ Weak transitions:
 - Use inconsistent styles
 - Try to create energy that the story lacks
 
-**Rule of thumb:**  
+**Rule of thumb:**
 Use straight cuts by default. Add transitions only when they solve a storytelling or pacing problem.
 
 ---
@@ -428,8 +428,8 @@ A high-quality video is the result of:
 - Cohesive design
 - Emotional or informational payoff
 
-A low-quality video feels like clips assembled together.  
+A low-quality video feels like clips assembled together.
 A high-quality video feels like a complete experience.
 
-The difference is not polish alone.  
+The difference is not polish alone.
 The difference is intention.

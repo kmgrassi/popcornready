@@ -2,7 +2,7 @@
 
 ## Objective
 
-Create a feedback system that helps Aividi improve future video generation over
+Create a feedback system that helps Popcorn Ready improve future video generation over
 time. Feedback from a generated video should become structured knowledge that can
 influence later briefs, asset context, prompt patterns, provider settings,
 quality checks, or service code through a controlled Observe, Orient, Decide,
@@ -14,7 +14,7 @@ change reviewable before it affects future videos.
 
 ## Product Principle
 
-Aividi should learn from every reviewed output without losing deterministic,
+Popcorn Ready should learn from every reviewed output without losing deterministic,
 inspectable project state. Feedback becomes another first-class project input,
 alongside source assets, generated assets, briefs, timeline versions, model
 settings, patches, and exports.

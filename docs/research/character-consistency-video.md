@@ -7,7 +7,7 @@ identity, style, structure, temporal, and quality controls.
 
 ## Operating Model
 
-For Aividi, treat a recurring character as a first-class production asset:
+For Popcorn Ready, treat a recurring character as a first-class production asset:
 
 - Character bible: the canonical description of identity, body/silhouette,
   wardrobe, palette, style, and non-negotiable invariants.
@@ -64,12 +64,12 @@ image over fresh text-to-image after the character is established.
 Google image-generation guidance is especially relevant for recurring
 characters because it supports multiple reference images. For video, use Veo
 reference images and image-to-video/first-frame workflows where available.
-Aividi should pass character reference assets to Gemini video generation when
+Popcorn Ready should pass character reference assets to Gemini video generation when
 creating character-driven clips.
 
 ### Open / Local Pipelines
 
-If Aividi later supports local generation stacks, the highest-control route is:
+If Popcorn Ready later supports local generation stacks, the highest-control route is:
 
 - Fixed seed for exploration and reproducible local sweeps.
 - Low-strength image-to-image from a hero frame.
@@ -90,7 +90,7 @@ Video consistency fails in two ways:
 - Shot-to-shot drift: the same character changes between generated clips.
 - Frame-to-frame drift: the character flickers or changes inside one clip.
 
-Aividi should initially optimize for shot-to-shot consistency by generating
+Popcorn Ready should initially optimize for shot-to-shot consistency by generating
 short clips from consistent reference packs. Longer scenes should be assembled
 from multiple short clips, not from one long unconstrained generation.
 
@@ -135,7 +135,7 @@ measured separately from general visual quality.
 | Video flickers despite good stills | No temporal control | Use provider video references, first frames, or shorter clips |
 | Fine-tune memorizes background/outfit | Training data leakage | Curate cleaner references and separate identity/style/wardrobe |
 
-## Practical Defaults For Aividi
+## Practical Defaults For Popcorn Ready
 
 Initial implementation should avoid custom training and focus on provider-API
 controls:

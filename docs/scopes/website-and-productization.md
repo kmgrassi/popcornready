@@ -2,7 +2,7 @@
 
 ## Objective
 
-Give aividi a public front door and a pathway from open-source project to hosted
+Give Popcorn Ready a public front door and a pathway from open-source project to hosted
 product. The MVP proves the core loop; this scope adds the marketing surface
 that explains the product, lets a visitor start a video from a single prompt,
 presents hosted pricing, and points self-hosters to GitHub. It connects the
@@ -11,12 +11,12 @@ landing experience to the productization phases already defined in
 
 ## What Ships First (in this repo today)
 
-- A marketing landing page at `/` that explains what aividi is, how the loop
+- A marketing landing page at `/` that explains what Popcorn Ready is, how the loop
   works, what it does, hosted pricing, and a link to the GitHub repo for
   self-hosting.
 - A **one-shot** prompt entry point on the landing page: the visitor describes a
   30-second video (optionally starting from one of four template chips), and
-  aividi generates the video with no uploads required.
+  Popcorn Ready generates the video with no uploads required.
 - The existing editor moves to `/studio`, which reads `goal`, `length`, and
   `autostart` from the query string. With `autostart=1` it immediately runs the
   one-shot pipeline and shows the result.
@@ -75,8 +75,8 @@ Pricing decisions to resolve before launch:
 
 ## Two-Track Productization
 
-aividi monetizes the same product two ways; both must stay in sync with the
-durable principle that AI plans and patches structured timelines while aividi
+Popcorn Ready monetizes the same product two ways; both must stay in sync with the
+durable principle that AI plans and patches structured timelines while Popcorn Ready
 validates, versions, renders, and stores.
 
 1. **Open source / self-host.** The repo is the free tier. A user clones it,

@@ -1,0 +1,18 @@
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  background: #3a1414;
+  border: 1px solid #6b2020;
+  color: #ffb4b4;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.ready {
+  color: var(--good);
+  font-size: 12px;
+}

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Allow Aividi to generate images and videos with recurring characters that remain
+Allow Popcorn Ready to generate images and videos with recurring characters that remain
 recognizable across shots, revisions, and provider calls.
 
 This scope turns the research summary in
@@ -412,7 +412,7 @@ The following work should be deferred until after PR1-PR3:
 
 ## Open Questions
 
-- Should Aividi create character profiles manually only, or auto-suggest them
+- Should Popcorn Ready create character profiles manually only, or auto-suggest them
   from repeated people/subjects in uploaded clips?
 - Should reference packs allow real people, fictional characters, products, and
   mascots under one model, or should there be separate profile types?
