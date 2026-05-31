@@ -11,6 +11,14 @@ test("video cost scales at ~$0.50 per second", () => {
     estimateCostUsd({ provider: "gemini", kind: "video", durationSec: 4 }),
     2
   );
+  assert.equal(
+    estimateCostUsd({ provider: "runway", kind: "video", durationSec: 5 }),
+    0.6
+  );
+  assert.equal(
+    estimateCostUsd({ provider: "ltx", kind: "video", durationSec: 6 }),
+    0.36
+  );
 });
 
 test("image cost is a flat per-generation rate", () => {

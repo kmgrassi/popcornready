@@ -30,26 +30,37 @@ export async function generateBeatClip(input: {
   const referencePaths = input.characterContext?.references.map(
     (reference) => reference.path
   );
+  const baseRequest = {
+    prompt: input.prompt,
+    size: input.size,
+    seconds: input.seconds,
+    referencePaths,
+    characterContext: input.characterContext,
+  };
   const result =
     input.provider === "openai"
       ? await provider.generateAsset({
           provider: "openai",
           kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-          referencePaths,
-          characterContext: input.characterContext,
+          ...baseRequest,
         })
-      : await provider.generateAsset({
-          provider: "gemini",
-          kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-          referencePaths,
-          characterContext: input.characterContext,
-        });
+      : input.provider === "gemini"
+        ? await provider.generateAsset({
+            provider: "gemini",
+            kind: "video",
+            ...baseRequest,
+          })
+        : input.provider === "runway"
+          ? await provider.generateAsset({
+              provider: "runway",
+              kind: "video",
+              ...baseRequest,
+            })
+          : await provider.generateAsset({
+              provider: "ltx",
+              kind: "video",
+              ...baseRequest,
+            });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newId("vid");
   const filename = `${id}.${result.extension}`;
