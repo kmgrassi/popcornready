@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Dispatch, SetStateAction, useMemo, useState } from "react";
 import {
   CharacterConsistencyReview,
   CharacterProfile,
@@ -19,6 +19,7 @@ type UseCharacterLibraryParams = {
   setBusy: (value: string | null) => void;
   setError: (value: string | null) => void;
   setProject: (project: Project | null) => void;
+  setCharacterProfileIds: Dispatch<SetStateAction<string[]>>;
 };
 
 export function useCharacterLibrary({
@@ -27,6 +28,7 @@ export function useCharacterLibrary({
   setBusy,
   setError,
   setProject,
+  setCharacterProfileIds,
 }: UseCharacterLibraryParams) {
   const [activeCharacterId, setActiveCharacterId] = useState("");
   const [editingCharacterId, setEditingCharacterId] = useState<string | null>(
@@ -123,6 +125,9 @@ export function useCharacterLibrary({
         throw new Error(data.error || "Unable to archive character");
       }
       setProject(data.project);
+      setCharacterProfileIds((prev) =>
+        prev.filter((candidate) => candidate !== id)
+      );
       if (activeCharacterId === id) setActiveCharacterId("");
     } catch (archiveError: any) {
       setError(archiveError.message);

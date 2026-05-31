@@ -131,6 +131,7 @@ export function Editor({
     setBusy,
     setError,
     setProject,
+    setCharacterProfileIds,
   });
 
   useEffect(() => {
