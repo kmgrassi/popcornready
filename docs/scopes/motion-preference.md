@@ -37,15 +37,25 @@ The LLM picks per beat. The choice is honored in
 (`src/lib/composition.ts:414-433`) prevent runaway counts (default: 10 images,
 3 videos) but do not shape the mix.
 
-**2. One-shot route (`src/app/api/oneshot/route.ts:138-162`).** The recently
-landed landing-page path always generates **video** for every beat. There is no
-image branch; the planner's per-beat decision is not consulted. This is the
-path the landing prompt currently uses (commit `c5524b7`).
+**2. One-shot pipelines — two implementations.** Both currently hard-code
+video for every beat and do not consult the planner's per-beat decision:
+
+- **Synchronous route (`src/app/api/oneshot/route.ts:138-162`).** The recently
+  landed landing-page path. `generateBeatClip` always passes `kind: "video"`.
+  This is the path the landing prompt currently uses (commit `c5524b7`).
+- **Asynchronous run executor (`src/lib/runs/execute.ts:86-107`).** Explicitly
+  described as the asynchronous twin of `/api/oneshot` (same planner → per-beat
+  generation → assembly → critique flow, but writing progress into the run
+  store for the polling UI). Its `generateBeatClip` also hard-codes
+  `kind: "video"` at lines 99 and 106.
 
 The result is that the only place a mixed image/video run can come from today
 is the composition-planner pipeline, and even there the user has no way to
 shift the feel — the single "prefer images" hint biases the mix in one
-direction regardless of the brief's theme.
+direction regardless of the brief's theme. Both one-shot implementations need
+to grow an image branch for the motion preference to take effect on any
+landing-prompt run, whether it executes synchronously or through the
+progress/polling run path.
 
 ## Terminology
 
@@ -127,20 +137,30 @@ prompt, **replacing** the current "prefer images unless motion is essential"
 line. The mode guidance (`MODE_GUIDANCE`) is unchanged; the new line slots in
 alongside it.
 
-### One-shot route
+### One-shot pipelines (sync + async)
 
-The one-shot path (`src/app/api/oneshot/route.ts`) is currently video-only and
-does not run the composition planner. Two options (see Open Decisions):
+Both one-shot implementations are currently video-only and bypass the
+composition planner: the synchronous route
+(`src/app/api/oneshot/route.ts`) and its asynchronous twin in
+`src/lib/runs/execute.ts` (the executor that powers the progress/polling run
+path). Two options (see Open Decisions):
 
-- **Recommended:** route the landing prompt through `planCompositionBeats` so
-  the motion preference takes effect there too, and add an image branch to
+- **Recommended:** route the landing prompt through `planCompositionBeats` in
+  *both* implementations so the motion preference takes effect regardless of
+  which path runs the brief, and add an image branch to each
   `generateBeatClip` for beats the planner marks `generate_image`. This
-  reunifies the two pipelines around one decision point.
-- **Alternative:** leave one-shot video-only and make `motionPreference`
-  silently inert there until the pipelines are merged.
+  reunifies all three entry points (composition planner, sync one-shot, async
+  run executor) around one decision point. The shared `generateBeatClip`
+  shape across both files makes this a near-mirror change, but it must be
+  applied in both places — changing only the sync route leaves
+  `motionPreference: image-forward` a no-op on every run that goes through
+  the progress UI.
+- **Alternative:** leave one or both one-shot implementations video-only and
+  make `motionPreference` silently inert there until they are merged.
 
-Without the recommended change, the new knob is a no-op for the most common
-entry path (the landing prompt), which would undermine the whole point.
+Without the recommended change applied to **both** files, the new knob is a
+no-op for the most common entry path (the landing prompt), which would
+undermine the whole point.
 
 ### Cost estimate
 
@@ -229,21 +249,34 @@ Acceptance criteria:
 - The progress UI can display "Motion: balanced" without extra calls.
 - Older runs without the field render as `auto`.
 
-### PR 4: Reunify one-shot with the planner (or document the gap)
+### PR 4: Reunify both one-shot implementations with the planner (or document the gap)
 
 Route the landing/one-shot prompt through `planCompositionBeats` and add an
 image branch to `generateBeatClip` so `generate_image` beats produce stills.
-If this is deferred, instead document that `motionPreference` has no effect on
-the one-shot path until a follow-up.
+This must land in **both** files that implement the one-shot flow:
+
+- `src/app/api/oneshot/route.ts` (synchronous route)
+- `src/lib/runs/execute.ts` (asynchronous twin powering the progress/polling
+  run path)
+
+If either is left video-only, `motionPreference` will be inert on whichever
+entry path uses that file. If reunification is deferred, document that
+`motionPreference` has no effect on the un-migrated path(s) until a follow-up,
+and consider disabling the UI control on those paths.
 
 Acceptance criteria:
 
 - A landing-prompt run with `motionPreference: image-forward` produces stills
-  for beats where motion is not essential.
+  for beats where motion is not essential, on **both** the sync and async
+  one-shot paths.
 - A run with `motionPreference: video-forward` produces video for every beat
-  where it is reasonable (matching today's all-video behavior).
+  where it is reasonable (matching today's all-video behavior), on both
+  paths.
 - Errors in the image branch fall back or fail cleanly without breaking the
   run.
+- The two `generateBeatClip` implementations stay in sync (or are refactored
+  to share a single implementation as part of this PR) so future changes
+  don't drift.
 
 ### PR 5: Motion control in the pre-run UI
 
@@ -258,9 +291,14 @@ Acceptance criteria:
 
 ## Open Decisions
 
-- **One-shot reunification (PR 4):** do we merge the one-shot path back into
-  the composition planner now, or ship the knob as planner-only and accept
-  that it is inert for the landing prompt until a later PR?
+- **One-shot reunification (PR 4):** do we merge **both** one-shot
+  implementations (sync route and async run executor) back into the
+  composition planner now, or ship the knob as planner-only and accept that
+  it is inert for whichever landing-prompt path is not yet migrated? A
+  partial migration (only one of the two files) is the worst outcome — the
+  knob would silently work on one path and not the other, which is hard to
+  reason about. Should the two `generateBeatClip` helpers be unified into a
+  shared implementation as part of this work to prevent future drift?
 - **`auto` system-prompt wording:** should `auto` explicitly tell the planner
   to "consider whether the topic calls for kinetic energy or stillness," or
   stay silent and let the planner default to its own judgment? Explicit is
@@ -290,6 +328,12 @@ Acceptance criteria:
   ignores the new knob, which is worse than not shipping it. Either ship PR 4
   or surface the limitation in the UI (e.g. disable the control when the
   selected pipeline is one-shot).
+- **Partial one-shot migration.** Because the same one-shot logic lives in
+  two files — `src/app/api/oneshot/route.ts` and `src/lib/runs/execute.ts` —
+  it is easy to migrate one and forget the other. The result would be a
+  knob that works on sync runs but silently no-ops on the async/progress
+  path (or vice versa), which is harder to diagnose than no support at all.
+  PR 4's acceptance criteria explicitly cover both files to prevent this.
 - **Cost surprise.** A user who picks `video-forward` for feel may be
   shocked by the cost. The cost estimate must update visibly when the
   preference changes, or this becomes a footgun.
