@@ -9,6 +9,7 @@ import {
   TimelineSegment,
 } from "../types";
 import { clipCatalog, timelineForPrompt } from "../timeline";
+import { compileTimelineViaEditGraph } from "../edit-graph";
 import { storyContextForPrompt } from "../story-context";
 import {
   estimateWordsForDuration,
@@ -130,12 +131,20 @@ Produce the timeline segments now.`;
   const showCaptions =
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
-  return {
+  const timeline: Timeline = {
     aspectRatio: input.plan.aspectRatio,
     fps: 30,
     segments: raw.segments as TimelineSegment[],
     ...(showCaptions === undefined ? {} : { showCaptions }),
   };
+
+  return compileTimelineViaEditGraph({
+    id: "rough_cut",
+    goal: input.plan.beats.map((beat) => beat.intent).join(" "),
+    plan: input.plan,
+    timeline,
+    clips: input.clips,
+  });
 }
 
 export async function critique(input: {

@@ -1,8 +1,9 @@
 import {
-  EDIT_GRAPH_SCHEMA,
+  EDIT_GRAPH_ASSET_SEMANTIC_ANALYSIS_SCHEMA_VERSION,
+  EDIT_GRAPH_EDIT_DECISION_SCHEMA_VERSION,
+  AssetSemanticAnalysis,
   EditDecision,
   MediaSegment,
-  SemanticAnalysis,
   TextEditOperation,
   TranscriptSpan,
   WordTiming,
@@ -76,6 +77,10 @@ function wordsFromText(text: string): string[] {
     .filter(Boolean);
 }
 
+function wordMidpointMs(word: WordTiming): number {
+  return word.startMs + (word.endMs - word.startMs) / 2;
+}
+
 export function transcriptFromText(args: {
   assetId: string;
   text: string;
@@ -115,12 +120,38 @@ export function transcriptFromText(args: {
 }
 
 function transcriptTextFor(asset: SemanticAssetInput): string | undefined {
-  return (
-    asset.context?.transcriptText ||
-    asset.context?.summary ||
-    asset.description ||
-    asset.provenance?.prompt
-  )?.trim();
+  return asset.context?.transcriptText?.trim();
+}
+
+function splitTranscriptByMoments(
+  assetId: string,
+  transcript: TranscriptSpan[],
+  moments: { startSec: number; endSec: number; label?: string }[]
+): TranscriptSpan[] {
+  if (transcript.length === 0 || moments.length === 0) return transcript;
+  const words = transcript.flatMap((span) => span.words);
+  const spans: TranscriptSpan[] = [];
+
+  moments.forEach((moment, index) => {
+    const startMs = Math.round(moment.startSec * 1000);
+    const endMs = Math.round(moment.endSec * 1000);
+    const momentWords = words.filter((word) => {
+      const midpoint = wordMidpointMs(word);
+      return midpoint >= startMs && midpoint < endMs;
+    });
+    if (momentWords.length === 0) return;
+
+    spans.push({
+      id: `${assetId}_span_${index + 1}`,
+      assetId,
+      startMs: momentWords[0].startMs,
+      endMs: momentWords[momentWords.length - 1].endMs,
+      text: momentWords.map((word) => word.word).join(" "),
+      words: momentWords,
+    });
+  });
+
+  return spans.length > 0 ? spans : transcript;
 }
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
@@ -197,41 +228,57 @@ export function decomposeAssetIntoSegments(
 export function buildSemanticAnalysis(
   asset: SemanticAssetInput,
   options: BuildOptions = {}
-): SemanticAnalysis {
+): AssetSemanticAnalysis {
   const durationMs = durationMsFor(asset);
   const text = transcriptTextFor(asset);
   const transcript = text
     ? transcriptFromText({ assetId: asset.id, text, durationMs })
     : [];
-  const segments = decomposeAssetIntoSegments(asset, transcript);
+  const scopedTranscript = splitTranscriptByMoments(
+    asset.id,
+    transcript,
+    asset.context?.moments ?? []
+  );
+  const segments = decomposeAssetIntoSegments(asset, scopedTranscript);
 
   return {
-    schemaVersion: EDIT_GRAPH_SCHEMA.semanticAnalysis,
+    schemaVersion: EDIT_GRAPH_ASSET_SEMANTIC_ANALYSIS_SCHEMA_VERSION,
     assetId: asset.id,
-    transcript,
+    transcript: scopedTranscript,
     segments,
     createdAt: options.now ?? new Date().toISOString(),
   };
 }
 
 function segmentIdsForTextEdit(
-  analysis: Pick<SemanticAnalysis, "transcript" | "segments">,
+  analysis: Pick<AssetSemanticAnalysis, "transcript" | "segments">,
   textEdit: TextEditOperation
 ): string[] {
   const spanIds = new Set<string>();
+  const wordRanges: { startMs: number; endMs: number }[] = [];
   if ("transcriptSpanIds" in textEdit) {
     for (const id of textEdit.transcriptSpanIds) spanIds.add(id);
   }
   if ("wordIds" in textEdit) {
     for (const span of analysis.transcript) {
-      if (span.words.some((word) => textEdit.wordIds.includes(word.id))) {
+      const matchingWords = span.words.filter((word) => textEdit.wordIds.includes(word.id));
+      if (matchingWords.length > 0) {
         spanIds.add(span.id);
+        wordRanges.push(
+          ...matchingWords.map((word) => ({ startMs: word.startMs, endMs: word.endMs }))
+        );
       }
     }
   }
 
   return analysis.segments
-    .filter((segment) => segment.transcriptSpanIds.some((id) => spanIds.has(id)))
+    .filter(
+      (segment) =>
+        (segment.transcriptSpanIds ?? []).some((id) => spanIds.has(id)) ||
+        wordRanges.some((word) =>
+          overlaps(word.startMs, word.endMs, segment.startMs, segment.endMs)
+        )
+    )
     .map((segment) => segment.id);
 }
 
@@ -250,7 +297,7 @@ function decisionOperationFor(textEdit: TextEditOperation): EditDecision["operat
 }
 
 export function textEditToEditDecision(
-  analysis: Pick<SemanticAnalysis, "transcript" | "segments">,
+  analysis: Pick<AssetSemanticAnalysis, "transcript" | "segments">,
   textEdit: TextEditOperation,
   options: TextEditDecisionOptions = {}
 ): EditDecision {
@@ -265,7 +312,7 @@ export function textEditToEditDecision(
 
   return {
     id: options.id ?? `decision_${Math.random().toString(36).slice(2, 10)}`,
-    schemaVersion: EDIT_GRAPH_SCHEMA.editDecision,
+    schemaVersion: EDIT_GRAPH_EDIT_DECISION_SCHEMA_VERSION,
     beatId: options.beatId ?? "transcript_edit",
     operation: decisionOperationFor(textEdit),
     sourceSegmentIds,

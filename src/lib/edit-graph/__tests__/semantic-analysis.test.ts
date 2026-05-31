@@ -27,8 +27,15 @@ test("buildSemanticAnalysis creates transcript spans and moment segments", () =>
 
   assert.equal(analysis.schemaVersion, "semanticAnalysis.v1");
   assert.equal(analysis.assetId, "asset_1");
-  assert.equal(analysis.transcript.length, 1);
-  assert.equal(analysis.transcript[0].words.length, 10);
+  assert.equal(analysis.transcript.length, 2);
+  assert.equal(
+    analysis.transcript.reduce((count, span) => count + span.words.length, 0),
+    10
+  );
+  assert.deepEqual(
+    analysis.segments.map((segment) => segment.transcriptSpanIds),
+    [["asset_1_span_1"], ["asset_1_span_2"]]
+  );
   assert.deepEqual(
     analysis.segments.map((segment) => ({
       startMs: segment.startMs,
@@ -48,6 +55,20 @@ test("buildSemanticAnalysis creates transcript spans and moment segments", () =>
       },
     ]
   );
+});
+
+test("buildSemanticAnalysis keeps summaries out of transcript", () => {
+  const analysis = buildSemanticAnalysis({
+    id: "asset_summary",
+    kind: "image",
+    context: {
+      summary: "A product screenshot with the dashboard open.",
+      recommendedRoles: ["demo"],
+    },
+  });
+
+  assert.deepEqual(analysis.transcript, []);
+  assert.equal(analysis.segments[0].visualDescription, "A product screenshot with the dashboard open.");
 });
 
 test("textEditToEditDecision maps word edits back to source segments", () => {
@@ -84,4 +105,31 @@ test("textEditToEditDecision maps word edits back to source segments", () => {
   assert.deepEqual(decision.constraints?.mustIncludeWords, ["filler"]);
   assert.equal(decision.rationale, "Remove filler word.");
   assert.equal(decision.confidence, 0.9);
+});
+
+test("textEditToEditDecision targets only the matching moment segment", () => {
+  const analysis = buildSemanticAnalysis({
+    id: "asset_3",
+    kind: "video",
+    durationSec: 8,
+    context: {
+      transcriptText: "First hook words second payoff words",
+      moments: [
+        { startSec: 0, endSec: 4, label: "hook" },
+        { startSec: 4, endSec: 8, label: "payoff" },
+      ],
+    },
+  });
+  const payoffWord = analysis.transcript
+    .flatMap((span) => span.words)
+    .find((word) => word.word === "payoff");
+  assert.ok(payoffWord);
+
+  const decision = textEditToEditDecision(
+    analysis,
+    { type: "caption_emphasis", wordIds: [payoffWord.id] },
+    { id: "decision_2" }
+  );
+
+  assert.deepEqual(decision.sourceSegmentIds, ["asset_3_segment_2"]);
 });

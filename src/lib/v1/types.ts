@@ -6,6 +6,11 @@
 // them and writes Jobs + VersionedTimelines. They live here as the agreed
 // contract so every PR builds against the same shapes.
 
+import {
+  CompiledTimelineMetadata,
+  EDIT_GRAPH_SCHEMA_VERSION,
+  EditGraphDocument,
+} from "../edit-graph";
 import { AspectRatio, CriticReport, StoryContext, TimelineSegment } from "../types";
 
 export type { AspectRatio } from "../types";
@@ -15,6 +20,7 @@ export const SCHEMA = {
   briefVersion: "brief.v1",
   asset: "asset.v1",
   composition: "composition.v1",
+  editGraph: EDIT_GRAPH_SCHEMA_VERSION,
   timeline: "timeline.v1",
   job: "job.v1",
 } as const;
@@ -205,9 +211,12 @@ export interface VersionedTimeline {
   showCaptions?: boolean;
   segments: TimelineSegment[];
   provenance: TimelineProvenance;
+  derivedFrom?: CompiledTimelineMetadata;
   createdBy: { jobId: string };
   createdAt: string;
 }
+
+export type VersionedEditGraph = EditGraphDocument;
 
 // --- Generation request/result --------------------------------------------
 
@@ -236,6 +245,7 @@ export interface GenerationJobInput {
 
 export interface GenerationJobResult {
   timelineIds: string[];
+  editGraphIds?: string[];
 }
 
 export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
@@ -262,6 +272,9 @@ export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
 //     stage's progressPercent/message.
 //   - jobIds and artifactIds point back to the authoritative Job and Artifact
 //     records; the run never duplicates their state.
+//   - Review checkpoints are represented by reviewGate, not by adding an
+//     "awaiting_review" status. A paused run remains an active JobStatus
+//     while execution is idle and waiting for approval.
 
 export type GenerationRunStatus = JobStatus;
 
@@ -276,6 +289,34 @@ export type GenerationStageType =
   | "quality_review"
   | "export"
   | "ready";
+
+// The user's per-run choice of which stages should pause for review after they
+// complete. An empty or omitted list is a straight-through run.
+export const GATEABLE_GENERATION_STAGE_TYPES = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+] as const satisfies readonly GenerationStageType[];
+
+export type GateableGenerationStageType =
+  (typeof GATEABLE_GENERATION_STAGE_TYPES)[number];
+
+export interface ReviewGateConfig {
+  gatedStages: GateableGenerationStageType[];
+}
+
+// Run-level review state, orthogonal to GenerationRunStatus. When present, the
+// run is awaiting user approval before the next stage can start.
+export interface RunReviewGate {
+  stageType: GateableGenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
 
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
@@ -294,6 +335,8 @@ export interface GenerationRun {
   projectId: string;
   briefVersionId?: string;
   status: GenerationRunStatus;
+  reviewGates?: GateableGenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
@@ -311,6 +354,8 @@ export interface GenerationStage {
   label: string;
   order: number;
   status: GenerationRunStatus;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   progressPercent?: number;
   message?: string;
   startedAt?: string;
