@@ -131,6 +131,54 @@ export interface StoryContext {
   callToAction?: string;
 }
 
+export type StoryBeatRole =
+  | "hook"
+  | "context"
+  | "problem"
+  | "setup"
+  | "demo"
+  | "evidence"
+  | "contrast"
+  | "payoff"
+  | "cta"
+  | "outro"
+  | "custom";
+
+export interface StoryBeat {
+  id: string;
+  role: StoryBeatRole;
+  name: string;
+  intent: string;
+  targetDurationMs?: number;
+}
+
+export interface StoryPlan {
+  id: string;
+  objective: string;
+  targetDurationMs: number;
+  audience?: string;
+  tone?: string;
+  beats: StoryBeat[];
+}
+
+export interface EditDecision {
+  id: string;
+  beatId: string;
+  operation: "select_segment";
+  sourceClipId: string;
+  sourceInMs: number;
+  sourceOutMs: number;
+  rationale?: string;
+  caption?: string;
+}
+
+export interface EditGraph {
+  schemaVersion: "edit-graph.v1";
+  story: StoryPlan;
+  decisions: EditDecision[];
+  storyContext?: StoryContext;
+}
+
 export interface TimelineSegment {
   id: string;
   clipId: string;
@@ -306,6 +354,7 @@ export interface Project {
   id: string;
   goal: string;
   storyContext?: StoryContext;
+  editGraph?: EditGraph;
   plan: EditPlan | null;
   timeline: Timeline | null;
   clips: Clip[];

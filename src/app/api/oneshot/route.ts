@@ -3,6 +3,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import { saveProject } from "@/lib/store";
 import { critique, planEdit } from "@/lib/agent";
+import {
+  compileEditGraphToTimeline,
+  editGraphFromTimeline,
+  editGraphForGeneratedBeatClips,
+} from "@/lib/edit-graph";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
 import { providerFor } from "@/lib/generative/providers";
 import {
@@ -12,7 +17,6 @@ import {
   Project,
   StoryContext,
   Timeline,
-  TimelineSegment,
 } from "@/lib/types";
 import {
   OpenAIVideoSeconds,
@@ -275,19 +279,21 @@ export async function POST(req: NextRequest) {
     );
 
     // 3. Assemble a beat-by-beat timeline from the generated clips.
-    const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
-      id: newId("seg"),
-      clipId: clips[i].id,
-      sourceInSec: 0,
-      sourceOutSec: clips[i].durationSec,
-      role: beat.name,
-      reason: beat.intent,
-    }));
+    const editGraph = editGraphForGeneratedBeatClips({
+      goal,
+      plan,
+      clips,
+      storyContext,
+    });
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileEditGraphToTimeline({
+        graph: editGraph,
+        aspectRatio,
+        fps: 30,
+        showCaptions,
+      }),
       clips
     );
-    timeline.showCaptions = showCaptions;
 
     // 4. Critique once and apply patches — but never let it empty the cut.
     const { report, patches } = await critique({
@@ -298,11 +304,18 @@ export async function POST(req: NextRequest) {
     });
     const patched = applyPatches(timeline, patches, clips);
     if (patched.segments.length > 0) timeline = patched;
+    const persistedEditGraph = editGraphFromTimeline({
+      goal,
+      plan,
+      timeline,
+      storyContext,
+    });
 
     const project: Project = {
       id: "default",
       goal,
       storyContext,
+      editGraph: persistedEditGraph,
       plan,
       timeline,
       clips,

@@ -9,6 +9,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { critique, planEdit } from "@/lib/agent";
+import {
+  compileEditGraphToTimeline,
+  editGraphFromTimeline,
+  editGraphForGeneratedBeatClips,
+} from "@/lib/edit-graph";
 import { providerFor } from "@/lib/generative/providers";
 import { GenerativeProviderName } from "@/lib/generative/types";
 import { saveProject } from "@/lib/store";
@@ -21,7 +26,6 @@ import {
   Project,
   StoryContext,
   Timeline,
-  TimelineSegment,
 } from "@/lib/types";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 import {
@@ -283,22 +287,20 @@ export async function executeRun(run: GenerationRun): Promise<void> {
 
     // timeline_assembly
     await startStage(runId, "timeline_assembly", "Assembling the timeline…");
-    const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
-      id: newAssetId("seg"),
-      clipId: clips[i].id,
-      sourceInSec: 0,
-      sourceOutSec: clips[i].durationSec,
-      role: beat.name,
-      reason: beat.intent,
-    }));
+    const editGraph = editGraphForGeneratedBeatClips({
+      goal,
+      plan,
+      clips,
+      storyContext,
+    });
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileEditGraphToTimeline({ graph: editGraph, aspectRatio, fps: 30 }),
       clips
     );
     await completeStage(
       runId,
       "timeline_assembly",
-      `Assembled ${segments.length} segments.`
+      `Assembled ${timeline.segments.length} segments.`
     );
 
     // quality_review
@@ -330,6 +332,12 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       id: "default",
       goal,
       storyContext,
+      editGraph: editGraphFromTimeline({
+        goal,
+        plan,
+        timeline,
+        storyContext,
+      }),
       plan,
       timeline,
       clips,
