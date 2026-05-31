@@ -9,6 +9,7 @@ import {
   GenerationStage,
   GenerationStageItem,
   GenerationStageType,
+  RunReviewGate,
 } from "./types";
 import { ApiError } from "./errors";
 
@@ -303,6 +304,7 @@ export interface GenerationRunResultArtifact {
 export interface CreateGenerationRunBody {
   briefVersionId?: string;
   prompt?: string;
+  reviewGates?: unknown;
 }
 
 export interface CreateRunArgs {
@@ -326,11 +328,61 @@ const STAGE_SEEDS: StageSeed[] = [
   { type: "ready" },
 ];
 
+export const GATEABLE_GENERATION_STAGES: readonly GenerationStageType[] = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+];
+
+const GATEABLE_STAGE_SET = new Set<GenerationStageType>(GATEABLE_GENERATION_STAGES);
+const TERMINAL_RUN_STATUSES = new Set<GenerationRunStatus>([
+  "succeeded",
+  "failed",
+  "canceled",
+]);
+const ACTIVE_RUN_STATUSES = new Set<GenerationRunStatus>(["queued", "running"]);
+
+export function validateReviewGates(value: unknown): GenerationStageType[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new ApiError("validation_failed", "reviewGates must be an array.", {
+      fields: [{ path: "reviewGates", message: "Must be an array of gateable stage types." }],
+    });
+  }
+
+  const gates: GenerationStageType[] = [];
+  const seen = new Set<GenerationStageType>();
+  value.forEach((raw, index) => {
+    if (typeof raw !== "string" || !GATEABLE_STAGE_SET.has(raw as GenerationStageType)) {
+      throw new ApiError("validation_failed", "reviewGates contains an invalid stage type.", {
+        fields: [
+          {
+            path: `reviewGates.${index}`,
+            message: "Must be one of the gateable stage types; ready cannot be gated.",
+          },
+        ],
+      });
+    }
+    const stage = raw as GenerationStageType;
+    if (!seen.has(stage)) {
+      seen.add(stage);
+      gates.push(stage);
+    }
+  });
+
+  return gates;
+}
+
 export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
   const { store, projectId, body } = args;
   const parsedBody = body && typeof body === "object" && !Array.isArray(body)
     ? body
     : {};
+  const reviewGates = validateReviewGates(parsedBody.reviewGates);
   const briefVersionId = parsedBody.briefVersionId
     ? String(parsedBody.briefVersionId).trim() || undefined
     : undefined;
@@ -339,6 +391,7 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
     projectId,
     status: "queued" as GenerationRunStatus,
     ...(briefVersionId ? { briefVersionId } : {}),
+    ...(reviewGates.length > 0 ? { reviewGates } : {}),
     currentStageType: "brief_intake",
     progressPercent: 0,
     message: "Run queued.",
@@ -355,6 +408,7 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
       status: "queued",
       jobIds: [],
       artifactIds: [],
+      ...(reviewGates.includes(seed.type) ? { isReviewGate: true } : {}),
     });
     stages.push(stage);
   }
@@ -415,4 +469,141 @@ export function requireRun(
     throw new ApiError("not_found", `Generation run not found: ${runId}`);
   }
   return payload;
+}
+
+export async function completeStageAndMaybePauseAtGate(args: {
+  store: GenerationRunsStore;
+  runId: string;
+  stageId: string;
+  message?: string;
+}): Promise<GenerationRunPayload> {
+  const { store, runId, stageId, message } = args;
+  const run = await store.getRun(runId);
+  if (!run) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  const stage = await store.getStage(stageId);
+  if (!stage || stage.runId !== runId) {
+    throw new ApiError("not_found", `Generation stage not found: ${stageId}`);
+  }
+
+  const now = new Date().toISOString();
+  const completed = await store.updateStage(stageId, {
+    status: "succeeded",
+    progressPercent: 100,
+    completedAt: now,
+    ...(message ? { message } : {}),
+  });
+
+  if (completed.isReviewGate && completed.type !== "ready") {
+    const reviewGate: RunReviewGate = {
+      stageType: completed.type,
+      stageId: completed.stageId,
+      state: "awaiting_review",
+      enteredAt: now,
+    };
+    await store.updateRun(runId, {
+      status: "running",
+      currentStageType: completed.type,
+      reviewGate,
+      progressPercent: progressAfterStage(completed),
+      message: "Ready for your review.",
+    });
+  } else {
+    await startNextStageAfter(store, run, completed);
+  }
+
+  const payload = await assemblePayload(store, runId);
+  if (!payload) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  return payload;
+}
+
+export async function approveGenerationRunGate(args: {
+  store: GenerationRunsStore;
+  runId: string;
+  projectId: string;
+}): Promise<GenerationRunPayload> {
+  const { store, runId, projectId } = args;
+  const payload = requireRun(await assemblePayload(store, runId), runId, projectId);
+  const { run, stages } = payload;
+
+  if (TERMINAL_RUN_STATUSES.has(run.status)) {
+    throw new ApiError(
+      "job_not_cancelable",
+      `Generation run ${runId} is ${run.status} and cannot be approved.`,
+      { status: run.status }
+    );
+  }
+
+  if (!run.reviewGate) {
+    if (ACTIVE_RUN_STATUSES.has(run.status)) return payload;
+    throw new ApiError(
+      "job_not_cancelable",
+      `Generation run ${runId} is ${run.status} and cannot be approved.`,
+      { status: run.status }
+    );
+  }
+
+  const gatedStage = stages.find((stage) => stage.stageId === run.reviewGate?.stageId);
+  if (!gatedStage) {
+    throw new ApiError(
+      "validation_failed",
+      `Review gate points at a missing stage: ${run.reviewGate.stageId}`
+    );
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const reviewedStage = await store.updateStage(gatedStage.stageId, {
+    reviewedAt,
+    status: "succeeded",
+    progressPercent: 100,
+    completedAt: gatedStage.completedAt ?? reviewedAt,
+  });
+  const updatedRun = await store.updateRun(runId, {
+    reviewGate: null,
+    status: "running",
+    message: `${reviewedStage.label} approved.`,
+  });
+  await startNextStageAfter(store, updatedRun, reviewedStage);
+
+  const nextPayload = await assemblePayload(store, runId);
+  if (!nextPayload) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  return nextPayload;
+}
+
+async function startNextStageAfter(
+  store: GenerationRunsStore,
+  run: GenerationRun,
+  completedStage: GenerationStage
+): Promise<void> {
+  const stages = await store.listStagesForRun(run.runId);
+  const nextStage = stages.find((stage) => stage.order > completedStage.order);
+  if (!nextStage) {
+    await store.updateRun(run.runId, {
+      status: "succeeded",
+      currentStageType: "ready",
+      progressPercent: 100,
+      message: "Your video is ready.",
+      completedAt: new Date().toISOString(),
+      reviewGate: null,
+    });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await store.updateStage(nextStage.stageId, {
+    status: "running",
+    startedAt: nextStage.startedAt ?? now,
+    progressPercent: nextStage.progressPercent ?? 0,
+  });
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: nextStage.type,
+    progressPercent: Math.round((nextStage.order / STAGE_SEEDS.length) * 100),
+    message: `Running ${nextStage.label}.`,
+    reviewGate: null,
+    startedAt: run.startedAt ?? now,
+  });
+}
+
+function progressAfterStage(stage: GenerationStage): number {
+  return Math.round(((stage.order + 1) / STAGE_SEEDS.length) * 100);
 }

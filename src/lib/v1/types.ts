@@ -277,6 +277,17 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+export interface ReviewGateConfig {
+  gatedStages: GenerationStageType[];
+}
+
+export interface RunReviewGate {
+  stageType: GenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
+
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
 // `details` carry the extras the progress UI needs to offer recovery.
@@ -301,6 +312,8 @@ export interface GenerationRun {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  reviewGates?: GenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   error?: GenerationErrorSummary;
 }
 
@@ -319,6 +332,8 @@ export interface GenerationStage {
   artifactIds: string[];
   createdAt: string;
   updatedAt: string;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   error?: GenerationErrorSummary;
 }
 

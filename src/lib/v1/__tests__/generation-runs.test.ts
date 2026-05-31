@@ -7,7 +7,9 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../errors";
 import {
   GenerationRunsStore,
+  approveGenerationRunGate,
   assemblePayload,
+  completeStageAndMaybePauseAtGate,
   createGenerationRunsStore,
   createRunWithSeedStages,
   requireRun,
@@ -394,6 +396,172 @@ test("createRunWithSeedStages persists run + stages so polling sees the same dat
     polled!.stages.map((s) => s.order),
     [0, 1, 2, 3, 4, 5, 6, 7],
     "stages should be sorted by order"
+  );
+});
+
+test("createRunWithSeedStages marks selected review gates", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_gates",
+    body: { reviewGates: ["creative_plan", "asset_generation", "creative_plan"] },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, ["creative_plan", "asset_generation"]);
+  assert.deepEqual(
+    payload.stages.filter((stage) => stage.isReviewGate).map((stage) => stage.type),
+    ["creative_plan", "asset_generation"]
+  );
+});
+
+test("createRunWithSeedStages rejects invalid and non-gateable review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_bad_gates",
+        body: { reviewGates: ["ready"] },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_bad_gates",
+        body: { reviewGates: "creative_plan" },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+});
+
+test("completeStageAndMaybePauseAtGate pauses a gated run", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_pause",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+
+  const paused = await completeStageAndMaybePauseAtGate({
+    store,
+    runId: created.run.runId,
+    stageId: planStage.stageId,
+    message: "Plan ready.",
+  });
+
+  assert.equal(paused.run.status, "running");
+  assert.equal(paused.run.reviewGate?.stageType, "creative_plan");
+  assert.equal(paused.run.reviewGate?.stageId, planStage.stageId);
+  assert.equal(paused.run.reviewGate?.state, "awaiting_review");
+  assert.equal(
+    paused.stages.find((stage) => stage.stageId === planStage.stageId)?.status,
+    "succeeded"
+  );
+  assert.equal(
+    paused.stages.find((stage) => stage.type === "asset_generation")?.status,
+    "queued"
+  );
+});
+
+test("approveGenerationRunGate clears the gate, marks the stage reviewed, and starts the next stage", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_approve",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  await completeStageAndMaybePauseAtGate({
+    store,
+    runId: created.run.runId,
+    stageId: planStage.stageId,
+  });
+
+  const approved = await approveGenerationRunGate({
+    store,
+    projectId: "proj_approve",
+    runId: created.run.runId,
+  });
+
+  const reviewedStage = approved.stages.find((stage) => stage.stageId === planStage.stageId)!;
+  const nextStage = approved.stages.find((stage) => stage.type === "asset_generation")!;
+  assert.equal(approved.run.reviewGate, null);
+  assert.equal(approved.run.currentStageType, "asset_generation");
+  assert.equal(nextStage.status, "running");
+  assert.equal(reviewedStage.status, "succeeded");
+  assert.match(reviewedStage.reviewedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("approveGenerationRunGate is a no-op for duplicate approval on an active run", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_dup_approve",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    reviewGate: null,
+    currentStageType: "asset_generation",
+  });
+
+  const approved = await approveGenerationRunGate({
+    store,
+    projectId: "proj_dup_approve",
+    runId: created.run.runId,
+  });
+
+  assert.equal(approved.run.currentStageType, "asset_generation");
+  assert.equal(approved.run.reviewGate, null);
+});
+
+test("approveGenerationRunGate rejects terminal runs", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_terminal_approve",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  await store.updateRun(created.run.runId, { status: "canceled" });
+
+  await assert.rejects(
+    () =>
+      approveGenerationRunGate({
+        store,
+        projectId: "proj_terminal_approve",
+        runId: created.run.runId,
+      }),
+    (err) => err instanceof ApiError && err.code === "job_not_cancelable"
+  );
+});
+
+test("a run with multiple gates can pause again after approval resumes it", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_multi_gate",
+    body: { reviewGates: ["creative_plan", "asset_generation"] },
+  });
+  const planStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const assetStage = created.stages.find((stage) => stage.type === "asset_generation")!;
+
+  await completeStageAndMaybePauseAtGate({
+    store,
+    runId: created.run.runId,
+    stageId: planStage.stageId,
+  });
+  await approveGenerationRunGate({
+    store,
+    projectId: "proj_multi_gate",
+    runId: created.run.runId,
+  });
+  const pausedAgain = await completeStageAndMaybePauseAtGate({
+    store,
+    runId: created.run.runId,
+    stageId: assetStage.stageId,
+  });
+
+  assert.equal(pausedAgain.run.reviewGate?.stageType, "asset_generation");
+  assert.equal(pausedAgain.run.reviewGate?.stageId, assetStage.stageId);
+  assert.equal(
+    pausedAgain.stages.find((stage) => stage.type === "audio_generation")?.status,
+    "queued"
   );
 });
 
