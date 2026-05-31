@@ -15,9 +15,14 @@ export function StatusBanner({ run }: StatusBannerProps) {
   const stageLabel = run.currentStageType
     ? GENERATION_STAGE_LABELS[run.currentStageType]
     : null;
+  const reviewStageLabel = run.reviewGate
+    ? GENERATION_STAGE_LABELS[run.reviewGate.stageType]
+    : null;
 
   const heading =
-    run.status === "queued"
+    reviewStageLabel
+      ? `${reviewStageLabel} — ready for review`
+      : run.status === "queued"
       ? "Waiting to start"
       : stageLabel
         ? `${stageLabel} — in progress`
@@ -26,11 +31,17 @@ export function StatusBanner({ run }: StatusBannerProps) {
   return (
     <div className="status-banner">
       <div className="status-banner-head">
-        <span className={`status-banner-dot status-banner-dot-${run.status}`} />
+        <span
+          className={`status-banner-dot status-banner-dot-${
+            run.reviewGate ? "review" : run.status
+          }`}
+        />
         <span className="status-banner-heading">{heading}</span>
       </div>
       <p className="status-banner-message" role="status" aria-live="polite" aria-atomic="true">
-        {run.message ?? "Tracking progress…"}
+        {run.reviewGate
+          ? "Review this stage's output, then approve to continue the run."
+          : run.message ?? "Tracking progress…"}
       </p>
       <div className="status-banner-meta" aria-live="off">
         <span className="status-banner-meta-label">Elapsed</span>

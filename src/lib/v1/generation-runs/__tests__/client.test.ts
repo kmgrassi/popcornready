@@ -86,6 +86,17 @@ test("retryRun sends an empty object when no scope is provided", async () => {
   assert.equal(calls[0].init?.body, "{}");
 });
 
+test("approveRun POSTs to the approve sub-resource", async () => {
+  const { fetchImpl, calls } = makeFetch(() =>
+    jsonResponse(200, { run: { runId: "r1" }, stages: [], stageItems: [] }),
+  );
+  const client = new GenerationRunClient({ fetchImpl });
+  await client.approveRun("p1", "r1");
+  assert.equal(calls[0].url, "/api/v1/projects/p1/generation-runs/r1/approve");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(calls[0].init?.body, "{}");
+});
+
 test("encodes projectId and runId path segments", async () => {
   const { fetchImpl, calls } = makeFetch(() =>
     jsonResponse(200, { run: { runId: "r/1" }, stages: [], stageItems: [] }),

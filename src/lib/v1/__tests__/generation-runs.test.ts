@@ -7,6 +7,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../errors";
 import {
   GenerationRunsStore,
+  approveReviewGate,
   assemblePayload,
   createGenerationRunsStore,
   createRunWithSeedStages,
@@ -38,6 +39,111 @@ test("createRun persists with assigned runId and timestamps", async () => {
 
   const read = await store.getRun(run.runId);
   assert.deepEqual(read, run);
+});
+
+test("createRunWithSeedStages marks selected review gates", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_a",
+    body: { reviewGates: ["creative_plan", "asset_generation"] },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "creative_plan")?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "asset_generation")?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "ready")?.isReviewGate,
+    undefined
+  );
+});
+
+test("createRunWithSeedStages rejects non-gateable review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_a",
+        body: { reviewGates: ["ready"] },
+      }),
+    (err: unknown) =>
+      err instanceof ApiError && err.code === "validation_failed"
+  );
+});
+
+test("approveReviewGate clears the gate, marks the stage reviewed, and starts next stage", async () => {
+  const run = await store.createRun({
+    projectId: "proj_a",
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGates: ["creative_plan"],
+  });
+  const plan = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Plan",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: [],
+    isReviewGate: true,
+  });
+  const visuals = await store.saveStage({
+    runId: run.runId,
+    type: "asset_generation",
+    label: "Visuals",
+    order: 2,
+    status: "queued",
+    jobIds: [],
+    artifactIds: [],
+  });
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: plan.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const payload = await approveReviewGate(store, run.runId);
+
+  assert.equal(payload.run.reviewGate, null);
+  assert.equal(payload.run.currentStageType, "asset_generation");
+  assert.equal(
+    payload.stages.find((stage) => stage.stageId === plan.stageId)?.reviewedAt !== undefined,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.stageId === visuals.stageId)?.status,
+    "running"
+  );
+});
+
+test("approveReviewGate rejects terminal runs", async () => {
+  const run = await store.createRun({
+    projectId: "proj_a",
+    status: "canceled",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: "stage_missing",
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  await assert.rejects(
+    () => approveReviewGate(store, run.runId),
+    (err: unknown) => err instanceof ApiError && err.code === "job_not_cancelable"
+  );
 });
 
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {

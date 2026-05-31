@@ -2423,6 +2423,12 @@ button:disabled {
   background: var(--muted);
 }
 
+.status-banner-dot-review {
+  background: var(--accent-2);
+  box-shadow: 0 0 0 0 rgba(77, 163, 255, 0.45);
+  animation: progress-pulse 1.4s ease-out infinite;
+}
+
 .status-banner-heading {
   font-size: 17px;
   font-weight: 700;
@@ -2534,6 +2540,13 @@ button:disabled {
   color: var(--accent);
 }
 
+.stage-row.awaiting-review .stage-glyph {
+  background: rgba(77, 163, 255, 0.14);
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(77, 163, 255, 0.08);
+}
+
 .stage-succeeded .stage-glyph {
   background: rgba(74, 210, 149, 0.12);
   border-color: var(--good);
@@ -2571,6 +2584,10 @@ button:disabled {
 
 .stage-running .stage-title {
   color: var(--accent);
+}
+
+.stage-row.awaiting-review .stage-title {
+  color: var(--accent-2);
 }
 
 .stage-queued .stage-title,
@@ -2615,6 +2632,12 @@ button:disabled {
   color: var(--muted);
 }
 
+.stage-row.awaiting-review .stage-status-pill {
+  background: rgba(77, 163, 255, 0.14);
+  border-color: rgba(77, 163, 255, 0.42);
+  color: var(--accent-2);
+}
+
 .stage-message {
   margin: 4px 0 0;
   font-size: 12px;
@@ -2643,6 +2666,56 @@ button:disabled {
   height: 100%;
   background: var(--accent);
   transition: width 320ms ease;
+}
+
+/* Review gates ------------------------------------------------------- */
+
+.review-gate-card {
+  background: var(--panel);
+  border: 1px solid rgba(77, 163, 255, 0.38);
+  border-radius: 12px;
+  padding: 22px;
+  box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.08);
+}
+
+.review-gate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.review-approve-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.review-gate-copy {
+  margin: 10px 0 16px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.review-gate-error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 100, 100, 0.35);
+  background: rgba(255, 100, 100, 0.08);
+  color: #ffb4b4;
+  font-size: 13px;
+}
+
+.review-output-grid {
+  margin-top: 12px;
+}
+
+.review-output-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--panel-2);
 }
 
 /* Terminal states ---------------------------------------------------- */
@@ -2769,6 +2842,14 @@ button:disabled {
 
   .progress-title {
     font-size: 22px;
+  }
+
+  .review-gate-head {
+    flex-direction: column;
+  }
+
+  .review-approve-button {
+    width: 100%;
   }
 
 }

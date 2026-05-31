@@ -8,6 +8,7 @@ import {
 
 interface StageRailProps {
   stages: GenerationStage[];
+  reviewStageId?: string;
 }
 
 const STATUS_LABEL: Record<GenerationRunStatus, string> = {
@@ -36,7 +37,7 @@ function StatusGlyph({ status }: { status: GenerationRunStatus }) {
   );
 }
 
-export function StageRail({ stages }: StageRailProps) {
+export function StageRail({ stages, reviewStageId }: StageRailProps) {
   const ordered = [...stages].sort((a, b) => a.order - b.order);
 
   return (
@@ -49,8 +50,14 @@ export function StageRail({ stages }: StageRailProps) {
         return (
           <li
             key={stage.stageId}
-            className={`stage-row stage-${stage.status}`}
-            aria-current={stage.status === "running" ? "step" : undefined}
+            className={`stage-row stage-${stage.status}${
+              stage.stageId === reviewStageId ? " awaiting-review" : ""
+            }`}
+            aria-current={
+              stage.stageId === reviewStageId || stage.status === "running"
+                ? "step"
+                : undefined
+            }
           >
             <div className="stage-marker">
               <StatusGlyph status={stage.status} />
@@ -60,10 +67,16 @@ export function StageRail({ stages }: StageRailProps) {
               <div className="stage-title-row">
                 <span className="stage-title">{label}</span>
                 <span className={`stage-status-pill stage-status-${stage.status}`}>
-                  {STATUS_LABEL[stage.status]}
+                  {stage.stageId === reviewStageId
+                    ? "Review"
+                    : stage.reviewedAt
+                      ? "Reviewed"
+                      : STATUS_LABEL[stage.status]}
                 </span>
               </div>
-              {message ? (
+              {stage.stageId === reviewStageId ? (
+                <p className="stage-message">Ready for your review.</p>
+              ) : message ? (
                 <p className="stage-message">{message}</p>
               ) : (
                 <p className="stage-message muted">
