@@ -3,6 +3,7 @@ import {
   GenerateAssetRequest,
   GeneratedAssetResult,
 } from "./types";
+import { measureAudioDurationSec } from "./audio-duration";
 import { estimateCostUsd } from "./pricing";
 
 const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
@@ -54,9 +55,9 @@ function measuredAudioDurationSec(
   bytes: Buffer,
   outputFormat = DEFAULT_AUDIO_FORMAT
 ): number | undefined {
-  return audioExtension(outputFormat) === "mp3"
-    ? estimateMp3DurationSec(bytes)
-    : undefined;
+  // Delegate to the unified measurer so WAV outputs (and any other container
+  // it learns to parse) measure correctly — not just MP3.
+  return measureAudioDurationSec(bytes, audioExtension(outputFormat)) ?? undefined;
 }
 
 function elevenLabsAudioResult({

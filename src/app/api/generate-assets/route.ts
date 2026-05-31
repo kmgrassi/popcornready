@@ -306,6 +306,7 @@ export async function POST(req: NextRequest) {
       result = await provider.generateAsset({
         provider: "elevenlabs",
         kind: "audio",
+        seconds,
         ...baseRequest,
       });
     } else if (providerName === "mock" && kind === "image") {
