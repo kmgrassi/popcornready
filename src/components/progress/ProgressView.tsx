@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   GenerationRun,
@@ -38,6 +38,15 @@ export function ProgressView({
   const [detail, setDetail] = useState({ run, stages, stageItems });
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+
+  // Sync derived state when the router passes a different run into this same
+  // client component (e.g. navigating between alternate run links).
+  useEffect(() => {
+    setDetail({ run, stages, stageItems });
+    setApproving(false);
+    setApproveError(null);
+  }, [run, stages, stageItems]);
+
   const terminal = isTerminal(detail.run.status);
   const reviewGate = detail.run.reviewGate ?? null;
   const reviewStage = reviewGate
