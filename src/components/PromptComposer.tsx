@@ -8,8 +8,6 @@ import {
   REVIEW_GATEABLE_STAGES,
 } from "@/lib/v1/types";
 
-const LANDING_PROJECT_ID = "default";
-
 const TEMPLATES: { label: string; prompt: string }[] = [
   {
     label: "Product intro",
@@ -131,29 +129,34 @@ export function PromptComposer() {
     setSubmitting(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/v1/projects/${encodeURIComponent(LANDING_PROJECT_ID)}/generation-runs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: goal,
-            reviewGates,
-          }),
-        }
-      );
+      // The one-shot route runs the full planner -> generation -> assembly
+      // pipeline in a single call and persists the project, so the editor can
+      // open immediately. The v1 generation-runs endpoint only seeds a queued
+      // run today (real execution is a later scope), so submitting there would
+      // leave the run queued forever; route landing generation here instead.
+      // reviewGates is forwarded for forward-compatibility but the one-shot
+      // pipeline does not yet honor per-stage review gating.
+      const response = await fetch("/api/oneshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal,
+          targetLengthSec: 30,
+          style: "cinematic story",
+          aspectRatio: "9:16",
+          reviewGates,
+        }),
+      });
       const data = await response.json();
-      if (!response.ok || !data.run?.runId) {
+      if (!response.ok || !data.project) {
         throw new Error(
           data?.error?.message ||
             data?.error ||
-            "Unable to start your generation run."
+            "Unable to generate your video."
         );
       }
       setActiveStage(5);
-      router.push(
-        `/studio?goal=${encodeURIComponent(goal)}&length=30&runId=${encodeURIComponent(data.run.runId)}`
-      );
+      router.push(`/studio?goal=${encodeURIComponent(goal)}&length=30`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
