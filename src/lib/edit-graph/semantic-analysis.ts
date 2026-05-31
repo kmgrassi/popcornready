@@ -164,7 +164,15 @@ function segmentTranscriptIds(
   endMs: number
 ): string[] {
   return transcript
-    .filter((span) => overlaps(span.startMs, span.endMs, startMs, endMs))
+    .filter((span) => {
+      if (span.words.length === 0) {
+        return overlaps(span.startMs, span.endMs, startMs, endMs);
+      }
+      return span.words.some((word) => {
+        const midpoint = wordMidpointMs(word);
+        return midpoint >= startMs && midpoint < endMs;
+      });
+    })
     .map((span) => span.id);
 }
 
