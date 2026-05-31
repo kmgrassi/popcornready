@@ -7,6 +7,7 @@
 // asset, generated-asset, composition, generation, and audio-alignment
 // surfaces) and are marked accordingly where referenced.
 
+import type { EditGraph, EditGraphRevisionOperation } from "../edit-graph";
 import { Patch, Timeline } from "../types";
 
 export type JobType =
@@ -64,6 +65,8 @@ export interface RevisionJobResult {
   // resources (with stable ids and sibling lineage) require PR4. TODO(PR4):
   // persist this as a sibling Timeline and return a timelineId instead.
   timeline: Timeline;
+  editGraph: EditGraph;
+  graphOperations: EditGraphRevisionOperation[];
   appliedPatches: number;
   patches: Patch[];
   summary: string;

@@ -10,7 +10,7 @@
 // providers and without network or Remotion.
 
 import { revise as defaultRevise } from "../agent";
-import { applyPatches as defaultApplyPatches } from "../timeline";
+import { applyPatchesViaEditGraph as defaultApplyPatchesViaEditGraph } from "../timeline";
 import { Clip, Project, timelineDurationSec } from "../types";
 import { ApiError, newId } from "./runtime";
 import {
@@ -27,7 +27,7 @@ import {
 
 export interface RevisionDeps {
   revise: typeof defaultRevise;
-  applyPatches: typeof defaultApplyPatches;
+  applyPatchesViaEditGraph: typeof defaultApplyPatchesViaEditGraph;
 }
 
 export async function runRevisionJob(input: {
@@ -37,7 +37,8 @@ export async function runRevisionJob(input: {
   deps?: Partial<RevisionDeps>;
 }): Promise<RevisionJobResult> {
   const revise = input.deps?.revise ?? defaultRevise;
-  const applyPatches = input.deps?.applyPatches ?? defaultApplyPatches;
+  const applyPatchesViaEditGraph =
+    input.deps?.applyPatchesViaEditGraph ?? defaultApplyPatchesViaEditGraph;
 
   const message = input.message.trim();
   if (!message) {
@@ -65,9 +66,17 @@ export async function runRevisionJob(input: {
     storyContext: input.project.storyContext,
   });
 
-  // Derive the sibling cut without mutating the base timeline.
-  const timeline = applyPatches(base, patches, input.project.clips);
-  return { timeline, appliedPatches: patches.length, patches, summary };
+  // Derive the sibling cut from edit-graph operations without mutating the base
+  // timeline. The compiled timeline remains the compatibility projection.
+  const revision = applyPatchesViaEditGraph(base, patches, input.project.clips);
+  return {
+    timeline: revision.timeline,
+    editGraph: revision.editGraph,
+    graphOperations: revision.graphOperations,
+    appliedPatches: patches.length,
+    patches,
+    summary,
+  };
 }
 
 // ---------------------------------------------------------------------------

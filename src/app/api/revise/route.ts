@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/store";
 import { revise } from "@/lib/agent";
-import { applyPatches } from "@/lib/timeline";
+import { applyPatchesViaEditGraph } from "@/lib/timeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,7 +30,13 @@ export async function POST(req: NextRequest) {
       storyContext: project.storyContext,
     });
 
-    project.timeline = applyPatches(project.timeline, patches, project.clips);
+    const revision = applyPatchesViaEditGraph(
+      project.timeline,
+      patches,
+      project.clips
+    );
+    project.editGraph = revision.editGraph;
+    project.timeline = revision.timeline;
     project.chat.push({ role: "user", content: message });
     project.chat.push({
       role: "assistant",
@@ -38,7 +44,11 @@ export async function POST(req: NextRequest) {
     });
     await saveProject(project);
 
-    return NextResponse.json({ project, appliedPatches: patches.length });
+    return NextResponse.json({
+      project,
+      appliedPatches: patches.length,
+      graphOperations: revision.graphOperations,
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Revision failed" },
