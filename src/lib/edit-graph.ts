@@ -8,6 +8,7 @@ import {
 } from "./types";
 
 export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
+export const EDIT_GRAPH_COMPILER_VERSION = "edit-graph-compiler.v1" as const;
 
 export interface EditGraphAsset {
   id: string;
@@ -79,6 +80,29 @@ export interface EditGraph {
     fps: number;
     showCaptions?: boolean;
   };
+}
+
+export interface EditGraphTimelineProjection {
+  id: string;
+  derived: true;
+  compilerVersion: typeof EDIT_GRAPH_COMPILER_VERSION;
+  compiledAt: string;
+}
+
+export interface EditGraphDocument extends EditGraph {
+  projectId: string;
+  briefVersionId: string;
+  compositionId?: string;
+  timeline: EditGraphTimelineProjection | null;
+  createdBy: { jobId: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompiledTimelineMetadata {
+  editGraphId: string;
+  compilerVersion: typeof EDIT_GRAPH_COMPILER_VERSION;
+  compiledAt: string;
 }
 
 export function msToSec(ms: number): number {
@@ -195,6 +219,31 @@ export function synthesizeEditGraph(input: {
   };
 }
 
+export function buildEditGraphFromTimeline(input: {
+  id: string;
+  projectId: string;
+  briefVersionId: string;
+  compositionId?: string;
+  jobId: string;
+  goal: string;
+  plan: EditPlan;
+  timeline: Timeline;
+  clips?: Clip[];
+  storyContext?: StoryContext | null;
+  createdAt: string;
+}): EditGraphDocument {
+  return {
+    ...synthesizeEditGraph(input),
+    projectId: input.projectId,
+    briefVersionId: input.briefVersionId,
+    ...(input.compositionId ? { compositionId: input.compositionId } : {}),
+    timeline: null,
+    createdBy: { jobId: input.jobId },
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
 export function compileEditGraphToTimeline(graph: EditGraph): Timeline {
   const segmentsById = new Map(
     graph.analysis.segments.map((segment) => [segment.id, segment])
@@ -232,4 +281,21 @@ export function compileTimelineViaEditGraph(
   input: Parameters<typeof synthesizeEditGraph>[0]
 ): Timeline {
   return compileEditGraphToTimeline(synthesizeEditGraph(input));
+}
+
+export function markGraphTimelineProjection(
+  graph: EditGraphDocument,
+  timelineId: string,
+  compiledAt: string
+): EditGraphDocument {
+  return {
+    ...graph,
+    timeline: {
+      id: timelineId,
+      derived: true,
+      compilerVersion: EDIT_GRAPH_COMPILER_VERSION,
+      compiledAt,
+    },
+    updatedAt: compiledAt,
+  };
 }

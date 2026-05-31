@@ -6,6 +6,11 @@
 // them and writes Jobs + VersionedTimelines. They live here as the agreed
 // contract so every PR builds against the same shapes.
 
+import {
+  CompiledTimelineMetadata,
+  EDIT_GRAPH_SCHEMA_VERSION,
+  EditGraphDocument,
+} from "../edit-graph";
 import { AspectRatio, CriticReport, StoryContext, TimelineSegment } from "../types";
 
 export type { AspectRatio } from "../types";
@@ -15,6 +20,7 @@ export const SCHEMA = {
   briefVersion: "brief.v1",
   asset: "asset.v1",
   composition: "composition.v1",
+  editGraph: EDIT_GRAPH_SCHEMA_VERSION,
   timeline: "timeline.v1",
   job: "job.v1",
 } as const;
@@ -205,9 +211,12 @@ export interface VersionedTimeline {
   showCaptions?: boolean;
   segments: TimelineSegment[];
   provenance: TimelineProvenance;
+  derivedFrom?: CompiledTimelineMetadata;
   createdBy: { jobId: string };
   createdAt: string;
 }
+
+export type VersionedEditGraph = EditGraphDocument;
 
 // --- Generation request/result --------------------------------------------
 
@@ -236,6 +245,7 @@ export interface GenerationJobInput {
 
 export interface GenerationJobResult {
   timelineIds: string[];
+  editGraphIds?: string[];
 }
 
 export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
