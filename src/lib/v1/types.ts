@@ -282,14 +282,27 @@ export type GenerationStageType =
 
 // The user's per-run choice of which stages should pause for review after they
 // complete. An empty or omitted list is a straight-through run.
+export const GATEABLE_GENERATION_STAGE_TYPES = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+] as const satisfies readonly GenerationStageType[];
+
+export type GateableGenerationStageType =
+  (typeof GATEABLE_GENERATION_STAGE_TYPES)[number];
+
 export interface ReviewGateConfig {
-  gatedStages: GenerationStageType[];
+  gatedStages: GateableGenerationStageType[];
 }
 
 // Run-level review state, orthogonal to GenerationRunStatus. When present, the
 // run is awaiting user approval before the next stage can start.
 export interface RunReviewGate {
-  stageType: GenerationStageType;
+  stageType: GateableGenerationStageType;
   stageId: string;
   state: "awaiting_review";
   enteredAt: string;
@@ -312,11 +325,11 @@ export interface GenerationRun {
   projectId: string;
   briefVersionId?: string;
   status: GenerationRunStatus;
+  reviewGates?: GateableGenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
-  reviewGates?: GenerationStageType[];
-  reviewGate?: RunReviewGate | null;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -331,14 +344,14 @@ export interface GenerationStage {
   label: string;
   order: number;
   status: GenerationRunStatus;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   progressPercent?: number;
   message?: string;
   startedAt?: string;
   completedAt?: string;
   jobIds: string[];
   artifactIds: string[];
-  isReviewGate?: boolean;
-  reviewedAt?: string;
   createdAt: string;
   updatedAt: string;
   error?: GenerationErrorSummary;
