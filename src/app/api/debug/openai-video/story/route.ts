@@ -3,7 +3,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import { providerFor } from "@/lib/generative/providers";
 import { Clip, Timeline, TimelineSegment, dims, timelineDurationSec } from "@/lib/types";
-import { GenerativeProviderName } from "@/lib/generative/types";
 import { POPCORN_READY_STORY_SHOTS } from "../presets";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +23,7 @@ function buildTimeline(segments: TimelineSegment[]): Timeline {
   };
 }
 
-function parseDebugProvider(value: unknown): GenerativeProviderName {
+function parseDebugProvider(value: unknown): "openai" | "gemini" {
   const raw = String(value || "gemini").toLowerCase();
   if (raw === "openai") return "openai";
   if (raw === "gemini") return "gemini";
@@ -46,14 +45,24 @@ export async function POST(req: NextRequest) {
 
     for (let index = 0; index < POPCORN_READY_STORY_SHOTS.length; index += 1) {
       const shot = POPCORN_READY_STORY_SHOTS[index];
-      const request = {
-        provider,
-        kind: "video" as const,
-        prompt: shot.prompt,
-        size,
-        model,
-        seconds: shot.durationSec,
-      };
+      const request =
+        provider === "openai"
+          ? {
+              provider: "openai" as const,
+              kind: "video" as const,
+              prompt: shot.prompt,
+              size,
+              model,
+              seconds: shot.durationSec,
+            }
+          : {
+              provider: "gemini" as const,
+              kind: "video" as const,
+              prompt: shot.prompt,
+              size,
+              model,
+              seconds: shot.durationSec,
+            };
       requests.push(request);
 
       const result = await providerAdapter.generateAsset(request);

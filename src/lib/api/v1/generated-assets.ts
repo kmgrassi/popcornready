@@ -19,6 +19,12 @@ import {
   GenerativeProviderName,
 } from "@/lib/generative/types";
 import type { GeneratedAssetCharacterBinding } from "@/lib/types";
+import {
+  RunStageHandle,
+  RunStageItemHandle,
+  stageItemKindForAssetKind,
+  toErrorSummary,
+} from "@/lib/v1/generation-progress";
 import { AuthContext } from "./auth";
 import { ApiError, FieldError, validationError } from "./errors";
 import { newId } from "./ids";
@@ -247,7 +253,8 @@ function parseGeneratedAssetRequest(body: unknown): ParsedRequest {
 async function runGeneration(
   auth: AuthContext,
   projectId: string,
-  parsed: ParsedRequest
+  parsed: ParsedRequest,
+  item: RunStageItemHandle | null
 ): Promise<V1Asset> {
   // Resolve reference assets to local file paths the provider can read.
   const referencePaths: string[] = [];
@@ -263,6 +270,15 @@ async function runGeneration(
     referencePaths.push(path.join(localDir(), asset.storageKey));
   }
 
+  if (item) {
+    await item.update({
+      progressPercent: 25,
+      message:
+        parsed.preflightIterations > 0
+          ? "Refining the generation prompt."
+          : "Preparing the generation prompt.",
+    });
+  }
   const preflight = await preflightGenerationContent({
     provider: parsed.provider,
     kind: parsed.kind,
@@ -272,6 +288,12 @@ async function runGeneration(
     dialogueInputs: parsed.dialogueInputs,
   });
 
+  if (item) {
+    await item.update({
+      progressPercent: 50,
+      message: `Calling ${parsed.provider} to generate the ${parsed.kind}.`,
+    });
+  }
   const provider = providerFor(parsed.provider);
   const baseRequest = {
     prompt: preflight.finalPrompt || parsed.prompt,
@@ -319,6 +341,18 @@ async function runGeneration(
     result = await provider.generateAsset({
       provider: "mock",
       kind: "image",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "mock" && parsed.kind === "video") {
+    result = await provider.generateAsset({
+      provider: "mock",
+      kind: "video",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "mock" && parsed.kind === "audio") {
+    result = await provider.generateAsset({
+      provider: "mock",
+      kind: "audio",
       ...baseRequest,
     });
   } else if (parsed.provider === "nanobanano" && parsed.kind === "image") {
@@ -415,12 +449,25 @@ export interface CreateGeneratedAssetArgs {
   auth: AuthContext;
   projectId: string;
   body: unknown;
+  // Optional stage handle when this generation runs inside a tracked run. The
+  // caller (run orchestrator) is expected to have opened the matching stage
+  // (asset_generation for image/video, audio_generation for audio) and to
+  // close it once all items for the stage are finished.
+  progress?: RunStageHandle;
+}
+
+const PROMPT_PREVIEW_MAX = 240;
+
+function clipPromptPreview(value: string): string {
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= PROMPT_PREVIEW_MAX) return trimmed;
+  return `${trimmed.slice(0, PROMPT_PREVIEW_MAX - 1)}…`;
 }
 
 export async function createGeneratedAsset(
   args: CreateGeneratedAssetArgs
 ): Promise<ApiResult> {
-  const { auth, projectId, body } = args;
+  const { auth, projectId, body, progress } = args;
 
   await getProject(auth.workspaceId, projectId); // throws not_found
   const parsed = parseGeneratedAssetRequest(body);
@@ -435,14 +482,36 @@ export async function createGeneratedAsset(
     error: null,
   });
 
+  // Bind a stage item to this asset so the progress UI can show a per-asset
+  // card. The item lives for the duration of this call and is closed before
+  // the function returns (success, validation failure, or provider error).
+  const item: RunStageItemHandle | null = progress
+    ? await progress.startItem({
+        kind: stageItemKindForAssetKind(parsed.kind),
+        label:
+          parsed.description ||
+          clipPromptPreview(parsed.prompt) ||
+          `Generated ${parsed.kind}`,
+        provider: parsed.provider,
+        promptPreview: clipPromptPreview(parsed.prompt),
+      })
+    : null;
+  if (progress) await progress.attachJob(job.id);
+
   try {
-    const asset = await runGeneration(auth, projectId, parsed);
+    const asset = await runGeneration(auth, projectId, parsed, item);
     const finished = await updateJob(job.id, {
       status: "succeeded",
       progress: { currentStep: "saving_artifact", percent: 100 },
       result: { assetIds: [asset.id] },
       error: null,
     });
+    if (item) {
+      await item.succeed({
+        assetId: asset.id,
+        message: `Generated ${parsed.kind}.`,
+      });
+    }
     return { status: 202, body: { job: finished } };
   } catch (err) {
     const apiErr =
@@ -456,6 +525,11 @@ export async function createGeneratedAsset(
       status: "failed",
       error: { code: apiErr.code, message: apiErr.message },
     });
+    if (item) {
+      await item.fail(
+        toErrorSummary(apiErr, { fallbackCode: "job_failed" })
+      );
+    }
     throw apiErr;
   }
 }

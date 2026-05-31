@@ -5,7 +5,6 @@ import { providerFor } from "@/lib/generative/providers";
 import {
   normalizeOpenAIVideoSeconds,
   OpenAIVideoSeconds,
-  GenerativeProviderName,
 } from "@/lib/generative/types";
 import {
   DEFAULT_SINGLE_OPENAI_VIDEO,
@@ -25,7 +24,7 @@ function resolveSeconds(value: unknown, fallback: OpenAIVideoSeconds = 8): OpenA
   return normalizeOpenAIVideoSeconds(value, fallback);
 }
 
-function parseDebugProvider(value: unknown): GenerativeProviderName {
+function parseDebugProvider(value: unknown): "openai" | "gemini" {
   const raw = String(value || "gemini").toLowerCase();
   if (raw === "openai") return "openai";
   if (raw === "gemini") return "gemini";
@@ -49,14 +48,24 @@ export async function POST(req: NextRequest) {
     }
 
     const providerAdapter = providerFor(provider);
-    const requestPayload = {
-      provider,
-      kind: "video" as const,
-      prompt,
-      size,
-      model,
-      seconds,
-    };
+    const requestPayload =
+      provider === "openai"
+        ? {
+            provider: "openai" as const,
+            kind: "video" as const,
+            prompt,
+            size,
+            model,
+            seconds,
+          }
+        : {
+            provider: "gemini" as const,
+            kind: "video" as const,
+            prompt,
+            size,
+            model,
+            seconds,
+          };
 
     const result = await providerAdapter.generateAsset(requestPayload);
 
@@ -83,7 +92,7 @@ export async function POST(req: NextRequest) {
         mimeType: result.mimeType,
       },
       message:
-        `${providerAdapter.name} video generation returned a real clip. Check `clip.url` in devtools or your browser.`,
+        `${providerAdapter.name} video generation returned a real clip. Check clip.url in devtools or your browser.`,
     });
   } catch (err: any) {
     return NextResponse.json(
