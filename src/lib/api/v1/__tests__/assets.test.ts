@@ -35,12 +35,24 @@ afterEach(async () => {
 test("registerAsset records a remote_url asset as pending", async () => {
   const asset = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/clip.mp4" },
+    durationSec: 8,
+    context: {
+      transcriptText: "A quick hook explains the product.",
+      moments: [{ startSec: 0, endSec: 8, label: "hook" }],
+    },
   });
   assert.equal(asset.status, "pending");
   assert.equal(asset.kind, "video");
   assert.equal(asset.filename, "clip.mp4");
   assert.equal(asset.remoteUrl, "https://cdn.example.com/clip.mp4");
   assert.equal(asset.storageKey, undefined);
+  assert.equal(asset.semanticAnalysis?.schemaVersion, "semanticAnalysis.v1");
+  assert.equal(asset.semanticAnalysis?.transcript[0].text, "A quick hook explains the product.");
+  assert.deepEqual(asset.semanticAnalysis?.segments[0].semanticTags, [
+    "video",
+    "remote_url",
+    "hook",
+  ]);
 });
 
 test("registerAsset copies a local_path asset into managed storage as ready", async () => {

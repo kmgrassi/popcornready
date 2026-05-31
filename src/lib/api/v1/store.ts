@@ -10,6 +10,7 @@ import path from "path";
 import { notFound } from "./errors";
 import { newId } from "./ids";
 import { GeneratedAssetProvenance } from "./provenance";
+import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
   AgentAssetSource,
   AssetContext,
@@ -59,6 +60,7 @@ export interface V1Asset {
   storageKey?: string;
   durationSec?: number;
   context?: AssetContext;
+  semanticAnalysis?: AssetSemanticAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
   createdAt: string;

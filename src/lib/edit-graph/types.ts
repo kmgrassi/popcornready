@@ -2,6 +2,9 @@ import type { AspectRatio } from "../types";
 
 export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
 export const EDIT_GRAPH_PROJECT_SCHEMA_VERSION = "aiVideoProject.v1" as const;
+export const EDIT_GRAPH_ASSET_SEMANTIC_ANALYSIS_SCHEMA_VERSION =
+  "semanticAnalysis.v1" as const;
+export const EDIT_GRAPH_EDIT_DECISION_SCHEMA_VERSION = "editDecision.v1" as const;
 
 export type EditGraphSchemaVersion = typeof EDIT_GRAPH_SCHEMA_VERSION;
 export type AIVideoProjectSchemaVersion =
@@ -34,6 +37,7 @@ export interface MediaAsset {
 }
 
 export interface WordTiming {
+  id: string;
   word: string;
   startMs: number;
   endMs: number;
@@ -57,10 +61,35 @@ export type TextEditOperationType =
   | "bleep"
   | "caption_emphasis";
 
-export interface TextEditOperation {
-  type: TextEditOperationType;
-  wordSpanIds: string[];
-}
+export type TextEditOperation =
+  | {
+      type: "remove_words";
+      wordIds: string[];
+      reason?: string;
+    }
+  | {
+      type: "compress_pause";
+      transcriptSpanIds: string[];
+      targetPauseMs: number;
+      reason?: string;
+    }
+  | {
+      type: "reorder_sentence";
+      transcriptSpanIds: string[];
+      insertAfterSpanId?: string;
+      reason?: string;
+    }
+  | {
+      type: "bleep";
+      wordIds: string[];
+      reason?: string;
+    }
+  | {
+      type: "caption_emphasis";
+      wordIds: string[];
+      style?: "highlight" | "underline" | "bold";
+      reason?: string;
+    };
 
 export type SceneType =
   | "talking_head"
@@ -83,12 +112,12 @@ export interface QualitySignals {
   faceVisible?: boolean;
   cameraMotion?: "static" | "smooth" | "shaky";
 }
-
 export interface MediaSegment {
   id: string;
   assetId: string;
   startMs: number;
   endMs: number;
+  transcriptSpanIds?: string[];
   transcript?: TranscriptSpan[];
   visualDescription?: string;
   detectedObjects?: string[];
@@ -169,11 +198,13 @@ export interface EditDecisionConstraints {
 
 export interface EditDecision {
   id: string;
+  schemaVersion?: typeof EDIT_GRAPH_EDIT_DECISION_SCHEMA_VERSION;
   beatId: string;
   operation: EditOperation;
   sourceSegmentIds: string[];
   rationale?: string;
   constraints?: EditDecisionConstraints;
+  textEdit?: TextEditOperation;
   confidence?: number;
 }
 
@@ -414,6 +445,14 @@ export interface EmbeddingRef {
   ownerType: "asset" | "segment" | "transcript_span" | "beat";
   model: string;
   vectorRef: string;
+}
+
+export interface AssetSemanticAnalysis {
+  schemaVersion: typeof EDIT_GRAPH_ASSET_SEMANTIC_ANALYSIS_SCHEMA_VERSION;
+  assetId: string;
+  transcript: TranscriptSpan[];
+  segments: MediaSegment[];
+  createdAt: string;
 }
 
 export interface SemanticAnalysis {
