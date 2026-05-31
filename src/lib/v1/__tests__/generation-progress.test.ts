@@ -17,6 +17,12 @@ import {
   noopProgressEmitter,
   toErrorSummary,
 } from "../generation-progress";
+import {
+  assemblePayload,
+  createGenerationRunsStore,
+  createPersistedRunProgressEmitter,
+  createRunWithSeedStages,
+} from "../generation-runs";
 import { V1Store, createStore } from "../store";
 import {
   AspectRatio,
@@ -325,6 +331,54 @@ test("runGenerationJob emits stages in the documented order on success", async (
     assert.ok(runPercents.includes(50), "timeline_assembly run percent");
     assert.ok(runPercents.includes(75), "quality_review run percent");
     assert.ok(runPercents.includes(100), "completion run percent");
+  });
+});
+
+test("runGenerationJob pauses after a persisted gated stage instead of advancing", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-run-gates-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runPayload = await createRunWithSeedStages({
+        store: runStore,
+        projectId: project.id,
+        body: {
+          briefVersionId: brief.id,
+          reviewGates: ["creative_plan"],
+        },
+      });
+      const emitter = createPersistedRunProgressEmitter(runStore, runPayload.run.runId);
+
+      const paused = await runGenerationJob(store, job.id, fakeDeps, emitter);
+      assert.equal(paused.status, "running");
+      assert.equal(paused.result, null);
+
+      const payload = await assemblePayload(runStore, runPayload.run.runId);
+      assert.ok(payload);
+      assert.equal(payload!.run.reviewGate?.state, "awaiting_review");
+      assert.equal(payload!.run.reviewGate?.stageType, "creative_plan");
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "creative_plan")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "timeline_assembly")?.status,
+        "queued"
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
   });
 });
 
