@@ -2353,6 +2353,18 @@ button:disabled {
   text-align: center;
 }
 
+.awaiting-review-card {
+  border-style: solid;
+  text-align: left;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .progress-card-heading {
   font-size: 14px;
   margin: 0 0 6px;

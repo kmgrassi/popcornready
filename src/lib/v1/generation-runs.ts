@@ -3,6 +3,7 @@ import path from "path";
 
 import { defaultDbDir } from "./store";
 import {
+  GateableGenerationStageType,
   GENERATION_STAGE_LABELS,
   GenerationRun,
   GenerationRunStatus,
@@ -303,6 +304,7 @@ export interface GenerationRunResultArtifact {
 export interface CreateGenerationRunBody {
   briefVersionId?: string;
   prompt?: string;
+  reviewGates?: unknown;
 }
 
 export interface CreateRunArgs {
@@ -326,6 +328,50 @@ const STAGE_SEEDS: StageSeed[] = [
   { type: "ready" },
 ];
 
+const GATEABLE_STAGE_TYPES = new Set<GenerationStageType>([
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+]);
+
+function isGateableStageType(type: GenerationStageType): type is GateableGenerationStageType {
+  return GATEABLE_STAGE_TYPES.has(type) && type !== "ready";
+}
+
+function parseReviewGates(value: unknown): GateableGenerationStageType[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ApiError("validation_failed", "reviewGates must be an array.", {
+      fields: [{ path: "reviewGates", message: "Expected an array of stage types." }],
+    });
+  }
+
+  const gates: GateableGenerationStageType[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (typeof raw !== "string" || !(raw in GENERATION_STAGE_LABELS)) {
+      throw new ApiError("validation_failed", "reviewGates contains an unknown stage.", {
+        fields: [{ path: "reviewGates", message: "Use only known generation stage types." }],
+      });
+    }
+    const type = raw as GenerationStageType;
+    if (!isGateableStageType(type)) {
+      throw new ApiError("validation_failed", "reviewGates contains a non-gateable stage.", {
+        fields: [{ path: "reviewGates", message: "ready cannot be used as a review gate." }],
+      });
+    }
+    if (!seen.has(type)) {
+      seen.add(type);
+      gates.push(type);
+    }
+  }
+  return gates;
+}
+
 export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
   const { store, projectId, body } = args;
   const parsedBody = body && typeof body === "object" && !Array.isArray(body)
@@ -334,11 +380,14 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
   const briefVersionId = parsedBody.briefVersionId
     ? String(parsedBody.briefVersionId).trim() || undefined
     : undefined;
+  const reviewGates = parseReviewGates(parsedBody.reviewGates);
 
   const run = await store.createRun({
     projectId,
     status: "queued" as GenerationRunStatus,
     ...(briefVersionId ? { briefVersionId } : {}),
+    reviewGates,
+    reviewGate: null,
     currentStageType: "brief_intake",
     progressPercent: 0,
     message: "Run queued.",
@@ -353,6 +402,9 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
       label: GENERATION_STAGE_LABELS[seed.type],
       order: i,
       status: "queued",
+      ...(reviewGates.includes(seed.type as GateableGenerationStageType)
+        ? { isReviewGate: true }
+        : {}),
       jobIds: [],
       artifactIds: [],
     });
@@ -360,6 +412,176 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
   }
 
   return { run, stages, stageItems: [], resultArtifacts: [] };
+}
+
+export async function approveReviewGate(
+  store: GenerationRunsStore,
+  runId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Terminal generation runs cannot be approved.", {
+      status: run.status,
+    });
+  }
+  if (!run.reviewGate) {
+    return payload;
+  }
+
+  const gate = run.reviewGate;
+  const stage = stages.find((s) => s.stageId === gate.stageId);
+  if (!stage || stage.type !== gate.stageType) {
+    throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
+  }
+
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(stage.stageId, { reviewedAt });
+
+  const nextStage = stages.find((s) => s.order > stage.order && s.status === "queued");
+  await store.updateRun(run.runId, {
+    reviewGate: null,
+    currentStageType: nextStage?.type ?? run.currentStageType,
+    message: nextStage
+      ? `Approved ${stage.label}; continuing to ${nextStage.label}.`
+      : `Approved ${stage.label}.`,
+  });
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function pauseAfterStageIfReviewGate(
+  store: GenerationRunsStore,
+  runId: string,
+  stageId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  const stage = stages.find((s) => s.stageId === stageId);
+  if (!stage || !stage.isReviewGate || stage.status !== "succeeded") {
+    return payload;
+  }
+  if (isTerminalRunStatus(run.status)) {
+    return payload;
+  }
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: stage.type,
+    reviewGate: {
+      stageType: stage.type as GateableGenerationStageType,
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+    message: `${stage.label} is ready for review.`,
+  });
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function rejectReviewGate(
+  store: GenerationRunsStore,
+  runId: string,
+  body: unknown
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Terminal generation runs cannot be rejected.", {
+      status: run.status,
+    });
+  }
+  if (!run.reviewGate) {
+    throw new ApiError("validation_failed", "Run is not awaiting review.");
+  }
+
+  const parsed = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as { stageType?: unknown; note?: unknown })
+    : {};
+  const gate = run.reviewGate;
+  if (parsed.stageType !== undefined && parsed.stageType !== gate.stageType) {
+    throw new ApiError("validation_failed", "Reject stageType must match the active review gate.", {
+      fields: [{ path: "stageType", message: `Expected ${gate.stageType}.` }],
+    });
+  }
+
+  const stage = stages.find((s) => s.stageId === gate.stageId);
+  if (!stage || stage.type !== gate.stageType) {
+    throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
+  }
+  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
+  const enteredAt = new Date().toISOString();
+
+  await store.updateStage(stage.stageId, {
+    status: "succeeded",
+    progressPercent: 100,
+    reviewedAt: undefined,
+    completedAt: enteredAt,
+    error: undefined,
+    message: note
+      ? `Regenerated after feedback: ${note}`
+      : "Regenerated after review feedback.",
+  });
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: stage.type,
+    reviewGate: {
+      stageType: stage.type as GateableGenerationStageType,
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt,
+    },
+    message: `${stage.label} regenerated and ready for review.`,
+  });
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function cancelGenerationRun(
+  store: GenerationRunsStore,
+  runId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Run already finished.", {
+      code: "job_not_cancelable",
+      message: "Run already finished.",
+      retryable: false,
+    });
+  }
+
+  const canceledAt = new Date().toISOString();
+  await store.updateRun(run.runId, {
+    status: "canceled",
+    reviewGate: null,
+    completedAt: canceledAt,
+    message: "Generation run canceled.",
+  });
+  await Promise.all(
+    stages
+      .filter((stage) => stage.status === "queued" || stage.status === "running")
+      .map((stage) =>
+        store.updateStage(stage.stageId, {
+          status: "canceled",
+          completedAt: canceledAt,
+          message: "Canceled before this stage completed.",
+        })
+      )
+  );
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+function isTerminalRunStatus(status: GenerationRunStatus): boolean {
+  return status === "succeeded" || status === "failed" || status === "canceled";
+}
+
+function requireExistingPayload(
+  payload: GenerationRunPayload | null,
+  runId: string
+): GenerationRunPayload {
+  if (!payload) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  return payload;
 }
 
 export async function assemblePayload(

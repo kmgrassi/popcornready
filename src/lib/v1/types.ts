@@ -277,6 +277,19 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+export type GateableGenerationStageType = Exclude<GenerationStageType, "ready">;
+
+export interface ReviewGateConfig {
+  gatedStages: GateableGenerationStageType[];
+}
+
+export interface RunReviewGate {
+  stageType: GateableGenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
+
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
 // `details` carry the extras the progress UI needs to offer recovery.
@@ -294,6 +307,8 @@ export interface GenerationRun {
   projectId: string;
   briefVersionId?: string;
   status: GenerationRunStatus;
+  reviewGates?: GateableGenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
@@ -311,6 +326,8 @@ export interface GenerationStage {
   label: string;
   order: number;
   status: GenerationRunStatus;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   progressPercent?: number;
   message?: string;
   startedAt?: string;
