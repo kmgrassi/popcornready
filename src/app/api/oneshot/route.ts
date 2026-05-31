@@ -91,6 +91,20 @@ function parseShowCaptions(value: unknown): boolean {
   return value === true || value === "true";
 }
 
+function audioRequested(body: any, goal: string): boolean {
+  if (
+    body.includeAudio === false ||
+    body.generateAudio === false ||
+    body.audio === false ||
+    body.audioMode === "none"
+  ) {
+    return false;
+  }
+  return !/\b(no audio|no music|silent video|without audio|without music)\b/i.test(
+    goal
+  );
+}
+
 function videoSizeForAspect(ar: AspectRatio): string {
   if (ar === "16:9") return "1280x720";
   if (ar === "1:1") return "1280x720";
@@ -101,16 +115,55 @@ function clampSeconds(durationSec: number): OpenAIVideoSeconds {
   return normalizeOpenAIVideoSeconds(durationSec);
 }
 
+function characterContinuityBlock(goal: string): string {
+  const ageMatch = goal.match(/\b(\d{1,2})[- ]year[- ]old\b/i);
+  const age = ageMatch ? `${ageMatch[1]}-year-old` : "same";
+  const roleMatch = goal.match(
+    /\b(?:\d{1,2}[- ]year[- ]old\s+)?([a-z][a-z -]{1,40}?(?:boy|girl|child|kid|man|woman|filmmaker|creator|founder|teacher|student))\b/i
+  );
+  const role = roleMatch ? roleMatch[1].trim() : "main character";
+
+  return [
+    "[CHARACTER INVARIANTS]",
+    `The recurring protagonist is the same ${age} ${role} in every shot, including dream/future sequences.`,
+    "Keep the same face, age, hair, build, silhouette, skin tone, wardrobe anchors, emotional throughline, and live-action cinematic style across all generated clips.",
+    "Do not redesign, recast, age-shift, gender-swap, or replace the protagonist. Future/famous versions must clearly read as the same person imagined forward, not a different adult.",
+  ].join(" ");
+}
+
+function beatMapForPrompt(plan: EditPlan): string {
+  return plan.beats
+    .map((beat, index) => `${index + 1}. ${beat.name}: ${beat.intent}`)
+    .join(" ");
+}
+
 function beatPrompt(
   goal: string,
+  plan: EditPlan,
   beat: Beat,
+  beatIndex: number,
   style: string,
   ar: AspectRatio
 ): string {
+  const previousBeat = beatIndex > 0 ? plan.beats[beatIndex - 1] : null;
+  const nextBeat =
+    beatIndex < plan.beats.length - 1 ? plan.beats[beatIndex + 1] : null;
   return [
     `${style} cinematic live-action video clip with natural motion and camera movement for a ${ar} short-form video.`,
-    `Beat: ${beat.name} — ${beat.intent}.`,
-    `Overall concept: ${goal}.`,
+    characterContinuityBlock(goal),
+    "[FULL STORY ARC]",
+    goal,
+    "[FULL BEAT MAP]",
+    beatMapForPrompt(plan),
+    "[CURRENT SHOT DELTA]",
+    `This is beat ${beatIndex + 1} of ${plan.beats.length}: ${beat.name} — ${beat.intent}.`,
+    previousBeat
+      ? `The previous beat was "${previousBeat.name}" — ${previousBeat.intent}. Preserve continuity from that moment.`
+      : "This is the opening beat. Establish the protagonist clearly and cinematically.",
+    nextBeat
+      ? `The next beat will be "${nextBeat.name}" — ${nextBeat.intent}. End with visual momentum that can cut into it.`
+      : "This is the closing beat. Resolve the story clearly.",
+    "Use explicit nouns instead of pronouns: show the same movie-loving boy/protagonist from the story, not an unrelated person.",
     `Production quality guidance: ${videoQualityContextForPrompt()}`,
     `Make the shot feel designed, not accidental: strong visual hierarchy, controlled lighting, subject-background separation, cohesive tone, and no on-screen text.`,
   ].join(" ");
@@ -208,9 +261,11 @@ async function savePartialProject(input: {
   plan: EditPlan;
   aspectRatio: AspectRatio;
   clips: Clip[];
+  soundtrack?: Clip | null;
   showCaptions: boolean;
 }): Promise<void> {
   const videoClips = input.clips.filter((clip) => clip.kind !== "audio");
+  const clips = input.soundtrack ? [...input.clips, input.soundtrack] : input.clips;
   const segments: TimelineSegment[] = videoClips.map((clip, i) => {
     const beat = input.plan.beats[i];
     return {
@@ -226,7 +281,7 @@ async function savePartialProject(input: {
     segments.length > 0
       ? sanitizeTimeline(
           { aspectRatio: input.aspectRatio, fps: 30, segments },
-          input.clips
+          clips
         )
       : null;
   if (timeline) timeline.showCaptions = input.showCaptions;
@@ -237,7 +292,7 @@ async function savePartialProject(input: {
     storyContext: input.storyContext,
     plan: input.plan,
     timeline,
-    clips: input.clips,
+    clips,
     characterProfiles: [],
     characterReferences: [],
     critic: null,
@@ -252,6 +307,12 @@ async function resumableClipsForGoal(goal: string): Promise<Clip[]> {
   return existing.timeline.segments
     .map((segment) => existing.clips.find((clip) => clip.id === segment.clipId))
     .filter((clip): clip is Clip => Boolean(clip && clip.kind !== "audio"));
+}
+
+async function resumableSoundtrackForGoal(goal: string): Promise<Clip | null> {
+  const existing = await getProject();
+  if (existing.goal !== goal) return null;
+  return existing.clips.find((clip) => clip.kind === "audio") || null;
 }
 
 async function generateSoundtrack(input: {
@@ -304,6 +365,7 @@ export async function POST(req: NextRequest) {
     const showCaptions = parseShowCaptions(body.showCaptions);
     const storyContext = mergeStoryContext(body.storyContext as StoryContext);
     const providers = resolveVideoProviders(body);
+    const includeAudio = audioRequested(body, goal);
 
     if (!goal) {
       return NextResponse.json(
@@ -328,7 +390,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Generate a video clip per beat from scratch (no uploads required).
+    // 2. Start the soundtrack before video generation and let it run in
+    // parallel with the sequential video loop.
+    const existingSoundtrack = includeAudio
+      ? await resumableSoundtrackForGoal(goal)
+      : null;
+    const soundtrackPromise: Promise<Clip | null> =
+      includeAudio && !existingSoundtrack
+        ? optionalOneShotStep("soundtrack", () =>
+            generateSoundtrack({
+              goal,
+              style,
+              targetLengthSec,
+              beats: plan.beats,
+            })
+          )
+        : Promise.resolve(existingSoundtrack);
+
+    // 3. Generate a video clip per beat from scratch (no uploads required).
     const videoSize = videoSizeForAspect(aspectRatio);
     const clips: Clip[] = (await resumableClipsForGoal(goal)).slice(
       0,
@@ -340,70 +419,81 @@ export async function POST(req: NextRequest) {
       );
     }
     let provider = providers.primary;
-    for (let index = clips.length; index < plan.beats.length; index += 1) {
-      const beat = plan.beats[index];
-      const seconds = clampSeconds(beat.durationSec);
-      const clipInput = {
-        prompt: beatPrompt(goal, beat, style, aspectRatio),
-        description: `${beat.name}: ${beat.intent}`,
-        size: videoSize,
-        displaySec: seconds,
-        seconds,
-      };
-      try {
-        console.info(
-          `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
-        );
-        clips.push(await generateBeatClip({ provider, ...clipInput }));
-        console.info(
-          `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
-        );
-        await savePartialProject({
-          goal,
-          storyContext,
-          plan,
-          aspectRatio,
-          clips,
-          showCaptions,
-        });
-      } catch (err) {
-        if (
-          !providers.fallback ||
-          provider === providers.fallback ||
-          !isQuotaError(err)
-        ) {
-          throw err;
+    let soundtrack: Clip | null = existingSoundtrack;
+    try {
+      for (let index = clips.length; index < plan.beats.length; index += 1) {
+        const beat = plan.beats[index];
+        const seconds = clampSeconds(beat.durationSec);
+        const clipInput = {
+          prompt: beatPrompt(goal, plan, beat, index, style, aspectRatio),
+          description: `${beat.name}: ${beat.intent}`,
+          size: videoSize,
+          displaySec: seconds,
+          seconds,
+        };
+        try {
+          console.info(
+            `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
+          );
+          clips.push(await generateBeatClip({ provider, ...clipInput }));
+          console.info(
+            `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
+          );
+          await savePartialProject({
+            goal,
+            storyContext,
+            plan,
+            aspectRatio,
+            clips,
+            soundtrack,
+            showCaptions,
+          });
+        } catch (err) {
+          if (
+            !providers.fallback ||
+            provider === providers.fallback ||
+            !isQuotaError(err)
+          ) {
+            throw err;
+          }
+          console.warn(
+            `[oneshot] ${provider} quota/rate-limit failure; retrying clip ${index + 1}/${plan.beats.length} with ${providers.fallback}`
+          );
+          provider = providers.fallback;
+          clips.push(await generateBeatClip({ provider, ...clipInput }));
+          console.info(
+            `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
+          );
+          await savePartialProject({
+            goal,
+            storyContext,
+            plan,
+            aspectRatio,
+            clips,
+            soundtrack,
+            showCaptions,
+          });
         }
-        console.warn(
-          `[oneshot] ${provider} quota/rate-limit failure; retrying clip ${index + 1}/${plan.beats.length} with ${providers.fallback}`
-        );
-        provider = providers.fallback;
-        clips.push(await generateBeatClip({ provider, ...clipInput }));
-        console.info(
-          `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
-        );
+      }
+    } catch (err) {
+      soundtrack = await soundtrackPromise;
+      if (soundtrack || clips.length > 0) {
         await savePartialProject({
           goal,
           storyContext,
           plan,
           aspectRatio,
           clips,
+          soundtrack,
           showCaptions,
         });
       }
+      throw err;
     }
-
-    const soundtrack = await optionalOneShotStep("soundtrack", () =>
-      generateSoundtrack({
-        goal,
-        style,
-        targetLengthSec,
-        beats: plan.beats,
-      })
-    );
+    soundtrack = await soundtrackPromise;
     if (soundtrack) clips.push(soundtrack);
 
-    // 3. Assemble a beat-by-beat timeline from the generated clips.
+    // 4. Assemble a beat-by-beat timeline from the generated clips.
     const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
       id: newId("seg"),
       clipId: clips[i].id,
@@ -418,7 +508,7 @@ export async function POST(req: NextRequest) {
     );
     timeline.showCaptions = showCaptions;
 
-    // 4. Critique once and apply patches. Critique is useful polish, but it is
+    // 5. Critique once and apply patches. Critique is useful polish, but it is
     // optional: a critic failure should never discard generated clips.
     let report: CriticReport | null = null;
     let patches: Patch[] = [];
