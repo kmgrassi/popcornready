@@ -336,10 +336,22 @@ async function runGeneration(
       kind: "audio",
       ...baseRequest,
     });
-  } else if (parsed.provider === "mock") {
+  } else if (parsed.provider === "mock" && parsed.kind === "image") {
     result = await provider.generateAsset({
       provider: "mock",
-      kind: parsed.kind,
+      kind: "image",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "mock" && parsed.kind === "video") {
+    result = await provider.generateAsset({
+      provider: "mock",
+      kind: "video",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "mock" && parsed.kind === "audio") {
+    result = await provider.generateAsset({
+      provider: "mock",
+      kind: "audio",
       ...baseRequest,
     });
   } else if (parsed.provider === "nanobanano" && parsed.kind === "image") {

@@ -54,11 +54,9 @@ async function readDuration(file: File): Promise<number> {
 export function Editor({
   initialGoal = "",
   initialLength = 30,
-  initialAutostart = false,
 }: {
   initialGoal?: string;
   initialLength?: number;
-  initialAutostart?: boolean;
 } = {}) {
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,15 +122,6 @@ export function Editor({
       })
       .catch((fetchError) => setError(String(fetchError)));
   }, []);
-
-  const oneShotFired = useRef(false);
-  useEffect(() => {
-    if (initialAutostart && initialGoal.trim() && !oneShotFired.current) {
-      oneShotFired.current = true;
-      handleOneShot();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialAutostart, initialGoal]);
 
   async function refreshCreatedVideos() {
     setGalleryLoading(true);

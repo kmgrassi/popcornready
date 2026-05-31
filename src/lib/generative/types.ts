@@ -146,12 +146,27 @@ export interface GeminiVideoRequest extends BaseGenerateAssetRequest {
   seconds?: number;
 }
 
-export interface MockAssetRequest extends BaseGenerateAssetRequest {
+export interface MockImageRequest extends BaseGenerateAssetRequest {
   provider: "mock";
-  kind: GenerativeAssetKind;
+  kind: "image";
   model?: string;
   size?: string;
   quality?: "low" | "medium" | "high" | "auto";
+}
+
+export interface MockVideoRequest extends BaseGenerateAssetRequest {
+  provider: "mock";
+  kind: "video";
+  model?: string;
+  size?: string;
+  seconds?: number;
+}
+
+export interface MockAudioRequest extends BaseGenerateAssetRequest {
+  provider: "mock";
+  kind: "audio";
+  model?: string;
+  seconds?: number;
 }
 
 export interface NanoBananoImageRequest extends BaseGenerateAssetRequest {
@@ -180,7 +195,9 @@ export type GenerateAssetRequest =
   | OpenAIImageRequest
   | OpenAIVideoRequest
   | GeminiVideoRequest
-  | MockAssetRequest
+  | MockImageRequest
+  | MockVideoRequest
+  | MockAudioRequest
   | NanoBananoImageRequest
   | ElevenLabsAudioRequest;
 

@@ -2103,6 +2103,29 @@ button:disabled {
 }
 
 @media (max-width: 560px) {
+  .lp-nav-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: auto;
+    min-height: 60px;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .lp-logo {
+    align-self: center;
+    white-space: nowrap;
+  }
+  .lp-nav-links {
+    display: contents;
+  }
+  .lp-nav-cta {
+    grid-column: 2;
+    align-self: center;
+  }
+  .theme-switcher {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
   .lp-steps,
   .lp-grid,
   .lp-pricing {
@@ -2114,6 +2137,13 @@ button:disabled {
   .lp-nav-links a:not(.lp-nav-cta) {
     display: none;
   }
+}
+
+.lp-prompt-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #ff7a7a;
+  text-align: center;
 }
 
 /* ---------------------------------------------------------------- */
