@@ -262,6 +262,9 @@ export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
 //     stage's progressPercent/message.
 //   - jobIds and artifactIds point back to the authoritative Job and Artifact
 //     records; the run never duplicates their state.
+//   - Review checkpoints are represented by reviewGate, not by adding an
+//     "awaiting_review" status. A paused run remains an active JobStatus
+//     while execution is idle and waiting for approval.
 
 export type GenerationRunStatus = JobStatus;
 
@@ -276,6 +279,21 @@ export type GenerationStageType =
   | "quality_review"
   | "export"
   | "ready";
+
+// The user's per-run choice of which stages should pause for review after they
+// complete. An empty or omitted list is a straight-through run.
+export interface ReviewGateConfig {
+  gatedStages: GenerationStageType[];
+}
+
+// Run-level review state, orthogonal to GenerationRunStatus. When present, the
+// run is awaiting user approval before the next stage can start.
+export interface RunReviewGate {
+  stageType: GenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
 
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
@@ -297,6 +315,8 @@ export interface GenerationRun {
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
+  reviewGates?: GenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -317,6 +337,8 @@ export interface GenerationStage {
   completedAt?: string;
   jobIds: string[];
   artifactIds: string[];
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   createdAt: string;
   updatedAt: string;
   error?: GenerationErrorSummary;
