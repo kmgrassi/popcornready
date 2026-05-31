@@ -37,7 +37,7 @@ import { GenerationRun } from "./types";
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
-type VisualProvider = "openai" | "gemini";
+type VisualProvider = "openai" | "gemini" | "runway" | "ltx";
 
 function newAssetId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
@@ -49,12 +49,16 @@ function resolveVideoProviders(): {
 } {
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
   const hasGemini = !!process.env.GEMINI_API_KEY;
+  const hasRunway = !!(process.env.RUNWAYML_API_SECRET || process.env.RUNWAY_API_KEY);
+  const hasLtx = !!process.env.LTX_API_KEY;
   if (hasGemini) {
     return { primary: "gemini", fallback: hasOpenAI ? "openai" : undefined };
   }
   if (hasOpenAI) return { primary: "openai" };
+  if (hasRunway) return { primary: "runway" };
+  if (hasLtx) return { primary: "ltx" };
   throw new Error(
-    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY or OPENAI_API_KEY."
+    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY, OPENAI_API_KEY, RUNWAYML_API_SECRET, or LTX_API_KEY."
   );
 }
 
@@ -102,13 +106,29 @@ async function generateBeatClip(input: {
           size: input.size,
           seconds: input.seconds,
         })
-      : await provider.generateAsset({
-          provider: "openai",
-          kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-        });
+      : input.provider === "openai"
+        ? await provider.generateAsset({
+            provider: "openai",
+            kind: "video",
+            prompt: input.prompt,
+            size: input.size,
+            seconds: input.seconds,
+          })
+        : input.provider === "runway"
+          ? await provider.generateAsset({
+              provider: "runway",
+              kind: "video",
+              prompt: input.prompt,
+              size: input.size,
+              seconds: input.seconds,
+            })
+          : await provider.generateAsset({
+              provider: "ltx",
+              kind: "video",
+              prompt: input.prompt,
+              size: input.size,
+              seconds: input.seconds,
+            });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newAssetId("vid");
   const filename = `${id}.${result.extension}`;

@@ -90,6 +90,8 @@ function normalizeProviderName(
   const name = raw.toLowerCase();
   if (name === "openai") return "openai";
   if (name === "gemini") return "gemini";
+  if (name === "runway" || name === "runwayml") return "runway";
+  if (name === "ltx" || name === "ltxvideo" || name === "ltx-video") return "ltx";
   if (name === "elevenlabs") return "elevenlabs";
   if (name === "mock") return "mock";
   if (name === "nanobanano" || name === "nano-banano" || name === "nano_banano") {
@@ -106,6 +108,8 @@ function validateProviderKind(
     return null;
   }
   if (providerName === "gemini" && kind === "video") return null;
+  if (providerName === "runway" && kind === "video") return null;
+  if (providerName === "ltx" && kind === "video") return null;
   if (providerName === "elevenlabs" && kind === "audio") return null;
   if (providerName === "mock" && kind === "image") return null;
   if (providerName === "nanobanano") {
@@ -298,6 +302,20 @@ export async function POST(req: NextRequest) {
     } else if (providerName === "gemini" && kind === "video") {
       result = await provider.generateAsset({
         provider: "gemini",
+        kind: "video",
+        seconds,
+        ...baseRequest,
+      });
+    } else if (providerName === "runway" && kind === "video") {
+      result = await provider.generateAsset({
+        provider: "runway",
+        kind: "video",
+        seconds,
+        ...baseRequest,
+      });
+    } else if (providerName === "ltx" && kind === "video") {
+      result = await provider.generateAsset({
+        provider: "ltx",
         kind: "video",
         seconds,
         ...baseRequest,

@@ -21,9 +21,14 @@ import { createElevenLabsAudio } from "./audio";
 import { estimateCostUsd } from "./pricing";
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const RUNWAY_BASE_URL = "https://api.dev.runwayml.com/v1";
+const RUNWAY_API_VERSION = "2024-11-06";
+const LTX_BASE_URL = "https://api.ltx.video/v1";
 const GEMINI_DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
 const OPENAI_DEFAULT_IMAGE_MODEL: OpenAIImageModel = "gpt-image-1.5";
 const OPENAI_DEFAULT_VIDEO_MODEL: OpenAIVideoModel = "sora-2";
+const RUNWAY_DEFAULT_VIDEO_MODEL = "gen4.5";
+const LTX_DEFAULT_VIDEO_MODEL = "ltx-2-3-fast";
 
 interface OpenAIImageGenerationPayload {
   model: string;
@@ -117,6 +122,13 @@ async function readAsGeminiImage(filePath: string): Promise<Image> {
   };
 }
 
+async function readAsDataUri(filePath: string): Promise<string> {
+  const bytes = await fs.readFile(filePath);
+  return `data:${mimeForPath(filePath)};base64,${Buffer.from(bytes).toString(
+    "base64"
+  )}`;
+}
+
 function geminiAspectRatio(size?: string): string {
   if (!size) return "16:9";
   const [width, height] = size.split("x").map((part) => Number(part));
@@ -124,6 +136,43 @@ function geminiAspectRatio(size?: string): string {
     return "16:9";
   }
   return width / height < 1 ? "9:16" : "16:9";
+}
+
+function runwayRatio(size?: string): string {
+  if (!size) return "1280:720";
+  const [width, height] = size.split("x").map((part) => Number(part));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height === 0) {
+    return "1280:720";
+  }
+  return width / height < 1 ? "720:1280" : "1280:720";
+}
+
+function normalizeRunwayVideoSeconds(value?: number): number {
+  const candidate = Math.round(Number(value));
+  if (!Number.isFinite(candidate)) return 5;
+  if (candidate <= 5) return 5;
+  if (candidate <= 10) return 10;
+  return 15;
+}
+
+function ltxResolution(size?: string): string {
+  if (!size) return "1920x1080";
+  const [width, height] = size.split("x").map((part) => Number(part));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height === 0) {
+    return "1920x1080";
+  }
+  return width / height < 1 ? "1080x1920" : "1920x1080";
+}
+
+function normalizeLtxVideoSeconds(value?: number, model = LTX_DEFAULT_VIDEO_MODEL): number {
+  const candidate = Math.round(Number(value));
+  const durations = model.includes("fast")
+    ? [6, 8, 10, 12, 14, 16, 18, 20]
+    : [6, 8, 10];
+  if (!Number.isFinite(candidate)) return 8;
+  return durations.reduce((best, current) =>
+    Math.abs(current - candidate) < Math.abs(best - candidate) ? current : best
+  );
 }
 
 function normalizeGeminiVideoSeconds(value?: number): number {
@@ -437,6 +486,188 @@ const geminiProvider: GenerativeProvider = {
   },
 };
 
+interface RunwayTask {
+  id: string;
+  status?: "PENDING" | "THROTTLED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "CANCELLED";
+  output?: string[];
+  failure?: string;
+  failureCode?: string;
+}
+
+async function runwayFetch(pathName: string, init: RequestInit): Promise<Response> {
+  const key = process.env.RUNWAYML_API_SECRET || process.env.RUNWAY_API_KEY;
+  if (!key) {
+    throw new Error(
+      "RUNWAYML_API_SECRET is not set for the Runway provider."
+    );
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${key}`);
+  headers.set("X-Runway-Version", RUNWAY_API_VERSION);
+
+  const res = await fetch(`${RUNWAY_BASE_URL}${pathName}`, {
+    ...init,
+    headers,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Runway request failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+  return res;
+}
+
+async function waitForRunwayTask(id: string): Promise<RunwayTask> {
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const res = await runwayFetch(`/tasks/${id}`, { method: "GET" });
+    const task = (await res.json()) as RunwayTask;
+    if (task.status === "SUCCEEDED" || task.status === "FAILED" || task.status === "CANCELED" || task.status === "CANCELLED") {
+      return task;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+  }
+  throw new Error(`Runway task ${id} did not complete before timeout.`);
+}
+
+async function generateRunwayVideo(
+  input: Extract<GenerateAssetRequest, { provider: "runway"; kind: "video" }>
+): Promise<GeneratedAssetResult> {
+  const prompt = requirePrompt(input.prompt);
+  const model = input.model || RUNWAY_DEFAULT_VIDEO_MODEL;
+  const duration = normalizeRunwayVideoSeconds(input.seconds);
+  const firstReference = input.referencePaths?.[0];
+  const endpoint = firstReference ? "/image_to_video" : "/text_to_video";
+  const body = {
+    model,
+    promptText: prompt.slice(0, 1000),
+    duration,
+    ratio: runwayRatio(input.size),
+    ...(firstReference ? { promptImage: await readAsDataUri(firstReference) } : {}),
+  };
+
+  const createRes = await runwayFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const created = (await createRes.json()) as RunwayTask;
+  if (!created.id) throw new Error("Runway video generation returned no task id.");
+
+  const completed = await waitForRunwayTask(created.id);
+  if (completed.status !== "SUCCEEDED") {
+    throw new Error(
+      `Runway video generation failed: ${completed.failureCode || completed.failure || completed.status || "unknown failure"}`
+    );
+  }
+  const outputUrl = completed.output?.[0];
+  if (!outputUrl) throw new Error("Runway video generation returned no output URL.");
+
+  const videoRes = await fetch(outputUrl);
+  if (!videoRes.ok) {
+    throw new Error(`Runway output download failed (${videoRes.status}).`);
+  }
+
+  return {
+    kind: "video",
+    bytes: Buffer.from(await videoRes.arrayBuffer()),
+    extension: "mp4",
+    mimeType: videoRes.headers.get("Content-Type") || "video/mp4",
+    provider: "runway",
+    model,
+    prompt,
+    costUsd: estimateCostUsd({
+      provider: "runway",
+      kind: "video",
+      model,
+      durationSec: duration,
+    }),
+    providerSettings: characterProviderSettings(input),
+  };
+}
+
+const runwayProvider: GenerativeProvider = {
+  name: "runway",
+  async generateAsset(input) {
+    if (input.provider !== "runway" || input.kind !== "video") {
+      throw new Error("Runway provider currently supports video generation only.");
+    }
+    return generateRunwayVideo(input);
+  },
+};
+
+async function ltxFetch(pathName: string, init: RequestInit): Promise<Response> {
+  const key = process.env.LTX_API_KEY;
+  if (!key) {
+    throw new Error("LTX_API_KEY is not set for the LTX provider.");
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${key}`);
+
+  const res = await fetch(`${LTX_BASE_URL}${pathName}`, {
+    ...init,
+    headers,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`LTX request failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+  return res;
+}
+
+async function generateLtxVideo(
+  input: Extract<GenerateAssetRequest, { provider: "ltx"; kind: "video" }>
+): Promise<GeneratedAssetResult> {
+  const prompt = requirePrompt(input.prompt);
+  const model = input.model || LTX_DEFAULT_VIDEO_MODEL;
+  const duration = normalizeLtxVideoSeconds(input.seconds, model);
+  const firstReference = input.referencePaths?.[0];
+  const endpoint = firstReference ? "/image-to-video" : "/text-to-video";
+  const body = {
+    prompt,
+    model,
+    duration,
+    resolution: ltxResolution(input.size),
+    fps: 24,
+    generate_audio: false,
+    ...(firstReference ? { image_uri: await readAsDataUri(firstReference) } : {}),
+  };
+
+  const res = await ltxFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  return {
+    kind: "video",
+    bytes: Buffer.from(await res.arrayBuffer()),
+    extension: "mp4",
+    mimeType: res.headers.get("Content-Type") || "video/mp4",
+    provider: "ltx",
+    model,
+    prompt,
+    costUsd: estimateCostUsd({
+      provider: "ltx",
+      kind: "video",
+      model,
+      durationSec: duration,
+    }),
+    providerSettings: characterProviderSettings(input),
+  };
+}
+
+const ltxProvider: GenerativeProvider = {
+  name: "ltx",
+  async generateAsset(input) {
+    if (input.provider !== "ltx" || input.kind !== "video") {
+      throw new Error("LTX provider currently supports video generation only.");
+    }
+    return generateLtxVideo(input);
+  },
+};
+
 const elevenLabsProvider: GenerativeProvider = {
   name: "elevenlabs",
   async generateAsset(input) {
@@ -558,6 +789,13 @@ export function providerFor(name: string): GenerativeProvider {
       return openAIProvider;
     case "gemini":
       return geminiProvider;
+    case "runway":
+    case "runwayml":
+      return runwayProvider;
+    case "ltx":
+    case "ltxvideo":
+    case "ltx-video":
+      return ltxProvider;
     case "elevenlabs":
       return elevenLabsProvider;
     case "nanobanano":
