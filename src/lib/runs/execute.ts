@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { critique, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
+import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
@@ -124,6 +125,7 @@ async function generateBeatClip(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
     },
   };
 }
@@ -292,7 +294,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: `${runId}_initial`,
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       clips
     );
     await completeStage(
@@ -330,6 +339,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       id: "default",
       goal,
       storyContext,
+      editGraph: synthesizeEditGraph({
+        id: `${runId}_final`,
+        goal,
+        plan,
+        timeline,
+        clips,
+        storyContext,
+      }),
       plan,
       timeline,
       clips,

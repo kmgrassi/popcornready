@@ -10,7 +10,8 @@
 // providers and without network or Remotion.
 
 import { revise as defaultRevise } from "../agent";
-import { applyPatches as defaultApplyPatches } from "../timeline";
+import { createRenderPlanFromTimeline } from "../render-plan";
+import { applyPatchesViaEditGraph as defaultApplyPatchesViaEditGraph } from "../timeline";
 import { Clip, Project, timelineDurationSec } from "../types";
 import { ApiError, newId } from "./runtime";
 import {
@@ -27,7 +28,7 @@ import {
 
 export interface RevisionDeps {
   revise: typeof defaultRevise;
-  applyPatches: typeof defaultApplyPatches;
+  applyPatchesViaEditGraph: typeof defaultApplyPatchesViaEditGraph;
 }
 
 export async function runRevisionJob(input: {
@@ -37,7 +38,8 @@ export async function runRevisionJob(input: {
   deps?: Partial<RevisionDeps>;
 }): Promise<RevisionJobResult> {
   const revise = input.deps?.revise ?? defaultRevise;
-  const applyPatches = input.deps?.applyPatches ?? defaultApplyPatches;
+  const applyPatchesViaEditGraph =
+    input.deps?.applyPatchesViaEditGraph ?? defaultApplyPatchesViaEditGraph;
 
   const message = input.message.trim();
   if (!message) {
@@ -65,9 +67,17 @@ export async function runRevisionJob(input: {
     storyContext: input.project.storyContext,
   });
 
-  // Derive the sibling cut without mutating the base timeline.
-  const timeline = applyPatches(base, patches, input.project.clips);
-  return { timeline, appliedPatches: patches.length, patches, summary };
+  // Derive the sibling cut from edit-graph operations without mutating the base
+  // timeline. The compiled timeline remains the compatibility projection.
+  const revision = applyPatchesViaEditGraph(base, patches, input.project.clips);
+  return {
+    timeline: revision.timeline,
+    editGraph: revision.editGraph,
+    graphOperations: revision.graphOperations,
+    appliedPatches: patches.length,
+    patches,
+    summary,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -191,14 +201,43 @@ export function runExportJob(input: {
     );
   }
 
-  const renderPlan: ExportRenderPlan = {
+  const { renderPlan: baseRenderPlan, alignment } = createRenderPlanFromTimeline({
+    timeline,
+    timelineId: input.timelineId,
+    audioClips,
     durationPolicy: policy,
-    durationSec: resolved.durationSec,
-    timelineDurationSec: tDuration,
-    audioDurationSec: aDuration,
-    audioAssetIds,
-    format: "mp4",
-    quality: options.quality ?? "standard",
+    maxDeltaSec: options.maxDeltaSec,
+    quality: options.quality,
+  });
+
+  // The earlier resolveExportDuration check compares each clip's *registered*
+  // durationSec, but the render plan aligns against the measured audio
+  // duration (measuredDurationSec). When those differ, a fail_on_mismatch
+  // export can slip past the registered-duration check yet still produce a
+  // render plan whose alignment reports audio_timeline_mismatch. Honor that
+  // measured-duration alignment result here so the export is rejected instead
+  // of emitting a successful, wrong-duration artifact.
+  if (
+    policy === "fail_on_mismatch" &&
+    alignment.error?.code === "audio_timeline_mismatch"
+  ) {
+    throw new ApiError(
+      "audio_timeline_mismatch",
+      422,
+      "Audio and timeline durations differ beyond the allowed threshold.",
+      {
+        timelineDurationSec: alignment.comparison.timelineDurationSec,
+        audioDurationSec: alignment.comparison.audioDurationSec,
+        deltaSec: alignment.comparison.deltaSec,
+        maxDeltaSec: alignment.comparison.maxDeltaSec,
+      }
+    );
+  }
+
+  const renderPlan: ExportRenderPlan = {
+    ...baseRenderPlan,
+    format: baseRenderPlan.output.format,
+    quality: baseRenderPlan.output.quality,
   };
 
   // Skeleton output: the artifact is recorded but not yet rendered. TODO(PR5):
@@ -211,7 +250,7 @@ export function runExportJob(input: {
     status: "pending_render",
     url: null,
     timelineId: input.timelineId,
-    durationSec: resolved.durationSec,
+    durationSec: renderPlan.durationSec,
     renderPlan,
     createdAt: new Date().toISOString(),
   };

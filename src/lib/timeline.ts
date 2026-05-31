@@ -1,4 +1,11 @@
 import { Clip, Patch, Timeline, TimelineSegment } from "./types";
+import {
+  applyEditGraphRevisionOperations,
+  compileEditGraph,
+  createEditGraphFromTimeline,
+  patchesToEditGraphOperations,
+} from "./edit-graph";
+import type { EditGraph, EditGraphRevisionOperation } from "./edit-graph";
 
 function newId(): string {
   return "seg_" + Math.random().toString(36).slice(2, 10);
@@ -38,6 +45,37 @@ export function sanitizeTimeline(
 // validated/clamped; invalid ones are skipped rather than throwing, so one
 // bad suggestion can't sink an otherwise good revision.
 export function applyPatches(
+  timeline: Timeline,
+  patches: Patch[],
+  clips: Clip[]
+): Timeline {
+  return applyPatchesViaEditGraph(timeline, patches, clips).timeline;
+}
+
+export function applyPatchesViaEditGraph(
+  timeline: Timeline,
+  patches: Patch[],
+  clips: Clip[]
+): {
+  timeline: Timeline;
+  editGraph: EditGraph;
+  graphOperations: EditGraphRevisionOperation[];
+} {
+  const graph = createEditGraphFromTimeline(timeline, clips);
+  const graphOperations = patchesToEditGraphOperations({ timeline, patches });
+  const revisedGraph = applyEditGraphRevisionOperations({
+    graph,
+    operations: graphOperations,
+    clips,
+  });
+  return {
+    timeline: sanitizeTimeline(compileEditGraph(revisedGraph), clips),
+    editGraph: revisedGraph,
+    graphOperations,
+  };
+}
+
+export function applyPatchesDirectly(
   timeline: Timeline,
   patches: Patch[],
   clips: Clip[]

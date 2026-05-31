@@ -90,6 +90,31 @@ export const timelineSchema = {
   required: ["segments"],
 };
 
+export const editDecisionTimelineSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    showCaptions: { type: "boolean" },
+    decisions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          beatId: str,
+          clipId: str,
+          sourceInSec: num,
+          sourceOutSec: num,
+          rationale: str,
+          caption: str,
+        },
+        required: ["beatId", "clipId", "sourceInSec", "sourceOutSec", "rationale"],
+      },
+    },
+  },
+  required: ["decisions"],
+};
+
 const patchSchema = {
   anyOf: [
     {

@@ -6,6 +6,7 @@ import {
   Job,
   V1Asset,
   V1Project,
+  VersionedEditGraph,
   VersionedTimeline,
 } from "./types";
 
@@ -35,6 +36,8 @@ export interface V1Store {
   // Writes owned by PR4.
   getJob(id: string): Promise<Job | null>;
   saveJob(job: Job): Promise<Job>;
+  getEditGraph(id: string): Promise<VersionedEditGraph | null>;
+  saveEditGraph(graph: VersionedEditGraph): Promise<VersionedEditGraph>;
   getTimeline(id: string): Promise<VersionedTimeline | null>;
   saveTimeline(timeline: VersionedTimeline): Promise<VersionedTimeline>;
   getIdempotency(scope: string): Promise<IdempotencyRecord | null>;
@@ -52,6 +55,7 @@ const COLLECTIONS = {
   briefVersions: "brief-versions",
   assets: "assets",
   compositions: "compositions",
+  editGraphs: "edit-graphs",
   jobs: "jobs",
   timelines: "timelines",
   idempotency: "idempotency",
@@ -118,6 +122,8 @@ export function createStore(rootDir: string): V1Store {
 
     getJob: (id) => readJson<Job>(COLLECTIONS.jobs, id),
     saveJob: (job) => writeJson(COLLECTIONS.jobs, job.id, job),
+    getEditGraph: (id) => readJson<VersionedEditGraph>(COLLECTIONS.editGraphs, id),
+    saveEditGraph: (graph) => writeJson(COLLECTIONS.editGraphs, graph.id, graph),
     getTimeline: (id) => readJson<VersionedTimeline>(COLLECTIONS.timelines, id),
     saveTimeline: (timeline) => writeJson(COLLECTIONS.timelines, timeline.id, timeline),
     getIdempotency: (scope) => readJson<IdempotencyRecord>(COLLECTIONS.idempotency, scope),

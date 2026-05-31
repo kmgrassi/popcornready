@@ -3,7 +3,8 @@
 import React from "react";
 import { Player } from "@remotion/player";
 import { VideoComposition } from "@/remotion/VideoComposition";
-import { Clip, Timeline, dims, timelineDurationSec } from "@/lib/types";
+import { createRenderPlanFromTimeline } from "@/lib/render-plan";
+import { Clip, Timeline } from "@/lib/types";
 
 export default function Preview({
   timeline,
@@ -32,11 +33,10 @@ export default function Preview({
     );
   }
 
-  const fps = timeline.fps || 30;
-  const { width, height } = dims(timeline.aspectRatio);
+  const { renderPlan } = createRenderPlanFromTimeline({ timeline });
   const durationInFrames = Math.max(
     1,
-    Math.round(timelineDurationSec(timeline) * fps)
+    Math.round(renderPlan.durationSec * renderPlan.output.fps)
   );
   const audioClipIds = clips
     .filter((clip) => clip.kind === "audio")
@@ -48,15 +48,16 @@ export default function Preview({
         component={VideoComposition as React.FC}
         inputProps={{
           timeline,
+          renderPlan,
           clips,
           baseUrl: "",
           includeAudio: audioClipIds.length > 0,
           audioClipIds,
         }}
         durationInFrames={durationInFrames}
-        fps={fps}
-        compositionWidth={width}
-        compositionHeight={height}
+        fps={renderPlan.output.fps}
+        compositionWidth={renderPlan.output.width}
+        compositionHeight={renderPlan.output.height}
         style={{ width: "100%" }}
         controls
         loop
