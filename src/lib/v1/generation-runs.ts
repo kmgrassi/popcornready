@@ -359,7 +359,12 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
     stages.push(stage);
   }
 
-  return { run, stages, stageItems: [], resultArtifacts: [] };
+  return {
+    run: surfaceRunReviewGateState(run),
+    stages: stages.map(surfaceStageReviewGateState),
+    stageItems: [],
+    resultArtifacts: [],
+  };
 }
 
 export async function assemblePayload(
@@ -377,10 +382,26 @@ export async function assemblePayload(
   }
 
   return {
-    run,
-    stages,
+    run: surfaceRunReviewGateState(run),
+    stages: stages.map(surfaceStageReviewGateState),
     stageItems,
     resultArtifacts: collectResultArtifacts(stages, stageItems),
+  };
+}
+
+function surfaceRunReviewGateState(run: GenerationRun): GenerationRun {
+  return {
+    ...run,
+    reviewGates: run.reviewGates ?? [],
+    reviewGate: run.reviewGate ?? null,
+  };
+}
+
+function surfaceStageReviewGateState(stage: GenerationStage): GenerationStage {
+  return {
+    ...stage,
+    isReviewGate: stage.isReviewGate ?? false,
+    reviewedAt: stage.reviewedAt ?? null,
   };
 }
 
