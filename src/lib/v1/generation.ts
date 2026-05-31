@@ -17,6 +17,7 @@ import {
   noopProgressEmitter,
   toErrorSummary,
 } from "./generation-progress";
+import { isRunReviewGatePaused } from "./generation-runs";
 import * as ids from "./ids";
 import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
@@ -621,6 +622,10 @@ export async function runGenerationJob(
     );
     await progress.updateRun({ progressPercent: 90, message: "Saving the timeline." });
     const now = new Date().toISOString();
+    const timelineForGraph =
+      input.showCaptions === undefined
+        ? timeline
+        : { ...timeline, showCaptions: input.showCaptions };
     const editGraph = buildEditGraphFromTimeline({
       id: ids.editGraphId(),
       projectId: job.projectId,
@@ -628,19 +633,13 @@ export async function runGenerationJob(
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
       jobId: job.id,
       goal: brief.brief.goal,
-      targetLengthSec: brief.brief.targetLengthSec,
-      aspectRatio: brief.brief.aspectRatio,
-      style: brief.brief.style,
       storyContext,
       plan,
       clips,
-      timeline,
+      timeline: timelineForGraph,
       createdAt: now,
     });
-    const compiledTimeline = compileEditGraphToTimeline(editGraph, {
-      fps: timeline.fps,
-      ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
-    });
+    const compiledTimeline = compileEditGraphToTimeline(editGraph);
     const versioned: VersionedTimeline = {
       id: ids.timelineId(),
       schemaVersion: SCHEMA.timeline,
@@ -688,6 +687,19 @@ export async function runGenerationJob(
     });
     return finished;
   } catch (err) {
+    if (isRunReviewGatePaused(err)) {
+      logger.info("job.paused_for_review", {
+        stageType: err.stageType,
+        stageId: err.stageId,
+      });
+      // The worker has stopped at a review gate, but the pause is a run-level
+      // concept (`run.reviewGate`) — the backing job is no longer executing.
+      // Leaving it `running` would strand it forever, since resume re-enters
+      // through `runGenerationJob`, which only picks up `queued` jobs. Roll the
+      // job back to `queued` so an approve can dispatch it again.
+      return saveJobUpdate(store, job, { status: "queued" }, logger);
+    }
+
     const rawMessage = err instanceof Error ? err.message : "Generation failed.";
     let code: ErrorCode = "internal_error";
     if (err instanceof ApiError) code = err.code;

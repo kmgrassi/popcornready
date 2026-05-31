@@ -287,6 +287,30 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+export const GATEABLE_GENERATION_STAGE_TYPES = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+] as const satisfies readonly GenerationStageType[];
+
+export type GateableGenerationStageType =
+  (typeof GATEABLE_GENERATION_STAGE_TYPES)[number];
+
+export interface ReviewGateConfig {
+  gatedStages: GateableGenerationStageType[];
+}
+
+export interface RunReviewGate {
+  stageType: GateableGenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+}
+
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
 // `details` carry the extras the progress UI needs to offer recovery.
@@ -304,6 +328,8 @@ export interface GenerationRun {
   projectId: string;
   briefVersionId?: string;
   status: GenerationRunStatus;
+  reviewGates?: GateableGenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
@@ -321,6 +347,8 @@ export interface GenerationStage {
   label: string;
   order: number;
   status: GenerationRunStatus;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   progressPercent?: number;
   message?: string;
   startedAt?: string;

@@ -237,7 +237,7 @@ test("generation persists edit graph as source and serves a derived timeline", a
 
     const graph = await store.getEditGraph(timeline!.derivedFrom!.editGraphId);
     assert.ok(graph, "edit graph should be persisted");
-    assert.equal(graph!.schemaVersion, "edit_graph.v1");
+    assert.equal(graph!.schemaVersion, "editGraph.v1");
     assert.equal(graph!.projectId, project.id);
     assert.equal(graph!.briefVersionId, brief.id);
     assert.equal(graph!.intent.goal, brief.brief.goal);
@@ -250,10 +250,7 @@ test("generation persists edit graph as source and serves a derived timeline", a
       timeline!.segments.map((segment) => segment.id)
     );
 
-    const recompiled = compileEditGraphToTimeline(graph!, {
-      fps: timeline!.fps,
-      showCaptions: timeline!.showCaptions,
-    });
+    const recompiled = compileEditGraphToTimeline(graph!);
     assert.deepEqual(recompiled, {
       aspectRatio: timeline!.aspectRatio,
       fps: timeline!.fps,

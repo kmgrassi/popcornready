@@ -369,6 +369,9 @@ async function generateGeminiVideo(
       numberOfVideos: 1,
     },
   });
+  console.info(
+    `[gemini] video operation started: ${operation.name || "unknown operation"}`
+  );
 
   const deadline = Date.now() + 12 * 60 * 1000;
   while (!operation.done && Date.now() < deadline) {

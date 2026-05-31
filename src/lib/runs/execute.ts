@@ -10,7 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { critique, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
-import { GenerativeProviderName } from "@/lib/generative/types";
+import { compileTimelineViaEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
@@ -37,33 +37,25 @@ import { GenerationRun } from "./types";
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
-type Mode = "video" | "image";
-type VisualProvider = Extract<GenerativeProviderName, "openai" | "gemini" | "mock">;
+type VisualProvider = "openai" | "gemini";
 
 function newAssetId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
 }
 
-function oneShotVideoEnabled(): boolean {
-  const v = (process.env.ONESHOT_VIDEO ?? "on").trim().toLowerCase();
-  return !["off", "false", "0", "no"].includes(v);
-}
-
-function resolveMode(): { mode: Mode; provider: VisualProvider } {
+function resolveVideoProviders(): {
+  primary: VisualProvider;
+  fallback?: VisualProvider;
+} {
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
   const hasGemini = !!process.env.GEMINI_API_KEY;
-  if (oneShotVideoEnabled()) {
-    if (hasOpenAI) return { mode: "video", provider: "openai" };
-    if (hasGemini) return { mode: "video", provider: "gemini" };
+  if (hasGemini) {
+    return { primary: "gemini", fallback: hasOpenAI ? "openai" : undefined };
   }
-  const imageProvider = hasOpenAI ? "openai" : "mock";
-  return { mode: "image", provider: imageProvider };
-}
-
-function imageSizeForAspect(ar: AspectRatio): string {
-  if (ar === "16:9") return "1536x1024";
-  if (ar === "1:1") return "1024x1024";
-  return "1024x1536";
+  if (hasOpenAI) return { primary: "openai" };
+  throw new Error(
+    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY or OPENAI_API_KEY."
+  );
 }
 
 function videoSizeForAspect(ar: AspectRatio): string {
@@ -81,15 +73,10 @@ function beatPrompt(
   goal: string,
   beat: Beat,
   style: string,
-  ar: AspectRatio,
-  mode: Mode
+  ar: AspectRatio
 ): string {
-  const medium =
-    mode === "video"
-      ? "cinematic live-action video clip with natural motion and camera movement"
-      : "cinematic still frame";
   return [
-    `${style} ${medium} for a ${ar} short-form video.`,
+    `${style} cinematic live-action video clip with natural motion and camera movement for a ${ar} short-form video.`,
     `Beat: ${beat.name} — ${beat.intent}.`,
     `Overall concept: ${goal}.`,
     `Production quality guidance: ${videoQualityContextForPrompt()}`,
@@ -98,7 +85,6 @@ function beatPrompt(
 }
 
 async function generateBeatClip(input: {
-  mode: Mode;
   provider: VisualProvider;
   prompt: string;
   description: string;
@@ -106,33 +92,25 @@ async function generateBeatClip(input: {
   displaySec: number;
   seconds?: number;
 }): Promise<Clip> {
-  const kind = input.mode === "video" ? "video" : "image";
   const provider = providerFor(input.provider);
-  const baseRequest = {
-    prompt: input.prompt,
-    size: input.size,
-    ...(kind === "video" ? { seconds: input.seconds } : {}),
-  };
   const result =
     input.provider === "gemini"
       ? await provider.generateAsset({
           provider: "gemini",
           kind: "video",
-          ...baseRequest,
+          prompt: input.prompt,
+          size: input.size,
+          seconds: input.seconds,
         })
-      : input.provider === "openai"
-        ? await provider.generateAsset({
-            provider: "openai",
-            kind,
-            ...baseRequest,
-          })
-        : await provider.generateAsset({
-            provider: "mock",
-            kind,
-            ...baseRequest,
-          });
+      : await provider.generateAsset({
+          provider: "openai",
+          kind: "video",
+          prompt: input.prompt,
+          size: input.size,
+          seconds: input.seconds,
+        });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
-  const id = newAssetId(kind === "video" ? "vid" : "img");
+  const id = newAssetId("vid");
   const filename = `${id}.${result.extension}`;
   await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
   return {
@@ -149,6 +127,16 @@ async function generateBeatClip(input: {
       prompt: result.prompt,
     },
   };
+}
+
+function isQuotaError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("429") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.toLowerCase().includes("quota") ||
+    message.toLowerCase().includes("rate limit")
+  );
 }
 
 function describeError(err: unknown): {
@@ -231,44 +219,57 @@ export async function executeRun(run: GenerationRun): Promise<void> {
     );
 
     // asset_generation
-    const { mode, provider } = resolveMode();
-    const imageSize = imageSizeForAspect(aspectRatio);
+    const providers = resolveVideoProviders();
     const videoSize = videoSizeForAspect(aspectRatio);
     await startStage(
       runId,
       "asset_generation",
-      `Generating ${plan.beats.length} ${mode === "video" ? "clips" : "stills"} with ${provider}…`
+      `Generating ${plan.beats.length} clips with ${providers.primary}…`
     );
 
     let completed = 0;
     const total = plan.beats.length;
     let clips: Clip[];
     try {
-      clips = await Promise.all(
-        plan.beats.map(async (beat) => {
-          const seconds =
-            mode === "video"
-              ? clampSeconds(beat.durationSec)
-              : Math.max(1.5, Number(beat.durationSec) || 4);
-          const clip = await generateBeatClip({
-            mode,
-            provider,
-            prompt: beatPrompt(goal, beat, style, aspectRatio, mode),
-            description: `${beat.name}: ${beat.intent}`,
-            size: mode === "video" ? videoSize : imageSize,
-            displaySec: seconds,
-            seconds: mode === "video" ? seconds : undefined,
-          });
-          completed += 1;
+      clips = [];
+      let provider = providers.primary;
+      for (const beat of plan.beats) {
+        const seconds = clampSeconds(beat.durationSec);
+        const clipInput = {
+          prompt: beatPrompt(goal, beat, style, aspectRatio),
+          description: `${beat.name}: ${beat.intent}`,
+          size: videoSize,
+          displaySec: seconds,
+          seconds,
+        };
+        let clip: Clip;
+        try {
+          clip = await generateBeatClip({ provider, ...clipInput });
+        } catch (err) {
+          if (
+            !providers.fallback ||
+            provider === providers.fallback ||
+            !isQuotaError(err)
+          ) {
+            throw err;
+          }
+          provider = providers.fallback;
           await setStageMessage(
             runId,
             "asset_generation",
-            `Generated ${completed} of ${total} ${mode === "video" ? "clips" : "stills"}…`,
-            Math.round((completed / total) * 100)
+            `Gemini quota was exhausted; continuing with ${provider}…`
           );
-          return clip;
-        })
-      );
+          clip = await generateBeatClip({ provider, ...clipInput });
+        }
+        completed += 1;
+        await setStageMessage(
+          runId,
+          "asset_generation",
+          `Generated ${completed} of ${total} clips…`,
+          Math.round((completed / total) * 100)
+        );
+        clips.push(clip);
+      }
     } catch (err) {
       const error = describeError(err);
       await failStage(runId, "asset_generation", error);
@@ -292,7 +293,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: `${runId}_initial`,
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       clips
     );
     await completeStage(

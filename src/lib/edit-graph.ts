@@ -7,61 +7,79 @@ import {
   TimelineSegment,
 } from "./types";
 
-export const EDIT_GRAPH_SCHEMA_VERSION = "edit_graph.v1" as const;
+export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
 export const EDIT_GRAPH_COMPILER_VERSION = "edit-graph-compiler.v1" as const;
 
-export type MediaAssetType = "video" | "audio" | "image" | "text" | "generated";
-
-export interface MediaAsset {
+export interface EditGraphAsset {
   id: string;
   uri: string;
-  type: MediaAssetType;
+  type: "video" | "audio" | "image" | "generated";
   durationMs?: number;
-  metadata: {
-    width?: number;
-    height?: number;
-    fps?: number;
-    sampleRate?: number;
-    channels?: number;
-    codec?: string;
-  };
-  generatedBy?: { provider: string; model?: string; prompt: string };
+  metadata: Record<string, never>;
+  generatedBy?: Clip["generatedBy"];
 }
 
-export interface MediaSegment {
-  id: string;
-  assetId: string;
-  startMs: number;
-  endMs: number;
-  visualDescription?: string;
-  semanticTags: string[];
-}
-
-export interface StoryPlan {
-  id: string;
-  objective: string;
-  targetDurationMs: number;
-  audience?: string;
-  tone?: string;
-  beats: StoryBeat[];
-}
-
-export interface StoryBeat {
+export interface EditGraphStoryBeat {
   id: string;
   role: string;
   intent: string;
   targetDurationMs?: number;
 }
 
-export interface EditDecision {
+export interface EditGraphStoryPlan {
   id: string;
+  objective: string;
+  targetDurationMs: number;
+  audience?: string;
+  tone?: string;
+  beats: EditGraphStoryBeat[];
+}
+
+export interface EditGraphMediaSegment {
+  id: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  semanticTags: string[];
+}
+
+export interface EditGraphSelectSegmentDecision {
+  id: string;
+  operation: "select_segment";
   beatId: string;
-  operation: "select_segment" | "trim" | "caption";
+  role: string;
   sourceSegmentIds: string[];
+  timelineSegmentId?: string;
   rationale?: string;
-  confidence?: number;
-  timelineSegmentId: string;
   caption?: string;
+  confidence?: number;
+}
+
+export type EditGraphDecision = EditGraphSelectSegmentDecision;
+
+export interface EditGraph {
+  id: string;
+  schemaVersion: typeof EDIT_GRAPH_SCHEMA_VERSION;
+  assets: EditGraphAsset[];
+  analysis: {
+    segments: EditGraphMediaSegment[];
+  };
+  intent: {
+    goal: string;
+    audience?: string;
+    aspectRatio: AspectRatio;
+    tone?: string;
+    targetDurationMs?: number;
+  };
+  story: EditGraphStoryPlan;
+  edit: {
+    decisions: EditGraphDecision[];
+  };
+  timelineSettings: {
+    aspectRatio: AspectRatio;
+    fps: number;
+    showCaptions?: boolean;
+  };
 }
 
 export interface EditGraphTimelineProjection {
@@ -71,28 +89,10 @@ export interface EditGraphTimelineProjection {
   compiledAt: string;
 }
 
-export interface EditGraphDocument {
-  id: string;
-  schemaVersion: typeof EDIT_GRAPH_SCHEMA_VERSION;
+export interface EditGraphDocument extends EditGraph {
   projectId: string;
   briefVersionId: string;
   compositionId?: string;
-  assets: MediaAsset[];
-  analysis: {
-    segments: MediaSegment[];
-  };
-  intent: {
-    goal: string;
-    audience?: string;
-    platform?: string;
-    targetDurationMs?: number;
-    aspectRatio?: AspectRatio;
-    tone?: string;
-  };
-  story: StoryPlan;
-  edit: {
-    decisions: EditDecision[];
-  };
   timeline: EditGraphTimelineProjection | null;
   createdBy: { jobId: string };
   createdAt: string;
@@ -105,162 +105,182 @@ export interface CompiledTimelineMetadata {
   compiledAt: string;
 }
 
-function secToMs(value: number): number {
-  return Math.round(value * 1000);
+export function msToSec(ms: number): number {
+  return ms / 1000;
 }
 
-function msToSec(value: number): number {
-  return value / 1000;
+export function secToMs(sec: number): number {
+  return Math.round(sec * 1000);
 }
 
-function roleToBeatId(role: string): string {
-  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return `beat_${slug || "segment"}`;
-}
-
-function assetTypeFromClip(clip: Clip): MediaAssetType {
+function clipType(clip: Clip): EditGraphAsset["type"] {
   if (clip.source === "generated") return "generated";
-  if (clip.kind === "audio") return "audio";
-  if (clip.kind === "image") return "image";
-  return "video";
+  return clip.kind || "video";
 }
 
-export function clipToMediaAsset(clip: Clip): MediaAsset {
+function beatId(index: number, name: string): string {
+  return `beat_${index + 1}_${name || "untitled"}`;
+}
+
+function sourceSegmentId(segment: TimelineSegment, index: number): string {
+  return `media_${segment.id || index + 1}`;
+}
+
+export function synthesizeEditGraph(input: {
+  id: string;
+  goal: string;
+  plan: EditPlan;
+  timeline: Timeline;
+  clips?: Clip[];
+  storyContext?: StoryContext | null;
+}): EditGraph {
+  const beatIdsByRole = new Map<string, string>();
+  const beats = input.plan.beats.map((beat, index) => {
+    const id = beatId(index, beat.name);
+    if (!beatIdsByRole.has(beat.name)) beatIdsByRole.set(beat.name, id);
+    return {
+      id,
+      role: beat.name,
+      intent: beat.intent,
+      targetDurationMs: secToMs(beat.durationSec),
+    };
+  });
+
+  const fallbackBeatId = beats[0]?.id || beatId(0, "timeline");
+  const clipsById = new Map((input.clips || []).map((clip) => [clip.id, clip]));
+  const timelineClipIds = new Set(input.timeline.segments.map((segment) => segment.clipId));
+  const clips: Clip[] =
+    input.clips?.filter((clip) => timelineClipIds.has(clip.id)) ||
+    [...timelineClipIds].map((clipId) => ({
+      id: clipId,
+      filename: clipId,
+      url: clipId,
+      durationSec: 0,
+      description: "",
+    }));
+
   return {
-    id: clip.id,
-    uri: clip.url,
-    type: assetTypeFromClip(clip),
-    durationMs: secToMs(clip.measuredDurationSec ?? clip.durationSec),
-    metadata: {},
-    ...(clip.generatedBy
-      ? {
-          generatedBy: {
-            provider: clip.generatedBy.provider,
-            ...(clip.generatedBy.model ? { model: clip.generatedBy.model } : {}),
-            prompt: clip.generatedBy.prompt,
-          },
-        }
-      : {}),
+    id: input.id,
+    schemaVersion: EDIT_GRAPH_SCHEMA_VERSION,
+    assets: clips.map((clip) => ({
+      id: clip.id,
+      uri: clip.url,
+      type: clipType(clip),
+      durationMs: secToMs(clip.measuredDurationSec ?? clip.durationSec),
+      metadata: {},
+      ...(clip.generatedBy ? { generatedBy: clip.generatedBy } : {}),
+    })),
+    analysis: {
+      segments: input.timeline.segments.map((segment, index) => {
+        const clip = clipsById.get(segment.clipId);
+        return {
+          id: sourceSegmentId(segment, index),
+          assetId: segment.clipId,
+          startMs: secToMs(segment.sourceInSec),
+          endMs: secToMs(segment.sourceOutSec),
+          semanticTags: [segment.role, clip?.description || ""].filter(Boolean),
+        };
+      }),
+    },
+    intent: {
+      goal: input.goal,
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      aspectRatio: input.plan.aspectRatio,
+      tone: input.plan.style,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+    },
+    story: {
+      id: `${input.id}_story`,
+      objective: input.goal,
+      targetDurationMs: secToMs(input.plan.targetLengthSec),
+      ...(input.storyContext?.audience ? { audience: input.storyContext.audience } : {}),
+      tone: input.plan.style,
+      beats,
+    },
+    edit: {
+      decisions: input.timeline.segments.map((segment, index) => ({
+        id: `decision_${segment.id || index + 1}`,
+        operation: "select_segment",
+        beatId: beatIdsByRole.get(segment.role) || fallbackBeatId,
+        role: segment.role,
+        sourceSegmentIds: [sourceSegmentId(segment, index)],
+        ...(segment.id ? { timelineSegmentId: segment.id } : {}),
+        rationale: segment.reason,
+        ...(segment.caption === undefined ? {} : { caption: segment.caption }),
+      })),
+    },
+    timelineSettings: {
+      aspectRatio: input.timeline.aspectRatio,
+      fps: input.timeline.fps,
+      ...(input.timeline.showCaptions === undefined
+        ? {}
+        : { showCaptions: input.timeline.showCaptions }),
+    },
   };
 }
 
-export function buildEditGraphFromTimeline(args: {
+export function buildEditGraphFromTimeline(input: {
   id: string;
   projectId: string;
   briefVersionId: string;
   compositionId?: string;
   jobId: string;
   goal: string;
-  targetLengthSec: number;
-  aspectRatio: AspectRatio;
-  style?: string;
-  storyContext?: StoryContext;
   plan: EditPlan;
-  clips: Clip[];
   timeline: Timeline;
+  clips?: Clip[];
+  storyContext?: StoryContext | null;
   createdAt: string;
 }): EditGraphDocument {
-  const beatById = new Map<string, StoryBeat>();
-  for (const beat of args.plan.beats) {
-    beatById.set(roleToBeatId(beat.name), {
-      id: roleToBeatId(beat.name),
-      role: beat.name,
-      intent: beat.intent,
-      targetDurationMs: secToMs(beat.durationSec),
-    });
-  }
-
-  for (const segment of args.timeline.segments) {
-    const beatId = roleToBeatId(segment.role);
-    if (!beatById.has(beatId)) {
-      beatById.set(beatId, {
-        id: beatId,
-        role: segment.role,
-        intent: segment.reason || segment.role,
-        targetDurationMs: secToMs(segment.sourceOutSec - segment.sourceInSec),
-      });
-    }
-  }
-
-  const analysisSegments: MediaSegment[] = args.timeline.segments.map((segment) => ({
-    id: `media_${segment.id}`,
-    assetId: segment.clipId,
-    startMs: secToMs(segment.sourceInSec),
-    endMs: secToMs(segment.sourceOutSec),
-    semanticTags: [segment.role].filter(Boolean),
-  }));
-
-  const decisions: EditDecision[] = args.timeline.segments.map((segment) => ({
-    id: `decision_${segment.id}`,
-    beatId: roleToBeatId(segment.role),
-    operation: segment.caption ? "caption" : "select_segment",
-    sourceSegmentIds: [`media_${segment.id}`],
-    rationale: segment.reason,
-    timelineSegmentId: segment.id,
-    ...(segment.caption ? { caption: segment.caption } : {}),
-  }));
-
   return {
-    id: args.id,
-    schemaVersion: EDIT_GRAPH_SCHEMA_VERSION,
-    projectId: args.projectId,
-    briefVersionId: args.briefVersionId,
-    ...(args.compositionId ? { compositionId: args.compositionId } : {}),
-    assets: args.clips.map(clipToMediaAsset),
-    analysis: { segments: analysisSegments },
-    intent: {
-      goal: args.goal,
-      ...(args.storyContext?.audience ? { audience: args.storyContext.audience } : {}),
-      ...(args.storyContext?.platform ? { platform: args.storyContext.platform } : {}),
-      targetDurationMs: secToMs(args.targetLengthSec),
-      aspectRatio: args.aspectRatio,
-      ...(args.style ? { tone: args.style } : {}),
-    },
-    story: {
-      id: `story_${args.id}`,
-      objective: args.goal,
-      targetDurationMs: secToMs(args.plan.targetLengthSec),
-      ...(args.storyContext?.audience ? { audience: args.storyContext.audience } : {}),
-      ...(args.style ? { tone: args.style } : {}),
-      beats: [...beatById.values()],
-    },
-    edit: { decisions },
+    ...synthesizeEditGraph(input),
+    projectId: input.projectId,
+    briefVersionId: input.briefVersionId,
+    ...(input.compositionId ? { compositionId: input.compositionId } : {}),
     timeline: null,
-    createdBy: { jobId: args.jobId },
-    createdAt: args.createdAt,
-    updatedAt: args.createdAt,
+    createdBy: { jobId: input.jobId },
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
   };
 }
 
-export function compileEditGraphToTimeline(
-  graph: EditGraphDocument,
-  options: { fps?: number; showCaptions?: boolean } = {}
-): Timeline {
-  const mediaById = new Map(graph.analysis.segments.map((segment) => [segment.id, segment]));
-  const beatById = new Map(graph.story.beats.map((beat) => [beat.id, beat]));
-
+export function compileEditGraphToTimeline(graph: EditGraph): Timeline {
+  const segmentsById = new Map(
+    graph.analysis.segments.map((segment) => [segment.id, segment])
+  );
+  const beatsById = new Map(graph.story.beats.map((beat) => [beat.id, beat]));
   const segments: TimelineSegment[] = [];
+
   for (const decision of graph.edit.decisions) {
-    const source = mediaById.get(decision.sourceSegmentIds[0]);
+    if (decision.operation !== "select_segment") continue;
+    const source = segmentsById.get(decision.sourceSegmentIds[0]);
     if (!source) continue;
-    const beat = beatById.get(decision.beatId);
+    const beat = beatsById.get(decision.beatId);
     segments.push({
-      id: decision.timelineSegmentId,
+      ...(decision.timelineSegmentId ? { id: decision.timelineSegmentId } : {}),
       clipId: source.assetId,
       sourceInSec: msToSec(source.startMs),
       sourceOutSec: msToSec(source.endMs),
-      role: beat?.role ?? decision.beatId,
+      role: decision.role || beat?.role || decision.beatId,
       reason: decision.rationale || "",
-      ...(decision.caption ? { caption: decision.caption } : {}),
-    });
+      ...(decision.caption === undefined ? {} : { caption: decision.caption }),
+    } as TimelineSegment);
   }
 
   return {
-    aspectRatio: graph.intent.aspectRatio ?? "9:16",
-    fps: options.fps ?? 30,
+    aspectRatio: graph.timelineSettings.aspectRatio,
+    fps: graph.timelineSettings.fps,
     segments,
-    ...(options.showCaptions === undefined ? {} : { showCaptions: options.showCaptions }),
+    ...(graph.timelineSettings.showCaptions === undefined
+      ? {}
+      : { showCaptions: graph.timelineSettings.showCaptions }),
   };
+}
+
+export function compileTimelineViaEditGraph(
+  input: Parameters<typeof synthesizeEditGraph>[0]
+): Timeline {
+  return compileEditGraphToTimeline(synthesizeEditGraph(input));
 }
 
 export function markGraphTimelineProjection(
