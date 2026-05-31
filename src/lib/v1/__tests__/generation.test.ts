@@ -20,6 +20,7 @@ test.after(() => {
 });
 
 import { resolveActor } from "../actor";
+import { compileEditGraphToTimeline } from "../../edit-graph";
 import { ApiError } from "../errors";
 import {
   GenerationDeps,
@@ -204,6 +205,58 @@ test("asset-driven generation produces a timeline with provenance", async () => 
     ]);
     assert.ok(timeline!.provenance.criticReport, "critic report stored");
     assert.equal(timeline!.createdBy.jobId, job.id);
+  });
+});
+
+test("generation persists edit graph as source and serves a derived timeline", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id, {
+      audience: "busy founders",
+      style: "direct",
+    });
+    await seedAsset(store, project.id, { id: "asset_1" });
+    await seedAsset(store, project.id, { id: "asset_2" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: {
+        briefVersionId: brief.id,
+        assetIds: ["asset_1", "asset_2"],
+        showCaptions: true,
+      },
+    });
+    const done = await runGenerationJob(store, job.id, fakeDeps);
+
+    const timeline = await store.getTimeline(done.result!.timelineIds[0]);
+    assert.ok(timeline, "timeline should still be readable");
+    assert.equal(timeline!.derivedFrom?.compilerVersion, "edit-graph-compiler.v1");
+    assert.equal(timeline!.derivedFrom?.editGraphId, done.result!.editGraphIds![0]);
+
+    const graph = await store.getEditGraph(timeline!.derivedFrom!.editGraphId);
+    assert.ok(graph, "edit graph should be persisted");
+    assert.equal(graph!.schemaVersion, "editGraph.v1");
+    assert.equal(graph!.projectId, project.id);
+    assert.equal(graph!.briefVersionId, brief.id);
+    assert.equal(graph!.intent.goal, brief.brief.goal);
+    assert.equal(graph!.intent.audience, "busy founders");
+    assert.equal(graph!.timeline?.id, timeline!.id);
+    assert.equal(graph!.timeline?.derived, true);
+    assert.equal(graph!.createdBy.jobId, job.id);
+    assert.deepEqual(
+      graph!.edit.decisions.map((decision) => decision.timelineSegmentId),
+      timeline!.segments.map((segment) => segment.id)
+    );
+
+    const recompiled = compileEditGraphToTimeline(graph!);
+    assert.deepEqual(recompiled, {
+      aspectRatio: timeline!.aspectRatio,
+      fps: timeline!.fps,
+      showCaptions: timeline!.showCaptions,
+      segments: timeline!.segments,
+    });
   });
 });
 
