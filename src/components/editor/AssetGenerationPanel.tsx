@@ -91,7 +91,6 @@ export function AssetGenerationPanel({
             <option value="openai">OpenAI</option>
             <option value="gemini">Gemini</option>
             <option value="nanobanano">NanoBanano</option>
-            <option value="mock">Mock</option>
           </select>
         </div>
         <div style={{ flex: 1 }}>

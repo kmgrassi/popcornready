@@ -117,17 +117,24 @@ ${planText(input.plan)}
 
 Produce the timeline segments now.`;
 
-  const raw = await structuredCall<{ segments: Omit<TimelineSegment, "id">[] }>({
+  const raw = await structuredCall<{
+    showCaptions?: boolean;
+    segments: Omit<TimelineSegment, "id">[];
+  }>({
     cachedSystem: sys,
     user,
     schema: timelineSchema,
     maxTokens: 8000,
   });
 
+  const showCaptions =
+    raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
+
   return {
     aspectRatio: input.plan.aspectRatio,
     fps: 30,
     segments: raw.segments as TimelineSegment[],
+    ...(showCaptions === undefined ? {} : { showCaptions }),
   };
 }
 

@@ -38,6 +38,34 @@ interface OpenAIVideoGenerationPayload {
   seconds: OpenAIVideoSeconds;
 }
 
+type OpenAIVideoStatus = "queued" | "in_progress" | "completed" | "failed";
+
+interface OpenAIVideoJob {
+  id: string;
+  status: OpenAIVideoStatus;
+  prompt?: string;
+  progress?: number;
+  model?: string;
+  size?: OpenAIVideoSize;
+  seconds?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  object?: string;
+  completed_at?: number;
+  created_at?: number;
+  expires_at?: number;
+}
+
+interface OpenAIVideoFetchOptions {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+const DEFAULT_OPENAI_VIDEO_POLL_MS = 5_000;
+const DEFAULT_OPENAI_VIDEO_TIMEOUT_MS = 8 * 60 * 1_000;
+
 function buildOpenAIImagePayload(
   input: Extract<GenerateAssetRequest, { provider: "openai"; kind: "image" }>
 ): OpenAIImageGenerationPayload {
@@ -97,6 +125,14 @@ function geminiAspectRatio(size?: string): string {
   return width / height < 1 ? "9:16" : "16:9";
 }
 
+function normalizeGeminiVideoSeconds(value?: number): number {
+  const candidate = Math.round(Number(value));
+  if (!Number.isFinite(candidate)) return 8;
+  if (candidate <= 4) return 4;
+  if (candidate <= 6) return 6;
+  return 8;
+}
+
 function characterProviderSettings(input: GenerateAssetRequest) {
   if (!input.characterContext) return undefined;
   return {
@@ -108,6 +144,35 @@ function characterProviderSettings(input: GenerateAssetRequest) {
     aspectRatio: input.size,
     promptInvariantVersion: input.characterContext.promptInvariantVersion,
   };
+}
+
+export async function getOpenAIVideoById(
+  id: string,
+  options: OpenAIVideoFetchOptions = {}
+): Promise<OpenAIVideoJob> {
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_OPENAI_VIDEO_POLL_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OPENAI_VIDEO_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const response = await openaiFetch(`/videos/${id}`, { method: "GET" });
+    const job = (await response.json()) as OpenAIVideoJob;
+
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(`OpenAI video job ${id} did not complete within ${timeoutMs}ms.`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+export async function downloadOpenAIVideoById(id: string): Promise<Buffer> {
+  const response = await openaiFetch(`/videos/${id}/content`, { method: "GET" });
+  return Buffer.from(await response.arrayBuffer());
 }
 
 async function openaiFetch(
@@ -216,28 +281,19 @@ async function generateOpenAIVideo(
     method: "POST",
     body: form,
   });
-  let video = await createRes.json();
-  const id = video?.id;
+  const createPayload = await createRes.json();
+  const id = createPayload?.id;
   if (!id) throw new Error("OpenAI video generation returned no job id.");
 
-  const deadline = Date.now() + 8 * 60 * 1000;
-  while (
-    (video.status === "queued" || video.status === "in_progress") &&
-    Date.now() < deadline
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    const statusRes = await openaiFetch(`/videos/${id}`, { method: "GET" });
-    video = await statusRes.json();
+  const completedVideo = await getOpenAIVideoById(id);
+  if (completedVideo.status !== "completed") {
+    const failure = completedVideo.error?.message
+      ? `OpenAI video generation failed: ${completedVideo.error.message}`
+      : `OpenAI video generation did not complete: ${completedVideo.status}`;
+    throw new Error(failure);
   }
 
-  if (video.status !== "completed") {
-    throw new Error(`OpenAI video generation did not complete: ${video.status}`);
-  }
-
-  const contentRes = await openaiFetch(`/videos/${id}/content`, {
-    method: "GET",
-  });
-  const bytes = Buffer.from(await contentRes.arrayBuffer());
+  const bytes = await downloadOpenAIVideoById(id);
   return {
     kind: "video",
     bytes,
@@ -290,6 +346,7 @@ async function generateGeminiVideo(
 
   const prompt = requirePrompt(input.prompt);
   const model = input.model || GEMINI_DEFAULT_VIDEO_MODEL;
+  const durationSeconds = normalizeGeminiVideoSeconds(input.seconds);
   const ai = new GoogleGenAI({ apiKey: key });
   const firstReference = input.referencePaths?.[0];
   if (
@@ -308,7 +365,7 @@ async function generateGeminiVideo(
     ...(firstReference ? { image: await readAsGeminiImage(firstReference) } : {}),
     config: {
       aspectRatio: geminiAspectRatio(input.size),
-      durationSeconds: input.seconds || 8,
+      durationSeconds,
       numberOfVideos: 1,
     },
   });

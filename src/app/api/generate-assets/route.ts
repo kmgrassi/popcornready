@@ -84,7 +84,9 @@ function normalizeProviderName(
   value: unknown,
   kind: GenerativeAssetKind
 ): GenerativeProviderName | null {
-  const raw = String(value || (kind === "audio" ? "elevenlabs" : "openai"));
+  const fallback =
+    kind === "audio" ? "elevenlabs" : kind === "video" ? "gemini" : "openai";
+  const raw = String(value || fallback);
   const name = raw.toLowerCase();
   if (name === "openai") return "openai";
   if (name === "gemini") return "gemini";

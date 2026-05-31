@@ -5,6 +5,10 @@ import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
 import { AspectRatio, StoryContext } from "@/lib/types";
 import { mergeStoryContext } from "@/lib/story-context";
 
+function parseShowCaptions(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -15,6 +19,7 @@ export async function POST(req: NextRequest) {
     const targetLengthSec = Number(body.targetLengthSec) || 30;
     const style = String(body.style || "fast-paced social ad");
     const aspectRatio = (body.aspectRatio || "9:16") as AspectRatio;
+    const showCaptions = parseShowCaptions(body.showCaptions);
     const storyContext = mergeStoryContext(body.storyContext as StoryContext);
 
     const project = await getProject();
@@ -45,6 +50,7 @@ export async function POST(req: NextRequest) {
       await selectClips({ plan, clips: project.clips }),
       project.clips
     );
+    timeline.showCaptions = showCaptions;
 
     // 3. Critique once and apply the patches -> improved cut (v1)
     const { report, patches } = await critique({

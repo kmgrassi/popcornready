@@ -145,6 +145,8 @@ export interface Timeline {
   aspectRatio: AspectRatio;
   fps: number;
   segments: TimelineSegment[];
+  // When true, captions generated on segments are rendered as on-screen overlays.
+  showCaptions?: boolean;
 }
 
 export interface CriticScores {

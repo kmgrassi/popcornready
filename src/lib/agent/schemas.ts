@@ -69,6 +69,7 @@ export const timelineSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    showCaptions: { type: "boolean" },
     segments: {
       type: "array",
       items: {

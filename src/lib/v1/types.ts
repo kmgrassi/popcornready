@@ -202,6 +202,7 @@ export interface VersionedTimeline {
   compositionId?: string;
   aspectRatio: AspectRatio;
   fps: number;
+  showCaptions?: boolean;
   segments: TimelineSegment[];
   provenance: TimelineProvenance;
   createdBy: { jobId: string };
@@ -219,6 +220,7 @@ export interface GenerationRequest {
     mode: string;
     audioAssetId?: string;
   };
+  showCaptions?: boolean;
 }
 
 // Validated, resolved inputs the executor runs against. Stored on the job so
@@ -229,6 +231,7 @@ export interface GenerationJobInput {
   assetIds: string[];
   generatedAssetJobIds: string[];
   variantCount: number;
+  showCaptions?: boolean;
 }
 
 export interface GenerationJobResult {

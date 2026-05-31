@@ -52,6 +52,7 @@ export const VideoComposition: React.FC<VideoProps> = ({
       )
     : [];
   let cursor = 0;
+  const showCaptions = timeline.showCaptions === true;
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -92,32 +93,32 @@ export const VideoComposition: React.FC<VideoProps> = ({
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               )}
-            </AbsoluteFill>
-            {seg.caption ? (
-              <AbsoluteFill
-                style={{
-                  justifyContent: "flex-end",
-                  alignItems: "center",
-                  padding: 48,
-                }}
-              >
-                <div
+              {showCaptions && seg.caption ? (
+                <AbsoluteFill
                   style={{
-                    background: "rgba(0,0,0,0.6)",
-                    color: "#fff",
-                    fontSize: 56,
-                    fontWeight: 700,
-                    fontFamily: "Arial, sans-serif",
-                    padding: "12px 24px",
-                    borderRadius: 12,
-                    textAlign: "center",
-                    maxWidth: "90%",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    padding: 48,
                   }}
                 >
-                  {seg.caption}
-                </div>
-              </AbsoluteFill>
-            ) : null}
+                  <div
+                    style={{
+                      background: "rgba(0,0,0,0.6)",
+                      color: "#fff",
+                      fontSize: 42,
+                      fontWeight: 700,
+                      fontFamily: "Arial, sans-serif",
+                      padding: "12px 24px",
+                      borderRadius: 12,
+                      textAlign: "center",
+                      maxWidth: "90%",
+                    }}
+                  >
+                    {seg.caption}
+                  </div>
+                </AbsoluteFill>
+              ) : null}
+            </AbsoluteFill>
           </Sequence>
         );
       })}

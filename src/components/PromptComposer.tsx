@@ -24,6 +24,11 @@ const TEMPLATES: { label: string; prompt: string }[] = [
     prompt:
       "A high-energy 30-second hype reel announcing an event — build anticipation with quick cuts and end on the date with a call to register.",
   },
+  {
+    label: "Movie dream montage",
+    prompt:
+      "Create a 30-second cinematic story. In the first 1-2 seconds, show a 10-year-old movie-loving boy in his bedroom late at night at a computer discovering the website “Popcorn Ready”. Then build a montage with gradually rising orchestral music as he creates a movie, goes from idea to production, and sees it released to adoring fans. Show him as a famous filmmaker at a packed premiere, then at an awards show selected for Best Movie as he walks up and starts, “I would like to thank...”. Cut to him waking up in bed, turning to his laptop, and finding Popcorn Ready open — the movie of his dreams can now be made.",
+  },
 ];
 
 export function PromptComposer() {
@@ -116,7 +121,8 @@ export function PromptComposer() {
       )}
       <p className="lp-prompt-hint">
         No clips needed — Popcorn Ready generates the visuals and cuts the video for
-        you. Bring your own keys for real footage, or preview with placeholders.
+        you. Bring your own keys for real footage, or use automatic visual
+        generation to create it all.
       </p>
     </div>
   );

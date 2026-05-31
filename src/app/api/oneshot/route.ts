@@ -75,7 +75,7 @@ function resolveMode(body: any): {
       }
       return { mode: "video", provider: "gemini" };
     }
-    if (requestedProvider && requestedProvider !== "openai") {
+    if (requestedProvider && requestedProvider !== "openai" && requestedProvider !== "gemini") {
       throw new Error(
         `One-shot video currently supports only openai or gemini providers. Received: ${requestedProvider}`
       );
@@ -88,8 +88,8 @@ function resolveMode(body: any): {
       }
       return { mode: "video", provider: "openai" };
     }
-    if (hasOpenAI) return { mode: "video", provider: "openai" };
     if (hasGemini) return { mode: "video", provider: "gemini" };
+    if (hasOpenAI) return { mode: "video", provider: "openai" };
     throw new Error(
       "No video-capable provider is configured for one-shot. Set OPENAI_API_KEY or GEMINI_API_KEY."
     );
@@ -112,6 +112,10 @@ function resolveMode(body: any): {
   }
   const imageProvider = "openai";
   return { mode: "image", provider: imageProvider };
+}
+
+function parseShowCaptions(value: unknown): boolean {
+  return value === true || value === "true";
 }
 
 function imageSizeForAspect(ar: AspectRatio): string {
@@ -213,6 +217,7 @@ export async function POST(req: NextRequest) {
     const targetLengthSec = Number(body.targetLengthSec) || 30;
     const style = String(body.style || "fast-paced social ad");
     const aspectRatio = (body.aspectRatio || "9:16") as AspectRatio;
+    const showCaptions = parseShowCaptions(body.showCaptions);
     const storyContext = mergeStoryContext(body.storyContext as StoryContext);
     const { mode, provider } = resolveMode(body);
 
@@ -282,6 +287,7 @@ export async function POST(req: NextRequest) {
       { aspectRatio, fps: 30, segments },
       clips
     );
+    timeline.showCaptions = showCaptions;
 
     // 4. Critique once and apply patches — but never let it empty the cut.
     const { report, patches } = await critique({

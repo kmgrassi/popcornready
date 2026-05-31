@@ -184,11 +184,19 @@ export async function prepareGeneration(
     if (asset.generatedAssetJobId) generatedAssetJobIds.add(asset.generatedAssetJobId);
   }
 
+  const showCaptions = body.showCaptions;
+  if (showCaptions !== undefined && typeof showCaptions !== "boolean") {
+    throw new ApiError("validation_failed", "showCaptions must be a boolean.", {
+      fields: [{ path: "showCaptions", message: "Must be true or false." }],
+    });
+  }
+
   return {
     briefVersionId,
     ...(compositionId ? { compositionId } : {}),
     assetIds,
     generatedAssetJobIds: [...generatedAssetJobIds],
+    ...(showCaptions === undefined ? {} : { showCaptions }),
     variantCount,
   };
 }
@@ -217,6 +225,7 @@ function requestBodyHash(body: GenerationRequest): string {
       assetIds: Array.isArray(body.assetIds) ? body.assetIds.map((id) => String(id)) : [],
       variantCount: body.variantCount ?? 1,
       audioAlignment: body.audioAlignment ?? null,
+      showCaptions: body.showCaptions ?? null,
     })
   );
 }
@@ -614,6 +623,7 @@ export async function runGenerationJob(
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
       aspectRatio: timeline.aspectRatio,
       fps: timeline.fps,
+      ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
       segments: timeline.segments,
       provenance: {
         briefVersionId: input.briefVersionId,
