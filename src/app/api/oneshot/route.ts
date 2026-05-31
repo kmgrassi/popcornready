@@ -348,10 +348,32 @@ async function resumableClipsForGoal(goal: string): Promise<Clip[]> {
     .filter((clip): clip is Clip => Boolean(clip && clip.kind !== "audio"));
 }
 
-async function resumableSoundtrackForGoal(goal: string): Promise<Clip | null> {
+// Tolerance (seconds) for treating a cached soundtrack's duration as matching
+// the current request. Audio durations decoded from media bytes rarely land
+// exactly on the requested length.
+const SOUNDTRACK_DURATION_TOLERANCE_SEC = 1.5;
+
+async function resumableSoundtrackForGoal(input: {
+  goal: string;
+  style: string;
+  targetLengthSec: number;
+}): Promise<Clip | null> {
   const existing = await getProject();
-  if (existing.goal !== goal) return null;
-  return existing.clips.find((clip) => clip.kind === "audio") || null;
+  if (existing.goal !== input.goal) return null;
+  // Only reuse a cached soundtrack when it still matches the current request.
+  // The editor exposes target length and style independently of the brief, so
+  // rerunning the same goal at a different length/style must regenerate audio
+  // rather than auto-selecting a stale clip of the wrong duration.
+  const candidate = existing.clips.find((clip) => clip.kind === "audio");
+  if (!candidate) return null;
+  const duration = candidate.measuredDurationSec ?? candidate.durationSec;
+  const durationMatches =
+    Math.abs(duration - input.targetLengthSec) <=
+    SOUNDTRACK_DURATION_TOLERANCE_SEC;
+  const styleMatches = candidate.generatedBy?.prompt
+    ? candidate.generatedBy.prompt.includes(`Visual style: ${input.style}`)
+    : true;
+  return durationMatches && styleMatches ? candidate : null;
 }
 
 async function resumableCharacterForGoal(goal: string): Promise<{
@@ -557,7 +579,7 @@ export async function POST(req: NextRequest) {
     // 3. Start the soundtrack before video generation and let it run in
     // parallel with the sequential video loop.
     const existingSoundtrack = includeAudio
-      ? await resumableSoundtrackForGoal(goal)
+      ? await resumableSoundtrackForGoal({ goal, style, targetLengthSec })
       : null;
     const soundtrackPromise: Promise<Clip | null> =
       includeAudio && !existingSoundtrack
