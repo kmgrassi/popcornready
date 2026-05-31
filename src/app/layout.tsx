@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import "../styles/base.css";
-import "../styles/tokens.css";
-import "../styles/utilities.css";
 import "./globals.css";
+import "../styles/base.css";
+import "../styles/utilities.css";
+import "../styles/tokens.css";
 
 export const metadata: Metadata = {
   title: "Popcorn Ready — AI-native video editor",
