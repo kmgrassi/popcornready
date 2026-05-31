@@ -419,6 +419,189 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
   return { run, stages, stageItems: [], resultArtifacts: [] };
 }
 
+export async function approveReviewGate(
+  store: GenerationRunsStore,
+  runId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Terminal generation runs cannot be approved.", {
+      status: run.status,
+    });
+  }
+  if (!run.reviewGate) {
+    return payload;
+  }
+
+  const gate = run.reviewGate;
+  const stage = stages.find((s) => s.stageId === gate.stageId);
+  if (!stage || stage.type !== gate.stageType) {
+    throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
+  }
+
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(stage.stageId, { reviewedAt });
+
+  const nextStage = stages.find((s) => s.order > stage.order && s.status === "queued");
+  await store.updateRun(run.runId, {
+    reviewGate: null,
+    currentStageType: nextStage?.type ?? run.currentStageType,
+    message: nextStage
+      ? `Approved ${stage.label}; continuing to ${nextStage.label}.`
+      : `Approved ${stage.label}.`,
+  });
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function pauseAfterStageIfReviewGate(
+  store: GenerationRunsStore,
+  runId: string,
+  stageId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  const stage = stages.find((s) => s.stageId === stageId);
+  if (!stage || !stage.isReviewGate || stage.status !== "succeeded") {
+    return payload;
+  }
+  if (isTerminalRunStatus(run.status)) {
+    return payload;
+  }
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: stage.type,
+    reviewGate: {
+      stageType: stage.type as GateableGenerationStageType,
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+    message: `${stage.label} is ready for review.`,
+  });
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function rejectReviewGate(
+  store: GenerationRunsStore,
+  runId: string,
+  body: unknown
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Terminal generation runs cannot be rejected.", {
+      status: run.status,
+    });
+  }
+  if (!run.reviewGate) {
+    throw new ApiError("validation_failed", "Run is not awaiting review.");
+  }
+
+  const parsed = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as { stageType?: unknown; note?: unknown })
+    : {};
+  const gate = run.reviewGate;
+  if (parsed.stageType !== undefined && parsed.stageType !== gate.stageType) {
+    throw new ApiError("validation_failed", "Reject stageType must match the active review gate.", {
+      fields: [{ path: "stageType", message: `Expected ${gate.stageType}.` }],
+    });
+  }
+
+  const stage = stages.find((s) => s.stageId === gate.stageId);
+  if (!stage || stage.type !== gate.stageType) {
+    throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
+  }
+  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
+
+  // Force the stage back through generation instead of re-presenting rejected
+  // output. The run re-enters awaiting_review only after the stage succeeds.
+  const items = await store.listStageItemsForStage(stage.stageId);
+  await Promise.all(
+    items.map((item) =>
+      store.updateStageItem(item.itemId, {
+        status: "queued",
+        progressPercent: 0,
+        assetId: undefined,
+        artifactId: undefined,
+        error: undefined,
+      })
+    )
+  );
+
+  await store.updateStage(stage.stageId, {
+    status: "queued",
+    progressPercent: 0,
+    artifactIds: [],
+    reviewedAt: undefined,
+    startedAt: undefined,
+    completedAt: undefined,
+    error: undefined,
+    message: note
+      ? `Regenerating after feedback: ${note}`
+      : "Regenerating after review feedback.",
+  });
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: stage.type,
+    reviewGate: null,
+    message: note
+      ? `Regenerating ${stage.label} after feedback: ${note}`
+      : `Regenerating ${stage.label} after review feedback.`,
+  });
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+export async function cancelGenerationRun(
+  store: GenerationRunsStore,
+  runId: string
+): Promise<GenerationRunPayload> {
+  const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
+  const { run, stages } = payload;
+  if (isTerminalRunStatus(run.status)) {
+    throw new ApiError("job_not_cancelable", "Run already finished.", {
+      code: "job_not_cancelable",
+      message: "Run already finished.",
+      retryable: false,
+    });
+  }
+
+  const canceledAt = new Date().toISOString();
+  await store.updateRun(run.runId, {
+    status: "canceled",
+    reviewGate: null,
+    completedAt: canceledAt,
+    message: "Generation run canceled.",
+  });
+  await Promise.all(
+    stages
+      .filter((stage) => stage.status === "queued" || stage.status === "running")
+      .map((stage) =>
+        store.updateStage(stage.stageId, {
+          status: "canceled",
+          completedAt: canceledAt,
+          message: "Canceled before this stage completed.",
+        })
+      )
+  );
+
+  return requireExistingPayload(await assemblePayload(store, runId), runId);
+}
+
+function isTerminalRunStatus(status: GenerationRunStatus): boolean {
+  return status === "succeeded" || status === "failed" || status === "canceled";
+}
+
+function requireExistingPayload(
+  payload: GenerationRunPayload | null,
+  runId: string
+): GenerationRunPayload {
+  if (!payload) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  return payload;
+}
+
 export async function assemblePayload(
   store: GenerationRunsStore,
   runId: string
