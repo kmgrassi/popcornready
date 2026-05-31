@@ -59,6 +59,8 @@ const PROVIDER_KIND_SUPPORT: Record<
 > = {
   openai: ["image", "video"],
   gemini: ["video"],
+  runway: ["video"],
+  ltx: ["video"],
   elevenlabs: ["audio"],
   mock: ["image", "video", "audio"],
   nanobanano: [],
@@ -111,6 +113,8 @@ function normalizeProvider(
   const name = String(value || fallback).toLowerCase();
   if (name === "openai") return "openai";
   if (name === "gemini") return "gemini";
+  if (name === "runway" || name === "runwayml") return "runway";
+  if (name === "ltx" || name === "ltxvideo" || name === "ltx-video") return "ltx";
   if (name === "elevenlabs") return "elevenlabs";
   if (name === "mock") return "mock";
   if (name === "nanobanano" || name === "nano-banano" || name === "nano_banano") {
@@ -329,6 +333,18 @@ async function runGeneration(
   } else if (parsed.provider === "gemini" && parsed.kind === "video") {
     result = await provider.generateAsset({
       provider: "gemini",
+      kind: "video",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "runway" && parsed.kind === "video") {
+    result = await provider.generateAsset({
+      provider: "runway",
+      kind: "video",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "ltx" && parsed.kind === "video") {
+    result = await provider.generateAsset({
+      provider: "ltx",
       kind: "video",
       ...baseRequest,
     });

@@ -41,7 +41,7 @@ export const maxDuration = 800;
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
-type VideoProvider = "openai" | "gemini";
+type VideoProvider = "openai" | "gemini" | "runway" | "ltx";
 
 function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
@@ -53,6 +53,10 @@ function resolveVideoProviders(body: any): {
 } {
   const hasOpenAI = Boolean((process.env.OPENAI_API_KEY || "").trim());
   const hasGemini = Boolean((process.env.GEMINI_API_KEY || "").trim());
+  const hasRunway = Boolean(
+    (process.env.RUNWAYML_API_SECRET || process.env.RUNWAY_API_KEY || "").trim()
+  );
+  const hasLtx = Boolean((process.env.LTX_API_KEY || "").trim());
   const requestedProvider =
     typeof body.provider === "string"
       ? body.provider.toLowerCase().trim()
@@ -71,13 +75,38 @@ function resolveVideoProviders(body: any): {
     }
     return { primary: "gemini" };
   }
+  if (requestedProvider === "runway" || requestedProvider === "runwayml") {
+    if (!hasRunway) {
+      throw new Error(
+        "One-shot video requested provider='runway', but RUNWAYML_API_SECRET is not configured."
+      );
+    }
+    return { primary: "runway" };
+  }
+  if (
+    requestedProvider === "ltx" ||
+    requestedProvider === "ltxvideo" ||
+    requestedProvider === "ltx-video"
+  ) {
+    if (!hasLtx) {
+      throw new Error(
+        "One-shot video requested provider='ltx', but LTX_API_KEY is not configured."
+      );
+    }
+    return { primary: "ltx" };
+  }
   if (
     requestedProvider &&
     requestedProvider !== "openai" &&
-    requestedProvider !== "gemini"
+    requestedProvider !== "gemini" &&
+    requestedProvider !== "runway" &&
+    requestedProvider !== "runwayml" &&
+    requestedProvider !== "ltx" &&
+    requestedProvider !== "ltxvideo" &&
+    requestedProvider !== "ltx-video"
   ) {
     throw new Error(
-      `One-shot video currently supports only openai or gemini providers. Received: ${requestedProvider}`
+      `One-shot video currently supports openai, gemini, runway, or ltx providers. Received: ${requestedProvider}`
     );
   }
   if (requestedProvider === "openai") {
@@ -92,8 +121,10 @@ function resolveVideoProviders(body: any): {
     return { primary: "gemini", fallback: hasOpenAI ? "openai" : undefined };
   }
   if (hasOpenAI) return { primary: "openai" };
+  if (hasRunway) return { primary: "runway" };
+  if (hasLtx) return { primary: "ltx" };
   throw new Error(
-    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY or OPENAI_API_KEY."
+    "No video-capable provider is configured for one-shot. Set GEMINI_API_KEY, OPENAI_API_KEY, RUNWAYML_API_SECRET, or LTX_API_KEY."
   );
 }
 
@@ -211,26 +242,37 @@ async function generateBeatClip(input: {
   const referencePaths = input.characterContext?.references.map(
     (reference) => reference.path
   );
+  const baseRequest = {
+    prompt: input.prompt,
+    size: input.size,
+    seconds: input.seconds,
+    referencePaths,
+    characterContext: input.characterContext,
+  };
   const result =
     input.provider === "openai"
       ? await provider.generateAsset({
           provider: "openai",
           kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-          referencePaths,
-          characterContext: input.characterContext,
+          ...baseRequest,
         })
-      : await provider.generateAsset({
-          provider: "gemini",
-          kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-          referencePaths,
-          characterContext: input.characterContext,
-        });
+      : input.provider === "gemini"
+        ? await provider.generateAsset({
+            provider: "gemini",
+            kind: "video",
+            ...baseRequest,
+          })
+        : input.provider === "runway"
+          ? await provider.generateAsset({
+              provider: "runway",
+              kind: "video",
+              ...baseRequest,
+            })
+          : await provider.generateAsset({
+              provider: "ltx",
+              kind: "video",
+              ...baseRequest,
+            });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newId("vid");
   const filename = `${id}.${result.extension}`;

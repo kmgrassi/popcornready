@@ -34,6 +34,12 @@ const SUPPORTED_MODES: Record<
   gemini: {
     video: ["prompt_only", "hero_frame", "first_frame_video"],
   },
+  runway: {
+    video: ["prompt_only", "hero_frame", "first_frame_video"],
+  },
+  ltx: {
+    video: ["prompt_only", "hero_frame", "first_frame_video"],
+  },
   mock: {
     image: ["prompt_only", "reference_pack", "hero_frame", "first_frame_video"],
     video: ["prompt_only", "reference_pack", "hero_frame", "first_frame_video"],

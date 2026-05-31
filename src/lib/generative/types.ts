@@ -7,6 +7,8 @@ import type {
 export type GenerativeProviderName =
   | "openai"
   | "gemini"
+  | "runway"
+  | "ltx"
   | "elevenlabs"
   | "nanobanano"
   | "mock";
@@ -146,6 +148,22 @@ export interface GeminiVideoRequest extends BaseGenerateAssetRequest {
   seconds?: number;
 }
 
+export interface RunwayVideoRequest extends BaseGenerateAssetRequest {
+  provider: "runway";
+  kind: "video";
+  model?: string;
+  size?: string;
+  seconds?: number;
+}
+
+export interface LtxVideoRequest extends BaseGenerateAssetRequest {
+  provider: "ltx";
+  kind: "video";
+  model?: string;
+  size?: string;
+  seconds?: number;
+}
+
 export interface MockImageRequest extends BaseGenerateAssetRequest {
   provider: "mock";
   kind: "image";
@@ -195,6 +213,8 @@ export type GenerateAssetRequest =
   | OpenAIImageRequest
   | OpenAIVideoRequest
   | GeminiVideoRequest
+  | RunwayVideoRequest
+  | LtxVideoRequest
   | MockImageRequest
   | MockVideoRequest
   | MockAudioRequest
