@@ -342,6 +342,12 @@ const STAGE_SEEDS: StageSeed[] = [
 const GATEABLE_STAGE_SET = new Set<GenerationStageType>(
   GATEABLE_GENERATION_STAGE_TYPES
 );
+const TERMINAL_RUN_STATUSES = new Set<GenerationRunStatus>([
+  "succeeded",
+  "failed",
+  "canceled",
+]);
+const ACTIVE_RUN_STATUSES = new Set<GenerationRunStatus>(["queued", "running"]);
 
 export function isGateableGenerationStageType(
   value: unknown
@@ -617,10 +623,26 @@ export async function assemblePayload(
   }
 
   return {
-    run,
-    stages,
+    run: surfaceRunReviewGateState(run),
+    stages: stages.map(surfaceStageReviewGateState),
     stageItems,
     resultArtifacts: collectResultArtifacts(stages, stageItems),
+  };
+}
+
+function surfaceRunReviewGateState(run: GenerationRun): GenerationRun {
+  return {
+    ...run,
+    reviewGates: run.reviewGates ?? [],
+    reviewGate: run.reviewGate ?? null,
+  };
+}
+
+function surfaceStageReviewGateState(stage: GenerationStage): GenerationStage {
+  return {
+    ...stage,
+    isReviewGate: stage.isReviewGate ?? false,
+    reviewedAt: stage.reviewedAt ?? null,
   };
 }
 
@@ -655,6 +677,94 @@ export function requireRun(
     throw new ApiError("not_found", `Generation run not found: ${runId}`);
   }
   return payload;
+}
+
+export async function approveGenerationRunGate(args: {
+  store: GenerationRunsStore;
+  runId: string;
+  projectId: string;
+}): Promise<GenerationRunPayload> {
+  const { store, runId, projectId } = args;
+  const payload = requireRun(await assemblePayload(store, runId), runId, projectId);
+  const { run, stages } = payload;
+
+  if (TERMINAL_RUN_STATUSES.has(run.status)) {
+    throw new ApiError(
+      "job_not_cancelable",
+      `Generation run ${runId} is ${run.status} and cannot be approved.`,
+      { status: run.status }
+    );
+  }
+
+  if (!run.reviewGate) {
+    if (ACTIVE_RUN_STATUSES.has(run.status)) return payload;
+    throw new ApiError(
+      "job_not_cancelable",
+      `Generation run ${runId} is ${run.status} and cannot be approved.`,
+      { status: run.status }
+    );
+  }
+
+  const gatedStage = stages.find((stage) => stage.stageId === run.reviewGate?.stageId);
+  if (!gatedStage) {
+    throw new ApiError(
+      "validation_failed",
+      `Review gate points at a missing stage: ${run.reviewGate.stageId}`
+    );
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const reviewedStage = await store.updateStage(gatedStage.stageId, {
+    reviewedAt,
+    status: "succeeded",
+    progressPercent: 100,
+    completedAt: gatedStage.completedAt ?? reviewedAt,
+  });
+  const updatedRun = await store.updateRun(runId, {
+    reviewGate: null,
+    status: "running",
+    message: `${reviewedStage.label} approved.`,
+  });
+  await startNextStageAfter(store, updatedRun, reviewedStage);
+
+  const nextPayload = await assemblePayload(store, runId);
+  if (!nextPayload) throw new ApiError("not_found", `Generation run not found: ${runId}`);
+  return nextPayload;
+}
+
+async function startNextStageAfter(
+  store: GenerationRunsStore,
+  run: GenerationRun,
+  completedStage: GenerationStage
+): Promise<void> {
+  const stages = await store.listStagesForRun(run.runId);
+  const nextStage = stages.find((stage) => stage.order > completedStage.order);
+  if (!nextStage) {
+    await store.updateRun(run.runId, {
+      status: "succeeded",
+      currentStageType: "ready",
+      progressPercent: 100,
+      message: "Your video is ready.",
+      completedAt: new Date().toISOString(),
+      reviewGate: null,
+    });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await store.updateStage(nextStage.stageId, {
+    status: "running",
+    startedAt: nextStage.startedAt ?? now,
+    progressPercent: nextStage.progressPercent ?? 0,
+  });
+  await store.updateRun(run.runId, {
+    status: "running",
+    currentStageType: nextStage.type,
+    progressPercent: Math.round((nextStage.order / STAGE_SEEDS.length) * 100),
+    message: `Running ${nextStage.label}.`,
+    reviewGate: null,
+    startedAt: run.startedAt ?? now,
+  });
 }
 
 export class RunReviewGatePaused extends Error {

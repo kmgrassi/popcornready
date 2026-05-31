@@ -158,6 +158,51 @@ test("listRunsForProject returns only that project's runs, newest first", async 
   assert.deepEqual(cList, []);
 });
 
+test("createRunWithSeedStages persists selected review gates on the run and stages", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_a",
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "creative_plan"],
+    },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(payload.run.reviewGate, null);
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "creative_plan")?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "asset_generation")
+      ?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "ready")?.isReviewGate,
+    undefined
+  );
+});
+
+test("createRunWithSeedStages rejects invalid review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_a",
+        body: { reviewGates: ["ready", "not_a_stage"] },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.code, "validation_failed");
+      return true;
+    }
+  );
+});
+
 test("stages are scoped by runId and listed in order", async () => {
   const run = await store.createRun({
     projectId: "proj_a",
@@ -725,6 +770,86 @@ test("assemblePayload collects result artifacts from stages and matches stage it
   assert.ok(exportArt, "export artifact should be in result list");
   assert.equal(exportArt!.kind, "export");
   assert.equal(exportArt!.itemId, undefined);
+});
+
+test("assemblePayload surfaces current review gate state for a paused run", async () => {
+  const run = await store.createRun({
+    projectId: "proj_gate",
+    status: "running",
+    currentStageType: "asset_generation",
+    progressPercent: 38,
+    reviewGates: ["creative_plan", "asset_generation"],
+  });
+  const planStage = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Plan",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: ["art_plan"],
+    isReviewGate: true,
+    reviewedAt: "2026-05-31T15:00:00.000Z",
+  });
+  const assetStage = await store.saveStage({
+    runId: run.runId,
+    type: "asset_generation",
+    label: "Visuals",
+    order: 2,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: ["art_visuals"],
+    isReviewGate: true,
+  });
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "asset_generation",
+      stageId: assetStage.stageId,
+      state: "awaiting_review",
+      enteredAt: "2026-05-31T15:05:00.000Z",
+    },
+  });
+
+  const payload = await assemblePayload(store, run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, ["creative_plan", "asset_generation"]);
+  assert.deepEqual(payload!.run.reviewGate, {
+    stageType: "asset_generation",
+    stageId: assetStage.stageId,
+    state: "awaiting_review",
+    enteredAt: "2026-05-31T15:05:00.000Z",
+  });
+
+  const surfacedPlanStage = payload!.stages.find((s) => s.stageId === planStage.stageId);
+  assert.ok(surfacedPlanStage);
+  assert.equal(surfacedPlanStage!.isReviewGate, true);
+  assert.equal(surfacedPlanStage!.reviewedAt, "2026-05-31T15:00:00.000Z");
+
+  const surfacedAssetStage = payload!.stages.find((s) => s.stageId === assetStage.stageId);
+  assert.ok(surfacedAssetStage);
+  assert.equal(surfacedAssetStage!.isReviewGate, true);
+  assert.equal(surfacedAssetStage!.reviewedAt, null);
+});
+
+test("assemblePayload surfaces YOLO defaults when a run has no review gates", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_yolo",
+    body: {},
+  });
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, []);
+  assert.equal(payload!.run.reviewGate, null);
+  assert.equal(
+    payload!.stages.every((stage) => stage.isReviewGate === false),
+    true
+  );
+  assert.equal(
+    payload!.stages.every((stage) => stage.reviewedAt === null),
+    true
+  );
 });
 
 test("requireRun returns the payload for a matching project", async () => {
