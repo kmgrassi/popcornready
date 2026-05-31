@@ -662,7 +662,12 @@ export async function runGenerationJob(
         stageType: err.stageType,
         stageId: err.stageId,
       });
-      return job;
+      // The worker has stopped at a review gate, but the pause is a run-level
+      // concept (`run.reviewGate`) — the backing job is no longer executing.
+      // Leaving it `running` would strand it forever, since resume re-enters
+      // through `runGenerationJob`, which only picks up `queued` jobs. Roll the
+      // job back to `queued` so an approve can dispatch it again.
+      return saveJobUpdate(store, job, { status: "queued" }, logger);
     }
 
     const rawMessage = err instanceof Error ? err.message : "Generation failed.";

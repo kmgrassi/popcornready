@@ -361,7 +361,10 @@ test("runGenerationJob pauses after a persisted gated stage instead of advancing
       const emitter = createPersistedRunProgressEmitter(runStore, runPayload.run.runId);
 
       const paused = await runGenerationJob(store, job.id, fakeDeps, emitter);
-      assert.equal(paused.status, "running");
+      // The worker stopped at the gate, but the job is rolled back to `queued`
+      // so the resume path (runGenerationJob runs only `queued` jobs) can
+      // re-enter it on approve rather than leaving it stuck `running`.
+      assert.equal(paused.status, "queued");
       assert.equal(paused.result, null);
 
       const payload = await assemblePayload(runStore, runPayload.run.runId);
