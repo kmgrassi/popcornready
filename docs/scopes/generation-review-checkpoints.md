@@ -160,8 +160,13 @@ POST /api/v1/projects/:projectId/generation-runs/:runId/approve
 
 - Approves the current `reviewGate`, clears it, and resumes the run at the next
   stage.
-- Idempotent: approving when not awaiting review (or approving the same gate
-  twice) is a no-op success.
+- Idempotent only for a duplicate approval of an already-cleared gate on a still
+  active run (e.g. the user double-clicks, or the run already advanced past the
+  gate): return a no-op success.
+- Terminal runs are an error, not a no-op: approving a `canceled`, `failed`, or
+  fully `succeeded` run returns `job_not_cancelable` (or an equivalent
+  invalid-state error) so a cancel's terminal state is preserved rather than
+  silently resumed.
 - Returns the updated run payload.
 
 ### Reject / request changes at a gate (builds on retry)
@@ -267,7 +272,9 @@ stage reviewed, and dispatch the next stage.
 Acceptance criteria:
 
 - Approving a paused run resumes it at the next stage.
-- Approve is idempotent and a no-op when not awaiting review.
+- Approve is a no-op success only for duplicate approval of an already-cleared
+  gate on an active run; approving a terminal run (`canceled`/`failed`/
+  `succeeded`) returns an invalid-state error.
 - A run with multiple gates pauses again at the next gate after resuming.
 
 ### PR 5: Surface gate state in the run payload
