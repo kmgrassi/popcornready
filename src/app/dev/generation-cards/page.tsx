@@ -48,7 +48,13 @@ interface DemoEntry {
   statusMessage?: string;
 }
 
-const seedItems: DemoEntry[] = [
+type DemoSeedEntry = Omit<DemoEntry, "item"> & {
+  item: Omit<GenerationStageItem, "createdAt" | "updatedAt">;
+};
+
+const demoTimestamp = "2026-05-31T09:00:00.000Z";
+
+const rawSeedItems: DemoSeedEntry[] = [
   {
     item: {
       itemId: "i-1",
@@ -236,6 +242,15 @@ const seedItems: DemoEntry[] = [
     },
   },
 ];
+
+const seedItems: DemoEntry[] = rawSeedItems.map(({ item, ...entry }) => ({
+  ...entry,
+  item: {
+    ...item,
+    createdAt: demoTimestamp,
+    updatedAt: demoTimestamp,
+  },
+}));
 
 export default function StageItemCardDemoPage() {
   const [items, setItems] = useState<DemoEntry[]>(seedItems);
