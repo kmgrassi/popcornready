@@ -192,7 +192,7 @@ export function runExportJob(input: {
     );
   }
 
-  const { renderPlan: baseRenderPlan } = createRenderPlanFromTimeline({
+  const { renderPlan: baseRenderPlan, alignment } = createRenderPlanFromTimeline({
     timeline,
     timelineId: input.timelineId,
     audioClips,
@@ -200,6 +200,31 @@ export function runExportJob(input: {
     maxDeltaSec: options.maxDeltaSec,
     quality: options.quality,
   });
+
+  // The earlier resolveExportDuration check compares each clip's *registered*
+  // durationSec, but the render plan aligns against the measured audio
+  // duration (measuredDurationSec). When those differ, a fail_on_mismatch
+  // export can slip past the registered-duration check yet still produce a
+  // render plan whose alignment reports audio_timeline_mismatch. Honor that
+  // measured-duration alignment result here so the export is rejected instead
+  // of emitting a successful, wrong-duration artifact.
+  if (
+    policy === "fail_on_mismatch" &&
+    alignment.error?.code === "audio_timeline_mismatch"
+  ) {
+    throw new ApiError(
+      "audio_timeline_mismatch",
+      422,
+      "Audio and timeline durations differ beyond the allowed threshold.",
+      {
+        timelineDurationSec: alignment.comparison.timelineDurationSec,
+        audioDurationSec: alignment.comparison.audioDurationSec,
+        deltaSec: alignment.comparison.deltaSec,
+        maxDeltaSec: alignment.comparison.maxDeltaSec,
+      }
+    );
+  }
+
   const renderPlan: ExportRenderPlan = {
     ...baseRenderPlan,
     format: baseRenderPlan.output.format,

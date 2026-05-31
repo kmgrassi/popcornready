@@ -165,6 +165,31 @@ test("export worker fails on audio/timeline mismatch when policy is fail_on_mism
   );
 });
 
+test("export worker fails on measured-duration mismatch under fail_on_mismatch", () => {
+  // The timeline is 5s and the audio is *registered* as 5s, so the earlier
+  // registered-duration check passes. But the measured duration is 12s, which
+  // the render plan aligns against — the export must still be rejected instead
+  // of emitting a successful artifact with a 12s render plan.
+  const project = projectFixture();
+  // Shrink the timeline to 5s so the registered audio duration matches it.
+  project.timeline!.segments = [
+    { id: "seg_1", clipId: "clip_a", sourceInSec: 0, sourceOutSec: 5, role: "hook", reason: "" },
+  ];
+  const audio = project.clips.find((c) => c.id === "clip_audio")!;
+  audio.durationSec = 5;
+  audio.measuredDurationSec = 12;
+
+  assert.throws(
+    () =>
+      runExportJob({
+        project,
+        timelineId: "tl_requested",
+        options: { audioAssetIds: ["clip_audio"], durationPolicy: "fail_on_mismatch" },
+      }),
+    (err: unknown) => err instanceof ApiError && err.code === "audio_timeline_mismatch"
+  );
+});
+
 test("export worker rejects an unknown duration policy", () => {
   const project = projectFixture();
   // Simulates a misspelled policy arriving as raw JSON (bypassing the type).
