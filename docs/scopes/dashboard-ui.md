@@ -167,11 +167,23 @@ on the dedicated routes below.
 
 ### Implementation notes
 
-- These are read aggregations over the same local JSON store
-  (`.local/dev-db/...`) used elsewhere; v1 can iterate the workspace's projects
-  and merge/sort in memory. The response shape must stay storage-neutral so a
-  later indexed database query can replace the in-memory merge without changing
-  the contract.
+- These are read aggregations over the **existing** local v1 stores. In the
+  current codebase that state is split across two stacks, and the dashboard must
+  join (or first unify) them rather than reading only one:
+  - `src/lib/api/v1/store.ts` → `.local/agent-store.json` (projects, assets) and
+    `src/lib/api/v1/jobs.ts` → `.local/agent-jobs.json` (jobs, including
+    exports). These back the documented `/api/v1` project/asset/generation/export
+    routes.
+  - `src/lib/v1/store.ts` and `src/lib/v1/generation-runs.ts` → `.local/dev-db/`
+    (generation runs, stages, stage items).
+  - Aggregation joins these by `projectId`. Reading only `.local/dev-db/` would
+    surface runs while missing the projects, assets, and outputs created through
+    the v1 API — and vice versa. PR 1 should either query both stores behind one
+    aggregation layer or first consolidate them onto a single store.
+- v1 can iterate the workspace's projects and merge/sort in memory. The response
+  shape must stay storage-neutral so a later indexed database query can replace
+  the in-memory merge — and any store consolidation — without changing the
+  contract.
 - Use `Cache-Control: no-store` for the dashboard summary and runs list, since
   they reflect live generation state.
 - No new mutating routes are introduced by this scope.
@@ -216,6 +228,10 @@ Add the four workspace-scoped read endpoints (`/dashboard`, `/generation-runs`,
 Acceptance criteria:
 
 - Each endpoint lists across all projects in the workspace, newest first.
+- Aggregation joins the project/asset/export store (`.local/agent-store.json`,
+  `.local/agent-jobs.json`) with the generation-run store (`.local/dev-db/`) by
+  `projectId`, so runs, projects, assets, and outputs created through the v1 API
+  all appear together.
 - Pagination, filters, and the standard list/error envelopes work.
 - Responses are storage-neutral and use `no-store` where state is live.
 - Works in `AUTH_MODE=local` against `dev_workspace` with no auth configured.
