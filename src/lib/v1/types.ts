@@ -262,6 +262,9 @@ export type GenerationJob = Job<GenerationJobInput, GenerationJobResult>;
 //     stage's progressPercent/message.
 //   - jobIds and artifactIds point back to the authoritative Job and Artifact
 //     records; the run never duplicates their state.
+//   - Review checkpoints are represented by reviewGate, not by adding an
+//     "awaiting_review" status. A paused run remains an active JobStatus
+//     while execution is idle and waiting for approval.
 
 export type GenerationRunStatus = JobStatus;
 
@@ -277,6 +280,8 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+// The user's per-run choice of which stages should pause for review after they
+// complete. An empty or omitted list is a straight-through run.
 export const GATEABLE_GENERATION_STAGE_TYPES = [
   "brief_intake",
   "creative_plan",
@@ -294,6 +299,8 @@ export interface ReviewGateConfig {
   gatedStages: GateableGenerationStageType[];
 }
 
+// Run-level review state, orthogonal to GenerationRunStatus. When present, the
+// run is awaiting user approval before the next stage can start.
 export interface RunReviewGate {
   stageType: GateableGenerationStageType;
   stageId: string;

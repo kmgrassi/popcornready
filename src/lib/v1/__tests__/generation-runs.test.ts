@@ -41,6 +41,49 @@ test("createRun persists with assigned runId and timestamps", async () => {
   assert.deepEqual(read, run);
 });
 
+test("review gate fields are optional and persist when present", async () => {
+  const run = await store.createRun({
+    projectId: "proj_a",
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGates: ["creative_plan"],
+  });
+  const stage = await store.saveStage({
+    runId: run.runId,
+    type: "creative_plan",
+    label: "Planning beats and shots",
+    order: 1,
+    status: "succeeded",
+    jobIds: [],
+    artifactIds: [],
+    isReviewGate: true,
+  });
+  const enteredAt = new Date().toISOString();
+
+  await store.updateRun(run.runId, {
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: stage.stageId,
+      state: "awaiting_review",
+      enteredAt,
+    },
+  });
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(stage.stageId, { reviewedAt });
+
+  const payload = await assemblePayload(store, run.runId);
+  assert.ok(payload);
+  assert.deepEqual(payload!.run.reviewGates, ["creative_plan"]);
+  assert.deepEqual(payload!.run.reviewGate, {
+    stageType: "creative_plan",
+    stageId: stage.stageId,
+    state: "awaiting_review",
+    enteredAt,
+  });
+  assert.equal(payload!.stages[0].isReviewGate, true);
+  assert.equal(payload!.stages[0].reviewedAt, reviewedAt);
+});
+
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {
   const run = await store.createRun({
     projectId: "proj_a",
