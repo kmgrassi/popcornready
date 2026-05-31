@@ -76,6 +76,33 @@ const TEMPLATES: { icon: string; label: string; text: string; prompt: string }[]
   },
 ];
 
+const GENERATION_STAGES = [
+  {
+    label: "Planning",
+    detail: "Turning the prompt into cinematic beats.",
+  },
+  {
+    label: "Generating clips",
+    detail: "Creating visual shots for each beat.",
+  },
+  {
+    label: "Scoring",
+    detail: "Creating an instrumental soundtrack when audio is available.",
+  },
+  {
+    label: "Assembling",
+    detail: "Building the timeline from generated media.",
+  },
+  {
+    label: "Reviewing",
+    detail: "Checking the cut and applying polish.",
+  },
+  {
+    label: "Opening studio",
+    detail: "Loading the editable timeline.",
+  },
+];
+
 export function PromptComposer() {
   const router = useRouter();
   const [value, setValue] = useState("");
@@ -83,6 +110,24 @@ export function PromptComposer() {
   const [error, setError] = useState<string | null>(null);
   const [templateIndex, setTemplateIndex] = useState(0);
   const activeTemplate = TEMPLATES[templateIndex];
+  const [activeStage, setActiveStage] = useState(0);
+
+  useEffect(() => {
+    if (!submitting) {
+      setActiveStage(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsedSec = (Date.now() - startedAt) / 1000;
+      if (elapsedSec > 120) setActiveStage(4);
+      else if (elapsedSec > 75) setActiveStage(3);
+      else if (elapsedSec > 35) setActiveStage(2);
+      else if (elapsedSec > 8) setActiveStage(1);
+      else setActiveStage(0);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [submitting]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -98,32 +143,26 @@ export function PromptComposer() {
     setSubmitting(true);
     setError(null);
     try {
-      // The landing prompt is "prompt-only": send the goal plus the same
-      // hidden advanced defaults the studio would have used, so the run is
-      // configured identically whether it is started from here or from the
-      // editor.
-      const response = await fetch(
-        "/api/v1/projects/default/generation-runs",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: goal,
-            targetLengthSec: 30,
-            style: "fast-paced social ad",
-            aspectRatio: "9:16",
-          }),
-        }
-      );
+      const response = await fetch("/api/oneshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal,
+          targetLengthSec: 30,
+          style: "cinematic story",
+          aspectRatio: "9:16",
+        }),
+      });
       const data = await response.json();
-      if (!response.ok || !data.run?.runId) {
+      if (!response.ok || !data.project) {
         throw new Error(
-          data?.error?.message || "Unable to start video generation."
+          data?.error?.message ||
+            data?.error ||
+            "Unable to generate your video."
         );
       }
-      router.push(
-        `/studio?runId=${encodeURIComponent(data.run.runId)}&goal=${encodeURIComponent(goal)}&length=30`
-      );
+      setActiveStage(5);
+      router.push(`/studio?goal=${encodeURIComponent(goal)}&length=30`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -177,8 +216,42 @@ export function PromptComposer() {
         onClick={() => start()}
         disabled={!value.trim() || submitting}
       >
-        {submitting ? "Starting your video…" : "Create my video →"}
+        {submitting
+          ? "Generating your video…"
+          : "Create my 30-second video →"}
       </button>
+      {submitting && (
+        <div className="lp-generation-progress" aria-live="polite">
+          <div className="lp-generation-progress-head">
+            <span>One-shot generation</span>
+            <strong>{GENERATION_STAGES[activeStage].label}</strong>
+          </div>
+          <ol className="lp-generation-steps">
+            {GENERATION_STAGES.map((stage, index) => {
+              const state =
+                index < activeStage
+                  ? "complete"
+                  : index === activeStage
+                    ? "active"
+                    : "pending";
+              return (
+                <li className={`lp-generation-step ${state}`} key={stage.label}>
+                  <span className="lp-generation-dot" />
+                  <span>
+                    <strong>{stage.label}</strong>
+                    <small>{stage.detail}</small>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="lp-generation-note">
+            This request runs the one-shot pipeline in a single server call, so
+            stage timing is estimated until backend progress is wired into the
+            one-shot route.
+          </p>
+        </div>
+      )}
       {error && (
         <p className="lp-prompt-error" role="alert">
           {error}
