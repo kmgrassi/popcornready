@@ -25,15 +25,12 @@ The one-shot pipeline (`POST /api/oneshot`) plans beats from the prompt,
 generates one visual per beat, assembles a timeline, and runs the critic — so a
 visitor with no footage still gets a finished, editable cut.
 
-By default it generates a real **video clip per beat** (OpenAI Sora when
-`OPENAI_API_KEY` is set, Gemini Veo when `GEMINI_API_KEY` is set), so the
+By default it generates a real **video clip per beat** (Gemini Veo when
+`GEMINI_API_KEY` is set, OpenAI Sora when `OPENAI_API_KEY` is set), so the
 visitor sees an actual moving 30-second video — the differentiator vs. tools
-that only return a prompt-to-clip stub. This is deliberately expensive, so it is
-gated by an operator **kill switch**: `ONESHOT_VIDEO=off` falls back to fast,
-cheap still-frame generation, intended to be flipped when traffic outpaces the
-generation budget. When no video-capable key is present (and for local/demo use)
-the pipeline degrades to image mode — real OpenAI images with a key, placeholder
-frames without — so the flow always completes.
+that only return a prompt-to-clip stub. When no video-capable key is present,
+the request returns a clear configuration error instead of silently degrading to
+still images, because the product promise is video.
 
 Clips are generated in parallel, so wall-clock latency is roughly the slowest
 single clip rather than the sum; even so, video generation takes a couple of
@@ -70,8 +67,7 @@ Pricing decisions to resolve before launch:
 - Free hosted trial allowance vs. self-host-only free tier.
 - Overage behavior: hard cap vs. metered overage.
 - How per-beat video generation cost (the main COGS driver) maps to tier
-  limits, and the policy for tripping the `ONESHOT_VIDEO` kill switch when
-  traffic outruns the budget.
+  limits, rate limits, and metered overage.
 
 ## Two-Track Productization
 
@@ -107,8 +103,8 @@ This maps onto the phases in the productionization scope:
 
 - Billing integration, metering, and account provisioning (Phase 2/3).
 - Async job/status polling for one-shot generation (Phase 3) — v1 runs
-  synchronously within the request and relies on the `ONESHOT_VIDEO` kill switch
-  for cost control.
+  synchronously within the request, so hosted cost control should come from
+  quotas, rate limits, and metered overage.
 - Auth on the marketing site; it is public and static apart from the form.
 - Final pricing — the tiers here are launch proposals to validate with users.
 
