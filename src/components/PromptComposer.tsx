@@ -1,33 +1,78 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const TEMPLATES: { label: string; prompt: string }[] = [
+const TEMPLATES: { icon: string; label: string; text: string; prompt: string }[] = [
   {
-    label: "Product intro",
+    icon: "🍂",
+    label: "Leaf blower cleanup",
+    text: "Generate a video of a homeowner clearing a leaf-covered driveway into a clean outdoor space.",
     prompt:
-      "Create a 30-second intro for a new product launch. Hook in the first 3 seconds, show what it does, and end with a strong call to action.",
+      "A homeowner uses a leaf blower to turn a messy driveway covered in leaves into a clean, satisfying outdoor space. Start with the frustrating mess, show the tool in action, and end with a crisp before-and-after reveal.",
   },
   {
-    label: "Explainer",
+    icon: "🥐",
+    label: "Bakery morning rush",
+    text: "Generate a video of a small bakery preparing for the morning rush.",
     prompt:
-      "Make a 30-second explainer that breaks down one big idea simply — open with a question, reveal the key insight, and finish with a satisfying payoff.",
+      "A small bakery prepares for the morning rush. Show the quiet early morning, the baking process, customers arriving, and end with a warm moment of someone enjoying a fresh pastry.",
   },
   {
-    label: "Social ad",
+    icon: "🎧",
+    label: "Headphones focus",
+    text: "Generate a video of a student finding focus in a chaotic coffee shop with noise-canceling headphones.",
     prompt:
-      "A fast-paced 30-second social ad that shows a relatable problem, reveals the solution, and ends with a punchy call to action.",
+      "A student uses noise-canceling headphones to get focused in a chaotic coffee shop. Start with distraction, show the moment the headphones go on, and end with the student finishing their work confidently.",
   },
   {
-    label: "Event hype reel",
+    icon: "🎾",
+    label: "Park fetch launcher",
+    text: "Generate a video of a dog owner making fetch easier with an automatic ball launcher.",
     prompt:
-      "A high-energy 30-second hype reel announcing an event — build anticipation with quick cuts and end on the date with a call to register.",
+      "A dog owner uses an automatic ball launcher at the park. Begin with an energetic dog begging to play, show the launcher making fetch easier, and end with both the dog and owner happy and tired.",
   },
   {
-    label: "Movie dream montage",
+    icon: "🌿",
+    label: "Backyard trimmer",
+    text: "Generate a video of an overgrown backyard becoming guest-ready with a cordless trimmer.",
     prompt:
-      "Create a 30-second cinematic story. In the first 1-2 seconds, show a 10-year-old movie-loving boy in his bedroom late at night at a computer discovering the website “Popcorn Ready”. Then build a montage with gradually rising orchestral music as he creates a movie, goes from idea to production, and sees it released to adoring fans. Show him as a famous filmmaker at a packed premiere, then at an awards show selected for Best Movie as he walks up and starts, “I would like to thank...”. Cut to him waking up in bed, turning to his laptop, and finding Popcorn Ready open — the movie of his dreams can now be made.",
+      "A gardener uses a cordless trimmer to clean up an overgrown backyard. Start with tangled weeds and messy edges, show quick progress, and end with a polished backyard ready for guests.",
+  },
+  {
+    icon: "🥗",
+    label: "Lunch prep system",
+    text: "Generate a video of a busy parent turning a chaotic kitchen into organized weekly lunches.",
+    prompt:
+      "A busy parent uses a meal-prep container system to organize lunches for the week. Start with a chaotic kitchen, show the simple system coming together, and end with a calm Monday morning.",
+  },
+  {
+    icon: "🚲",
+    label: "Cyclist flat fix",
+    text: "Generate a video of a cyclist fixing a roadside flat with a compact tire repair kit.",
+    prompt:
+      "A cyclist discovers a compact tire repair kit during a roadside flat. Start with the problem, show the quick fix, and end with the cyclist back on the road at sunset.",
+  },
+  {
+    icon: "💡",
+    label: "Desk setup upgrade",
+    text: "Generate a video of a remote worker transforming a cluttered desk into a calm productive setup.",
+    prompt:
+      "A remote worker upgrades their desk setup with a monitor light, laptop stand, and clean cable organization. Start with a cluttered, uncomfortable workspace, show the transformation, and end with a calm productive setup.",
+  },
+  {
+    icon: "🎬",
+    label: "Backyard movie night",
+    text: "Generate a video of a family setting up a backyard movie night under string lights.",
+    prompt:
+      "A family uses a portable projector for a backyard movie night. Start with an ordinary backyard, show the setup coming together, and end with everyone watching the movie under string lights.",
+  },
+  {
+    icon: "🏋️",
+    label: "Smart jump rope habit",
+    text: "Generate a video of a fitness beginner building confidence with a smart jump rope workout.",
+    prompt:
+      "A fitness beginner uses a smart jump rope to build a simple daily workout habit. Start with hesitation, show small progress and encouraging feedback, and end with the person feeling proud after completing the session.",
   },
 ];
 
@@ -36,10 +81,20 @@ export function PromptComposer() {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templateIndex, setTemplateIndex] = useState(0);
+  const activeTemplate = TEMPLATES[templateIndex];
 
-  async function start() {
-    const goal = value.trim();
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setTemplateIndex((current) => (current + 1) % TEMPLATES.length);
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  async function start(promptOverride?: string) {
+    const goal = (promptOverride ?? value).trim();
     if (!goal || submitting) return;
+    setValue(goal);
     setSubmitting(true);
     setError(null);
     try {
@@ -77,53 +132,58 @@ export function PromptComposer() {
 
   return (
     <div className="lp-prompt">
-      <div className="lp-templates">
-        <span className="lp-templates-label">Try a template:</span>
-        {TEMPLATES.map((t) => (
-          <button
-            type="button"
-            key={t.label}
-            className="lp-chip"
-            onClick={() => setValue(t.prompt)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
       <label htmlFor="goal" className="lp-prompt-label">
-        What&apos;s your 30-second video?
+        What&apos;s your video?
       </label>
       <textarea
         id="goal"
         className="lp-prompt-input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="e.g. A 30-second ad that hooks fast, shows the problem, demos the product, and ends with a strong CTA."
+        placeholder="e.g. A social ad that hooks fast, shows the problem, demos the product, and ends with a strong CTA."
         rows={3}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start();
         }}
       />
+      <div className="lp-templates">
+        <span className="lp-templates-label">
+          <span className="lp-template-icon" aria-hidden="true">
+            {activeTemplate.icon}
+          </span>
+          Template idea
+        </span>
+        <div className="lp-template-roller" aria-label="Video templates">
+          <div
+            key={activeTemplate.label}
+            className="lp-template-item"
+            title={activeTemplate.prompt}
+          >
+            <span>{activeTemplate.text}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="lp-template-generate"
+          onClick={() => start(activeTemplate.prompt)}
+          disabled={submitting}
+        >
+          Use template
+        </button>
+      </div>
       <button
         type="button"
         className="lp-prompt-submit"
-        onClick={start}
+        onClick={() => start()}
         disabled={!value.trim() || submitting}
       >
-        {submitting
-          ? "Starting your video…"
-          : "Create my 30-second video →"}
+        {submitting ? "Starting your video…" : "Create my video →"}
       </button>
       {error && (
         <p className="lp-prompt-error" role="alert">
           {error}
         </p>
       )}
-      <p className="lp-prompt-hint">
-        No clips needed — Popcorn Ready generates the visuals and cuts the video for
-        you. Bring your own keys for real footage, or use automatic visual
-        generation to create it all.
-      </p>
     </div>
   );
 }
