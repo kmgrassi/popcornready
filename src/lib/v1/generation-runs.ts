@@ -9,6 +9,7 @@ import {
   GenerationStage,
   GenerationStageItem,
   GenerationStageType,
+  ReviewGateConfig,
 } from "./types";
 import { ApiError } from "./errors";
 
@@ -303,6 +304,7 @@ export interface GenerationRunResultArtifact {
 export interface CreateGenerationRunBody {
   briefVersionId?: string;
   prompt?: string;
+  reviewGates?: unknown;
 }
 
 export interface CreateRunArgs {
@@ -326,6 +328,68 @@ const STAGE_SEEDS: StageSeed[] = [
   { type: "ready" },
 ];
 
+export const GATEABLE_GENERATION_STAGE_TYPES = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+] as const satisfies readonly GenerationStageType[];
+
+const GATEABLE_GENERATION_STAGE_TYPE_SET = new Set<GenerationStageType>(
+  GATEABLE_GENERATION_STAGE_TYPES
+);
+
+export function parseReviewGateConfig(
+  value: unknown
+): ReviewGateConfig {
+  if (value === undefined) return { gatedStages: [] };
+  if (!Array.isArray(value)) {
+    throw new ApiError("validation_failed", "reviewGates must be an array of gateable stage types.", {
+      fields: [
+        {
+          path: "reviewGates",
+          message: "Must be an array.",
+        },
+      ],
+    });
+  }
+
+  const gatedStages: GenerationStageType[] = [];
+  const seen = new Set<GenerationStageType>();
+  for (let i = 0; i < value.length; i += 1) {
+    const stageType = value[i];
+    if (
+      typeof stageType !== "string" ||
+      !GATEABLE_GENERATION_STAGE_TYPE_SET.has(stageType as GenerationStageType)
+    ) {
+      throw new ApiError(
+        "validation_failed",
+        "reviewGates contains a stage type that cannot be gated.",
+        {
+          fields: [
+            {
+              path: `reviewGates.${i}`,
+              message: "Must be one of the gateable stage types.",
+            },
+          ],
+          gateableStages: [...GATEABLE_GENERATION_STAGE_TYPES],
+        }
+      );
+    }
+
+    const gatedStageType = stageType as GenerationStageType;
+    if (!seen.has(gatedStageType)) {
+      seen.add(gatedStageType);
+      gatedStages.push(gatedStageType);
+    }
+  }
+
+  return { gatedStages };
+}
+
 export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
   const { store, projectId, body } = args;
   const parsedBody = body && typeof body === "object" && !Array.isArray(body)
@@ -334,11 +398,16 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
   const briefVersionId = parsedBody.briefVersionId
     ? String(parsedBody.briefVersionId).trim() || undefined
     : undefined;
+  const reviewGateConfig = parseReviewGateConfig(parsedBody.reviewGates);
+  const reviewGateStageSet = new Set(reviewGateConfig.gatedStages);
 
   const run = await store.createRun({
     projectId,
     status: "queued" as GenerationRunStatus,
     ...(briefVersionId ? { briefVersionId } : {}),
+    ...(reviewGateConfig.gatedStages.length > 0
+      ? { reviewGates: reviewGateConfig.gatedStages }
+      : {}),
     currentStageType: "brief_intake",
     progressPercent: 0,
     message: "Run queued.",
@@ -355,6 +424,7 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
       status: "queued",
       jobIds: [],
       artifactIds: [],
+      ...(reviewGateStageSet.has(seed.type) ? { isReviewGate: true } : {}),
     });
     stages.push(stage);
   }

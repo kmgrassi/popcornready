@@ -366,6 +366,77 @@ test("createRunWithSeedStages returns a queued run with all seed stages in order
   assert.deepEqual(payload.resultArtifacts, []);
 });
 
+test("createRunWithSeedStages stamps configured review gates on matching stages", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_seed_gates",
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "timeline_assembly"],
+    },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+    "timeline_assembly",
+  ]);
+
+  const gatedStages = payload.stages
+    .filter((stage) => stage.isReviewGate)
+    .map((stage) => stage.type);
+  assert.deepEqual(gatedStages, [
+    "creative_plan",
+    "asset_generation",
+    "timeline_assembly",
+  ]);
+});
+
+test("createRunWithSeedStages treats omitted or empty reviewGates as YOLO runs", async () => {
+  const omitted = await createRunWithSeedStages({
+    store,
+    projectId: "proj_seed_no_gates",
+    body: {},
+  });
+  const empty = await createRunWithSeedStages({
+    store,
+    projectId: "proj_seed_empty_gates",
+    body: { reviewGates: [] },
+  });
+
+  assert.equal(omitted.run.reviewGates, undefined);
+  assert.equal(empty.run.reviewGates, undefined);
+  assert.equal(
+    omitted.stages.some((stage) => stage.isReviewGate),
+    false
+  );
+  assert.equal(
+    empty.stages.some((stage) => stage.isReviewGate),
+    false
+  );
+});
+
+test("createRunWithSeedStages rejects invalid and non-gateable review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_seed_bad_gate",
+        body: { reviewGates: ["creative_plan", "ready"] },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_seed_bad_gate_type",
+        body: { reviewGates: "creative_plan" },
+      }),
+    (err) => err instanceof ApiError && err.code === "validation_failed"
+  );
+});
+
 test("createRunWithSeedStages treats a null body as an empty payload", async () => {
   const payload = await createRunWithSeedStages({
     store,
