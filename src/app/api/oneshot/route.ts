@@ -8,6 +8,8 @@ import { providerFor } from "@/lib/generative/providers";
 import {
   AspectRatio,
   Beat,
+  CharacterProfile,
+  CharacterReference,
   Clip,
   CriticReport,
   EditPlan,
@@ -23,6 +25,13 @@ import {
 } from "@/lib/generative/types";
 import { mergeStoryContext } from "@/lib/story-context";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
+import type { CharacterGenerationContext } from "@/lib/generative/types";
+import {
+  buildOneShotCharacterDraft,
+  oneShotCharacterBinding,
+  oneShotCharacterContext,
+  oneShotHeroFramePrompt,
+} from "@/lib/oneshot/character-reference";
 
 export const dynamic = "force-dynamic";
 // Per-beat video generation is slow. Give the request headroom while we move
@@ -195,8 +204,12 @@ async function generateBeatClip(input: {
   size: string;
   displaySec: number;
   seconds?: OpenAIVideoSeconds;
+  characterContext?: CharacterGenerationContext;
 }): Promise<Clip> {
   const provider = providerFor(input.provider);
+  const referencePaths = input.characterContext?.references.map(
+    (reference) => reference.path
+  );
   const result =
     input.provider === "openai"
       ? await provider.generateAsset({
@@ -205,6 +218,8 @@ async function generateBeatClip(input: {
           prompt: input.prompt,
           size: input.size,
           seconds: input.seconds,
+          referencePaths,
+          characterContext: input.characterContext,
         })
       : await provider.generateAsset({
           provider: "gemini",
@@ -212,10 +227,25 @@ async function generateBeatClip(input: {
           prompt: input.prompt,
           size: input.size,
           seconds: input.seconds,
+          referencePaths,
+          characterContext: input.characterContext,
         });
   await fs.mkdir(GENERATED_DIR, { recursive: true });
   const id = newId("vid");
   const filename = `${id}.${result.extension}`;
+  const characterBinding = input.characterContext
+    ? oneShotCharacterBinding({
+        assetId: id,
+        context: input.characterContext,
+        providerSettings: result.providerSettings
+          ? {
+              provider: result.provider,
+              model: result.model,
+              ...result.providerSettings,
+            }
+          : undefined,
+      })
+    : undefined;
   await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
   return {
     id,
@@ -229,7 +259,9 @@ async function generateBeatClip(input: {
       provider: result.provider,
       model: result.model,
       prompt: result.prompt,
+      characterBinding,
     },
+    characterBinding,
   };
 }
 
@@ -262,9 +294,11 @@ async function savePartialProject(input: {
   aspectRatio: AspectRatio;
   clips: Clip[];
   soundtrack?: Clip | null;
+  characterProfiles: CharacterProfile[];
+  characterReferences: CharacterReference[];
   showCaptions: boolean;
 }): Promise<void> {
-  const videoClips = input.clips.filter((clip) => clip.kind !== "audio");
+  const videoClips = input.clips.filter((clip) => clip.kind === "video");
   const clips = input.soundtrack ? [...input.clips, input.soundtrack] : input.clips;
   const segments: TimelineSegment[] = videoClips.map((clip, i) => {
     const beat = input.plan.beats[i];
@@ -293,12 +327,17 @@ async function savePartialProject(input: {
     plan: input.plan,
     timeline,
     clips,
-    characterProfiles: [],
-    characterReferences: [],
+    characterProfiles: input.characterProfiles,
+    characterReferences: input.characterReferences,
     critic: null,
     chat: [],
     updatedAt: new Date().toISOString(),
   });
+}
+
+function localGeneratedPath(url: string): string | null {
+  if (!url.startsWith("/generated/")) return null;
+  return path.join(process.cwd(), "public", url);
 }
 
 async function resumableClipsForGoal(goal: string): Promise<Clip[]> {
@@ -313,6 +352,118 @@ async function resumableSoundtrackForGoal(goal: string): Promise<Clip | null> {
   const existing = await getProject();
   if (existing.goal !== goal) return null;
   return existing.clips.find((clip) => clip.kind === "audio") || null;
+}
+
+async function resumableCharacterForGoal(goal: string): Promise<{
+  profile: CharacterProfile;
+  reference: CharacterReference;
+  clip: Clip;
+  path: string;
+} | null> {
+  const existing = await getProject();
+  if (existing.goal !== goal) return null;
+  const reference = existing.characterReferences?.find(
+    (item) => item.role === "hero_frame" && item.quality === "approved"
+  );
+  if (!reference) return null;
+  const profile = existing.characterProfiles?.find(
+    (item) => item.id === reference.characterProfileId
+  );
+  const clip = existing.clips.find((item) => item.id === reference.assetId);
+  const filePath = clip ? localGeneratedPath(clip.url) : null;
+  if (!profile || !clip || !filePath) return null;
+  try {
+    await fs.access(filePath);
+  } catch {
+    return null;
+  }
+  return { profile, reference, clip, path: filePath };
+}
+
+async function generateCharacterHeroFrame(input: {
+  goal: string;
+  style: string;
+}): Promise<{
+  profile: CharacterProfile;
+  reference: CharacterReference;
+  clip: Clip;
+  path: string;
+} | null> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn(
+      "[oneshot] OPENAI_API_KEY is not configured; skipping generated character hero frame"
+    );
+    return null;
+  }
+
+  const provider = providerFor("openai");
+  const prompt = oneShotHeroFramePrompt(input);
+  const result = await provider.generateAsset({
+    provider: "openai",
+    kind: "image",
+    prompt,
+    size: "1024x1024",
+    quality: "high",
+  });
+
+  await fs.mkdir(GENERATED_DIR, { recursive: true });
+  const clipId = newId("img");
+  const profileId = newId("char");
+  const referenceId = newId("ref");
+  const filename = `${clipId}_hero.${result.extension}`;
+  const filePath = path.join(GENERATED_DIR, filename);
+  const now = new Date().toISOString();
+  const draft = buildOneShotCharacterDraft({
+    goal: input.goal,
+    projectId: "default",
+    profileId,
+    referenceId,
+    assetId: clipId,
+    now,
+  });
+  const referenceUrl = `/generated/${filename}`;
+  const context = oneShotCharacterContext({
+    profile: draft.profile,
+    reference: draft.reference,
+    referencePath: filePath,
+    referenceUrl,
+    originalPrompt: input.goal,
+    providerPrompt: prompt,
+  });
+  const characterBinding = oneShotCharacterBinding({
+    assetId: clipId,
+    context,
+    providerSettings: result.providerSettings
+      ? {
+          provider: result.provider,
+          model: result.model,
+          ...result.providerSettings,
+        }
+      : undefined,
+  });
+
+  await fs.writeFile(filePath, result.bytes);
+
+  return {
+    ...draft,
+    clip: {
+      id: clipId,
+      filename,
+      url: referenceUrl,
+      kind: "image",
+      durationSec: 4,
+      description: "Generated one-shot protagonist hero reference.",
+      source: "generated",
+      generatedBy: {
+        provider: result.provider,
+        model: result.model,
+        prompt: result.prompt,
+        characterBinding,
+      },
+      characterBinding,
+    },
+    path: filePath,
+  };
 }
 
 async function generateSoundtrack(input: {
@@ -390,7 +541,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Start the soundtrack before video generation and let it run in
+    // 2. Create or reuse one hero-frame character reference so every video
+    // beat can use the same visual anchor.
+    const existingCharacter = await resumableCharacterForGoal(goal);
+    const generatedCharacter = existingCharacter
+      ? null
+      : await optionalOneShotStep("character hero frame", () =>
+          generateCharacterHeroFrame({ goal, style })
+        );
+    const character = existingCharacter || generatedCharacter;
+    const characterProfiles = character ? [character.profile] : [];
+    const characterReferences = character ? [character.reference] : [];
+    const characterClips = character ? [character.clip] : [];
+
+    // 3. Start the soundtrack before video generation and let it run in
     // parallel with the sequential video loop.
     const existingSoundtrack = includeAudio
       ? await resumableSoundtrackForGoal(goal)
@@ -407,7 +571,7 @@ export async function POST(req: NextRequest) {
           )
         : Promise.resolve(existingSoundtrack);
 
-    // 3. Generate a video clip per beat from scratch (no uploads required).
+    // 4. Generate a video clip per beat from scratch (no uploads required).
     const videoSize = videoSizeForAspect(aspectRatio);
     const clips: Clip[] = (await resumableClipsForGoal(goal)).slice(
       0,
@@ -431,11 +595,24 @@ export async function POST(req: NextRequest) {
           displaySec: seconds,
           seconds,
         };
+        const characterContext =
+          character && character.path
+            ? oneShotCharacterContext({
+                profile: character.profile,
+                reference: character.reference,
+                referencePath: character.path,
+                referenceUrl: character.clip.url,
+                originalPrompt: goal,
+                providerPrompt: clipInput.prompt,
+              })
+            : undefined;
         try {
           console.info(
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
-          clips.push(await generateBeatClip({ provider, ...clipInput }));
+          clips.push(
+            await generateBeatClip({ provider, ...clipInput, characterContext })
+          );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
@@ -444,8 +621,10 @@ export async function POST(req: NextRequest) {
             storyContext,
             plan,
             aspectRatio,
-            clips,
+            clips: [...characterClips, ...clips],
             soundtrack,
+            characterProfiles,
+            characterReferences,
             showCaptions,
           });
         } catch (err) {
@@ -460,7 +639,9 @@ export async function POST(req: NextRequest) {
             `[oneshot] ${provider} quota/rate-limit failure; retrying clip ${index + 1}/${plan.beats.length} with ${providers.fallback}`
           );
           provider = providers.fallback;
-          clips.push(await generateBeatClip({ provider, ...clipInput }));
+          clips.push(
+            await generateBeatClip({ provider, ...clipInput, characterContext })
+          );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
@@ -469,8 +650,10 @@ export async function POST(req: NextRequest) {
             storyContext,
             plan,
             aspectRatio,
-            clips,
+            clips: [...characterClips, ...clips],
             soundtrack,
+            characterProfiles,
+            characterReferences,
             showCaptions,
           });
         }
@@ -483,17 +666,20 @@ export async function POST(req: NextRequest) {
           storyContext,
           plan,
           aspectRatio,
-          clips,
+          clips: [...characterClips, ...clips],
           soundtrack,
+          characterProfiles,
+          characterReferences,
           showCaptions,
         });
       }
       throw err;
     }
     soundtrack = await soundtrackPromise;
-    if (soundtrack) clips.push(soundtrack);
+    const projectClips = [...characterClips, ...clips];
+    if (soundtrack) projectClips.push(soundtrack);
 
-    // 4. Assemble a beat-by-beat timeline from the generated clips.
+    // 5. Assemble a beat-by-beat timeline from the generated clips.
     const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
       id: newId("seg"),
       clipId: clips[i].id,
@@ -504,11 +690,11 @@ export async function POST(req: NextRequest) {
     }));
     let timeline: Timeline = sanitizeTimeline(
       { aspectRatio, fps: 30, segments },
-      clips
+      projectClips
     );
     timeline.showCaptions = showCaptions;
 
-    // 5. Critique once and apply patches. Critique is useful polish, but it is
+    // 6. Critique once and apply patches. Critique is useful polish, but it is
     // optional: a critic failure should never discard generated clips.
     let report: CriticReport | null = null;
     let patches: Patch[] = [];
@@ -516,7 +702,7 @@ export async function POST(req: NextRequest) {
       critique({
         plan,
         timeline,
-        clips,
+        clips: projectClips,
         storyContext,
       })
     );
@@ -533,9 +719,9 @@ export async function POST(req: NextRequest) {
       storyContext,
       plan,
       timeline,
-      clips,
-      characterProfiles: [],
-      characterReferences: [],
+      clips: projectClips,
+      characterProfiles,
+      characterReferences,
       critic: report,
       chat: [],
       updatedAt: new Date().toISOString(),
