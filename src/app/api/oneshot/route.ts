@@ -4,6 +4,7 @@ import path from "path";
 import { saveProject } from "@/lib/store";
 import { critique, planEdit } from "@/lib/agent";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
+import { compileTimelineViaEditGraph } from "@/lib/edit-graph";
 import { providerFor } from "@/lib/generative/providers";
 import {
   AspectRatio,
@@ -284,7 +285,14 @@ export async function POST(req: NextRequest) {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: "oneshot_initial",
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       clips
     );
     timeline.showCaptions = showCaptions;

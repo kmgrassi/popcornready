@@ -11,6 +11,7 @@ import path from "path";
 import { critique, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
 import { GenerativeProviderName } from "@/lib/generative/types";
+import { compileTimelineViaEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
@@ -292,7 +293,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(
-      { aspectRatio, fps: 30, segments },
+      compileTimelineViaEditGraph({
+        id: `${runId}_initial`,
+        goal,
+        plan,
+        timeline: { aspectRatio, fps: 30, segments },
+        clips,
+        storyContext,
+      }),
       clips
     );
     await completeStage(
