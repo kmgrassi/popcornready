@@ -10,6 +10,7 @@ import {
 } from "@/lib/oneshot/character-reference";
 import type { Clip } from "@/lib/types";
 import type { CharacterGenerationContext } from "@/lib/generative/types";
+import { normalizeOpenAIVideoSeconds } from "@/lib/generative/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
@@ -123,8 +124,11 @@ export async function POST(req: NextRequest) {
     );
     const style = String(body.style || "cinematic live-action");
     const requestedSeconds = Number(body.seconds) || 2;
-    const effectiveSeconds = normalizeGeminiSeconds(requestedSeconds);
     const videoProvider = String(body.videoProvider || "gemini");
+    const effectiveSeconds =
+      videoProvider === "openai"
+        ? normalizeOpenAIVideoSeconds(requestedSeconds)
+        : normalizeGeminiSeconds(requestedSeconds);
     const imageProvider = String(body.imageProvider || "openai");
     const imageModel = body.imageModel ? String(body.imageModel) : undefined;
     const videoModel = body.videoModel ? String(body.videoModel) : undefined;
