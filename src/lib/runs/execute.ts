@@ -10,7 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { critique, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
-import { compileTimelineViaEditGraph } from "@/lib/edit-graph";
+import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
@@ -339,6 +339,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       id: "default",
       goal,
       storyContext,
+      editGraph: synthesizeEditGraph({
+        id: `${runId}_final`,
+        goal,
+        plan,
+        timeline,
+        clips,
+        storyContext,
+      }),
       plan,
       timeline,
       clips,

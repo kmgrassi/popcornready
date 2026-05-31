@@ -118,7 +118,7 @@ function clipType(clip: Clip): EditGraphAsset["type"] {
   return clip.kind || "video";
 }
 
-function beatId(index: number, name: string): string {
+export function editGraphBeatId(index: number, name: string): string {
   return `beat_${index + 1}_${name || "untitled"}`;
 }
 
@@ -136,7 +136,7 @@ export function synthesizeEditGraph(input: {
 }): EditGraph {
   const beatIdsByRole = new Map<string, string>();
   const beats = input.plan.beats.map((beat, index) => {
-    const id = beatId(index, beat.name);
+    const id = editGraphBeatId(index, beat.name);
     if (!beatIdsByRole.has(beat.name)) beatIdsByRole.set(beat.name, id);
     return {
       id,
@@ -146,7 +146,7 @@ export function synthesizeEditGraph(input: {
     };
   });
 
-  const fallbackBeatId = beats[0]?.id || beatId(0, "timeline");
+  const fallbackBeatId = beats[0]?.id || editGraphBeatId(0, "timeline");
   const clipsById = new Map((input.clips || []).map((clip) => [clip.id, clip]));
   const timelineClipIds = new Set(input.timeline.segments.map((segment) => segment.clipId));
   const clips: Clip[] =

@@ -569,7 +569,15 @@ export async function runGenerationJob(
     });
     let timeline: ReturnType<typeof sanitizeTimeline>;
     try {
-      timeline = sanitizeTimeline(await deps.selectClips({ plan, clips }), clips);
+      timeline = sanitizeTimeline(
+        await deps.selectClips({
+          plan,
+          clips,
+          goal: brief.brief.goal,
+          storyContext,
+        }),
+        clips
+      );
     } catch (err) {
       const summary = toErrorSummary(err, { fallbackCode: "internal_error" });
       await timelineItem.fail(summary);
