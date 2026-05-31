@@ -277,12 +277,25 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+export const GATEABLE_GENERATION_STAGE_TYPES = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+] as const satisfies readonly GenerationStageType[];
+
+export type GateableGenerationStageType =
+  (typeof GATEABLE_GENERATION_STAGE_TYPES)[number];
+
 export interface ReviewGateConfig {
-  gatedStages: GenerationStageType[];
+  gatedStages: GateableGenerationStageType[];
 }
 
 export interface RunReviewGate {
-  stageType: GenerationStageType;
+  stageType: GateableGenerationStageType;
   stageId: string;
   state: "awaiting_review";
   enteredAt: string;
@@ -305,6 +318,8 @@ export interface GenerationRun {
   projectId: string;
   briefVersionId?: string;
   status: GenerationRunStatus;
+  reviewGates?: GateableGenerationStageType[];
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
@@ -312,8 +327,6 @@ export interface GenerationRun {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
-  reviewGates?: GenerationStageType[];
-  reviewGate?: RunReviewGate | null;
   error?: GenerationErrorSummary;
 }
 
@@ -324,6 +337,8 @@ export interface GenerationStage {
   label: string;
   order: number;
   status: GenerationRunStatus;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
   progressPercent?: number;
   message?: string;
   startedAt?: string;
@@ -332,8 +347,6 @@ export interface GenerationStage {
   artifactIds: string[];
   createdAt: string;
   updatedAt: string;
-  isReviewGate?: boolean;
-  reviewedAt?: string;
   error?: GenerationErrorSummary;
 }
 
