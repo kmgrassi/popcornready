@@ -277,6 +277,27 @@ export type GenerationStageType =
   | "export"
   | "ready";
 
+export type ReviewGateConfig = {
+  gatedStages: GenerationStageType[];
+};
+
+export type RunReviewGate = {
+  stageType: GenerationStageType;
+  stageId: string;
+  state: "awaiting_review";
+  enteredAt: string;
+};
+
+export const REVIEW_GATEABLE_STAGES: GenerationStageType[] = [
+  "brief_intake",
+  "creative_plan",
+  "asset_generation",
+  "audio_generation",
+  "timeline_assembly",
+  "quality_review",
+  "export",
+];
+
 // User-safe error summary for a failed run, stage, or stage item. `code` and
 // `message` mirror JobError; `retryable` and the redacted, diagnostic-safe
 // `details` carry the extras the progress UI needs to offer recovery.
@@ -302,6 +323,8 @@ export interface GenerationRun {
   startedAt?: string;
   completedAt?: string;
   error?: GenerationErrorSummary;
+  reviewGates?: GenerationStageType[];
+  reviewGate?: RunReviewGate | null;
 }
 
 export interface GenerationStage {
@@ -320,6 +343,8 @@ export interface GenerationStage {
   createdAt: string;
   updatedAt: string;
   error?: GenerationErrorSummary;
+  isReviewGate?: boolean;
+  reviewedAt?: string;
 }
 
 // Child item of an asset-heavy stage so the UI can show per-beat cards.

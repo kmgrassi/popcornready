@@ -4,6 +4,7 @@ import path from "path";
 import { defaultDbDir } from "./store";
 import {
   GENERATION_STAGE_LABELS,
+  REVIEW_GATEABLE_STAGES,
   GenerationRun,
   GenerationRunStatus,
   GenerationStage,
@@ -303,6 +304,7 @@ export interface GenerationRunResultArtifact {
 export interface CreateGenerationRunBody {
   briefVersionId?: string;
   prompt?: string;
+  reviewGates?: unknown;
 }
 
 export interface CreateRunArgs {
@@ -326,6 +328,45 @@ const STAGE_SEEDS: StageSeed[] = [
   { type: "ready" },
 ];
 
+const REVIEW_GATEABLE_STAGE_SET = new Set<GenerationStageType>(
+  REVIEW_GATEABLE_STAGES
+);
+
+function parseReviewGates(value: unknown): GenerationStageType[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ApiError("validation_failed", "reviewGates must be an array.", {
+      fields: [{ path: "reviewGates", message: "Expected an array." }],
+    });
+  }
+
+  const gates: GenerationStageType[] = [];
+  const invalid: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") {
+      invalid.push(String(raw));
+      continue;
+    }
+    const stageType = raw.trim() as GenerationStageType;
+    if (!REVIEW_GATEABLE_STAGE_SET.has(stageType)) {
+      invalid.push(raw);
+      continue;
+    }
+    if (!gates.includes(stageType)) gates.push(stageType);
+  }
+
+  if (invalid.length > 0) {
+    throw new ApiError("validation_failed", "reviewGates contains invalid stages.", {
+      fields: invalid.map((stage) => ({
+        path: "reviewGates",
+        message: `${stage} is not a gateable stage.`,
+      })),
+    });
+  }
+
+  return gates;
+}
+
 export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
   const { store, projectId, body } = args;
   const parsedBody = body && typeof body === "object" && !Array.isArray(body)
@@ -334,11 +375,14 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
   const briefVersionId = parsedBody.briefVersionId
     ? String(parsedBody.briefVersionId).trim() || undefined
     : undefined;
+  const reviewGates = parseReviewGates(parsedBody.reviewGates);
 
   const run = await store.createRun({
     projectId,
     status: "queued" as GenerationRunStatus,
     ...(briefVersionId ? { briefVersionId } : {}),
+    reviewGates,
+    reviewGate: null,
     currentStageType: "brief_intake",
     progressPercent: 0,
     message: "Run queued.",
@@ -355,6 +399,7 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
       status: "queued",
       jobIds: [],
       artifactIds: [],
+      isReviewGate: reviewGates.includes(seed.type),
     });
     stages.push(stage);
   }

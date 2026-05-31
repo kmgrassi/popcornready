@@ -2,6 +2,13 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  GENERATION_STAGE_LABELS,
+  GenerationStageType,
+  REVIEW_GATEABLE_STAGES,
+} from "@/lib/v1/types";
+
+const LANDING_PROJECT_ID = "default";
 
 const TEMPLATES: { label: string; prompt: string }[] = [
   {
@@ -58,12 +65,25 @@ const GENERATION_STAGES = [
   },
 ];
 
+const REVIEW_STAGE_DETAILS: Record<GenerationStageType, string> = {
+  brief_intake: "Confirm the brief before planning starts.",
+  creative_plan: "Review story beats and creative direction.",
+  asset_generation: "Inspect generated visuals before assembly.",
+  audio_generation: "Check music and narration choices.",
+  timeline_assembly: "Review the cut before quality checks.",
+  quality_review: "Inspect critic notes and polish.",
+  export: "Approve the render step before final output.",
+  ready: "Ready is terminal and cannot be gated.",
+};
+
 export function PromptComposer() {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStage, setActiveStage] = useState(0);
+  const [showReviewConfig, setShowReviewConfig] = useState(false);
+  const [reviewGates, setReviewGates] = useState<GenerationStageType[]>([]);
 
   useEffect(() => {
     if (!submitting) {
@@ -82,32 +102,58 @@ export function PromptComposer() {
     return () => window.clearInterval(timer);
   }, [submitting]);
 
+  function openReviewConfig() {
+    const goal = value.trim();
+    if (!goal || submitting) return;
+    setError(null);
+    setShowReviewConfig(true);
+  }
+
+  function toggleReviewGate(stage: GenerationStageType) {
+    setReviewGates((current) =>
+      current.includes(stage)
+        ? current.filter((candidate) => candidate !== stage)
+        : [...current, stage]
+    );
+  }
+
+  function selectAllReviewGates() {
+    setReviewGates((current) =>
+      current.length === REVIEW_GATEABLE_STAGES.length
+        ? []
+        : [...REVIEW_GATEABLE_STAGES]
+    );
+  }
+
   async function start() {
     const goal = value.trim();
     if (!goal || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const response = await fetch("/api/oneshot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal,
-          targetLengthSec: 30,
-          style: "cinematic story",
-          aspectRatio: "9:16",
-        }),
-      });
+      const response = await fetch(
+        `/api/v1/projects/${encodeURIComponent(LANDING_PROJECT_ID)}/generation-runs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: goal,
+            reviewGates,
+          }),
+        }
+      );
       const data = await response.json();
-      if (!response.ok || !data.project) {
+      if (!response.ok || !data.run?.runId) {
         throw new Error(
           data?.error?.message ||
             data?.error ||
-            "Unable to generate your video."
+            "Unable to start your generation run."
         );
       }
       setActiveStage(5);
-      router.push(`/studio?goal=${encodeURIComponent(goal)}&length=30`);
+      router.push(
+        `/studio?goal=${encodeURIComponent(goal)}&length=30&runId=${encodeURIComponent(data.run.runId)}`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -140,19 +186,90 @@ export function PromptComposer() {
         placeholder="e.g. A 30-second ad that hooks fast, shows the problem, demos the product, and ends with a strong CTA."
         rows={3}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start();
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) openReviewConfig();
         }}
       />
       <button
         type="button"
         className="lp-prompt-submit"
-        onClick={start}
+        onClick={openReviewConfig}
         disabled={!value.trim() || submitting}
       >
         {submitting
-          ? "Generating your video…"
-          : "Create my 30-second video →"}
+          ? "Starting your run..."
+          : "Create my 30-second video"}
       </button>
+      {showReviewConfig && (
+        <div
+          className="lp-review-config"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lp-review-config-title"
+        >
+          <div className="lp-review-config-panel">
+            <div className="lp-review-config-head">
+              <div>
+                <p className="lp-review-config-eyebrow">Review checkpoints</p>
+                <h2 id="lp-review-config-title">Choose where to pause</h2>
+              </div>
+              <button
+                type="button"
+                className="lp-review-config-close"
+                onClick={() => setShowReviewConfig(false)}
+                disabled={submitting}
+                aria-label="Close review checkpoint settings"
+              >
+                x
+              </button>
+            </div>
+            <div className="lp-review-options">
+              {REVIEW_GATEABLE_STAGES.map((stage) => {
+                const checked = reviewGates.includes(stage);
+                return (
+                  <label className="lp-review-option" key={stage}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleReviewGate(stage)}
+                      disabled={submitting}
+                    />
+                    <span>
+                      <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
+                      <small>{REVIEW_STAGE_DETAILS[stage]}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="lp-review-config-actions">
+              <button
+                type="button"
+                className="lp-review-secondary"
+                onClick={selectAllReviewGates}
+                disabled={submitting}
+              >
+                {reviewGates.length === REVIEW_GATEABLE_STAGES.length
+                  ? "Clear reviews"
+                  : "Review every step"}
+              </button>
+              <button
+                type="button"
+                className="lp-review-primary"
+                onClick={start}
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Starting..."
+                  : reviewGates.length === 0
+                    ? "YOLO, let's go"
+                    : `Start with ${reviewGates.length} review${
+                        reviewGates.length === 1 ? "" : "s"
+                      }`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {submitting && (
         <div className="lp-generation-progress" aria-live="polite">
           <div className="lp-generation-progress-head">

@@ -110,6 +110,51 @@ test("listRunsForProject returns only that project's runs, newest first", async 
   assert.deepEqual(cList, []);
 });
 
+test("createRunWithSeedStages persists selected review gates on the run and stages", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_a",
+    body: {
+      reviewGates: ["creative_plan", "asset_generation", "creative_plan"],
+    },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, [
+    "creative_plan",
+    "asset_generation",
+  ]);
+  assert.equal(payload.run.reviewGate, null);
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "creative_plan")?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "asset_generation")
+      ?.isReviewGate,
+    true
+  );
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "ready")?.isReviewGate,
+    false
+  );
+});
+
+test("createRunWithSeedStages rejects invalid review gates", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_a",
+        body: { reviewGates: ["ready", "not_a_stage"] },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.code, "validation_failed");
+      return true;
+    }
+  );
+});
+
 test("stages are scoped by runId and listed in order", async () => {
   const run = await store.createRun({
     projectId: "proj_a",
