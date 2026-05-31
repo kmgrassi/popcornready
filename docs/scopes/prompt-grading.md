@@ -261,11 +261,15 @@ Defaults:
   earlier iteration scored higher. Tracking `bestIndex` would be a small win
   for quality but a real loss in mental-model clarity; we explicitly choose
   the simpler rule.
-- On `max_iterations`, the run does **not** silently ship the last prompt as a
-  pass. It either (a) pauses for user review via the
-  [Generation Review Checkpoints](./generation-review-checkpoints.md) gate, or
-  (b) for YOLO runs, ships the last candidate and flags it in
-  `CriticReport.warnings` with `outcome: "max_iterations"`.
+- On `max_iterations`, the run **always pauses for human review** before any
+  sub-threshold prompt reaches the provider. For runs that already had a
+  review gate at this stage, the gate just opens early with the grade history
+  attached. For YOLO runs (no gate configured), the run **promotes itself to
+  a review gate** at this stage — see the YOLO-promotes-to-gate rule in
+  **Integration With Review Checkpoints**. The pause is recorded as
+  `outcome: "max_iterations"` in `GradedPrompt`. No exhausted prompt ever
+  ships without an explicit human bypass decision; this is the contract from
+  the **Product Principle**.
 
 The "rewrite" step is a new, small agent method on each authoring agent — not
 a new global agent. The wrapper passes `rewriteGuidance` and the original
