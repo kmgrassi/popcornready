@@ -1,5 +1,11 @@
 import { createHash } from "crypto";
 import { critique as realCritique, planEdit as realPlanEdit, selectClips as realSelectClips } from "../agent";
+import {
+  EDIT_GRAPH_COMPILER_VERSION,
+  buildEditGraphFromTimeline,
+  compileEditGraphToTimeline,
+  markGraphTimelineProjection,
+} from "../edit-graph";
 import { applyPatches, sanitizeTimeline } from "../timeline";
 import { mergeStoryContext } from "../story-context";
 import { Clip, StoryContext } from "../types";
@@ -11,6 +17,7 @@ import {
   noopProgressEmitter,
   toErrorSummary,
 } from "./generation-progress";
+import { isRunReviewGatePaused } from "./generation-runs";
 import * as ids from "./ids";
 import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
@@ -615,16 +622,34 @@ export async function runGenerationJob(
     );
     await progress.updateRun({ progressPercent: 90, message: "Saving the timeline." });
     const now = new Date().toISOString();
+    const timelineForGraph =
+      input.showCaptions === undefined
+        ? timeline
+        : { ...timeline, showCaptions: input.showCaptions };
+    const editGraph = buildEditGraphFromTimeline({
+      id: ids.editGraphId(),
+      projectId: job.projectId,
+      briefVersionId: input.briefVersionId,
+      ...(input.compositionId ? { compositionId: input.compositionId } : {}),
+      jobId: job.id,
+      goal: brief.brief.goal,
+      storyContext,
+      plan,
+      clips,
+      timeline: timelineForGraph,
+      createdAt: now,
+    });
+    const compiledTimeline = compileEditGraphToTimeline(editGraph);
     const versioned: VersionedTimeline = {
       id: ids.timelineId(),
       schemaVersion: SCHEMA.timeline,
       projectId: job.projectId,
       briefVersionId: input.briefVersionId,
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
-      aspectRatio: timeline.aspectRatio,
-      fps: timeline.fps,
+      aspectRatio: compiledTimeline.aspectRatio,
+      fps: compiledTimeline.fps,
       ...(input.showCaptions === undefined ? {} : { showCaptions: input.showCaptions }),
-      segments: timeline.segments,
+      segments: compiledTimeline.segments,
       provenance: {
         briefVersionId: input.briefVersionId,
         ...(input.compositionId ? { compositionId: input.compositionId } : {}),
@@ -633,9 +658,15 @@ export async function runGenerationJob(
         criticReport: report,
         appliedPatchCount: patches.length,
       },
+      derivedFrom: {
+        editGraphId: editGraph.id,
+        compilerVersion: EDIT_GRAPH_COMPILER_VERSION,
+        compiledAt: now,
+      },
       createdBy: { jobId: job.id },
       createdAt: now,
     };
+    await store.saveEditGraph(markGraphTimelineProjection(editGraph, versioned.id, now));
     await store.saveTimeline(versioned);
 
     const finished = await saveJobUpdate(
@@ -644,7 +675,7 @@ export async function runGenerationJob(
       {
         status: "succeeded",
         progress: { currentStep: "saving_artifact", percent: 100 },
-        result: { timelineIds: [versioned.id] },
+        result: { timelineIds: [versioned.id], editGraphIds: [editGraph.id] },
       },
       logger
     );
@@ -656,6 +687,19 @@ export async function runGenerationJob(
     });
     return finished;
   } catch (err) {
+    if (isRunReviewGatePaused(err)) {
+      logger.info("job.paused_for_review", {
+        stageType: err.stageType,
+        stageId: err.stageId,
+      });
+      // The worker has stopped at a review gate, but the pause is a run-level
+      // concept (`run.reviewGate`) — the backing job is no longer executing.
+      // Leaving it `running` would strand it forever, since resume re-enters
+      // through `runGenerationJob`, which only picks up `queued` jobs. Roll the
+      // job back to `queued` so an approve can dispatch it again.
+      return saveJobUpdate(store, job, { status: "queued" }, logger);
+    }
+
     const rawMessage = err instanceof Error ? err.message : "Generation failed.";
     let code: ErrorCode = "internal_error";
     if (err instanceof ApiError) code = err.code;
