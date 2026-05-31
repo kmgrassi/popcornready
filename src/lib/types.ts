@@ -149,6 +149,33 @@ export interface Timeline {
   showCaptions?: boolean;
 }
 
+export type RenderEngine = "remotion";
+export type RenderOutputFormat = "mp4";
+export type RenderVideoCodec = "h264";
+export type RenderDurationPolicy =
+  | "timeline_only"
+  | "match_longest_media"
+  | "fail_on_mismatch";
+
+export interface RenderPlan {
+  schemaVersion: "render-plan.v1";
+  engine: RenderEngine;
+  timelineId?: string;
+  durationPolicy: RenderDurationPolicy;
+  durationSec: number;
+  timelineDurationSec: number;
+  audioDurationSec: number;
+  audioAssetIds: string[];
+  output: {
+    format: RenderOutputFormat;
+    codec: RenderVideoCodec;
+    width: number;
+    height: number;
+    fps: number;
+    quality: string;
+  };
+}
+
 export interface CriticScores {
   hook_score: number;
   clarity_score: number;
@@ -308,6 +335,7 @@ export interface Project {
   storyContext?: StoryContext;
   plan: EditPlan | null;
   timeline: Timeline | null;
+  renderPlan?: RenderPlan | null;
   clips: Clip[];
   characterProfiles?: CharacterProfile[];
   characterReferences?: CharacterReference[];

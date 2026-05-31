@@ -10,6 +10,7 @@
 // providers and without network or Remotion.
 
 import { revise as defaultRevise } from "../agent";
+import { createRenderPlanFromTimeline } from "../render-plan";
 import { applyPatches as defaultApplyPatches } from "../timeline";
 import { Clip, Project, timelineDurationSec } from "../types";
 import { ApiError, newId } from "./runtime";
@@ -191,14 +192,18 @@ export function runExportJob(input: {
     );
   }
 
-  const renderPlan: ExportRenderPlan = {
+  const { renderPlan: baseRenderPlan } = createRenderPlanFromTimeline({
+    timeline,
+    timelineId: input.timelineId,
+    audioClips,
     durationPolicy: policy,
-    durationSec: resolved.durationSec,
-    timelineDurationSec: tDuration,
-    audioDurationSec: aDuration,
-    audioAssetIds,
-    format: "mp4",
-    quality: options.quality ?? "standard",
+    maxDeltaSec: options.maxDeltaSec,
+    quality: options.quality,
+  });
+  const renderPlan: ExportRenderPlan = {
+    ...baseRenderPlan,
+    format: baseRenderPlan.output.format,
+    quality: baseRenderPlan.output.quality,
   };
 
   // Skeleton output: the artifact is recorded but not yet rendered. TODO(PR5):
@@ -211,7 +216,7 @@ export function runExportJob(input: {
     status: "pending_render",
     url: null,
     timelineId: input.timelineId,
-    durationSec: resolved.durationSec,
+    durationSec: renderPlan.durationSec,
     renderPlan,
     createdAt: new Date().toISOString(),
   };
