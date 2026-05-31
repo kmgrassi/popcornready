@@ -17,7 +17,7 @@ let tmpDir: string;
 let store: GenerationRunsStore;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "aividi-genruns-"));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-genruns-"));
   store = createGenerationRunsStore(tmpDir);
 });
 

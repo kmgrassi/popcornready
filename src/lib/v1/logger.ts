@@ -45,7 +45,11 @@ export interface Logger {
 }
 
 function effectiveLevel(): LogLevel | null {
-  const raw = (process.env.AIVIDI_LOG_LEVEL || "").toLowerCase();
+  const raw = (
+    process.env.POPCORN_READY_LOG_LEVEL ||
+    process.env.AIVIDI_LOG_LEVEL ||
+    ""
+  ).toLowerCase();
   if (raw === "silent") return null;
   if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") {
     return raw;

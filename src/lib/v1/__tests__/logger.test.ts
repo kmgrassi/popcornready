@@ -59,16 +59,16 @@ test("child logger inherits context and overrides fields", () => {
 
 test("silent log level suppresses all output", () => {
   const { captured, restore } = captureSink();
-  const previousLevel = process.env.AIVIDI_LOG_LEVEL;
-  process.env.AIVIDI_LOG_LEVEL = "silent";
+  const previousLevel = process.env.POPCORN_READY_LOG_LEVEL;
+  process.env.POPCORN_READY_LOG_LEVEL = "silent";
   try {
     const log = createLogger();
     log.info("ignored");
     log.error("ignored");
     assert.equal(captured.length, 0);
   } finally {
-    if (previousLevel === undefined) delete process.env.AIVIDI_LOG_LEVEL;
-    else process.env.AIVIDI_LOG_LEVEL = previousLevel;
+    if (previousLevel === undefined) delete process.env.POPCORN_READY_LOG_LEVEL;
+    else process.env.POPCORN_READY_LOG_LEVEL = previousLevel;
     restore();
   }
 });

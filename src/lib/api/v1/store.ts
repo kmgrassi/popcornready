@@ -85,9 +85,9 @@ interface V1Db {
 
 const DB_SCHEMA_VERSION = "agentDb.v1";
 
-// Resolved per call so tests can point AIVIDI_LOCAL_DIR at a temp directory.
+// Resolved per call so tests can point POPCORN_READY_LOCAL_DIR at a temp directory.
 export function localDir(): string {
-  return process.env.AIVIDI_LOCAL_DIR || path.join(process.cwd(), ".local");
+  return process.env.POPCORN_READY_LOCAL_DIR || path.join(process.cwd(), ".local");
 }
 
 function dbFile(): string {

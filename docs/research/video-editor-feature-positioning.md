@@ -2,7 +2,7 @@
 
 This matrix adapts the feature heatmap from
 [`video-editing-market-landscape.md`](./video-editing-market-landscape.md) and
-adds Aividi / Popcorn Ready as the first row. It is intended for product
+adds Popcorn Ready as the first row. It is intended for product
 positioning and roadmap discussion, not as a formal benchmark.
 
 Legend: `●●●` strong, `●●○` medium, `●○○` light, `○○○` minimal or not primary.
@@ -11,7 +11,7 @@ Legend: `●●●` strong, `●●○` medium, `●○○` light, `○○○` m
 
 | App | Deep timeline craft | Audio post | Compositing / VFX | Captions / localization | Generative AI | Collaboration / versioning | Positioning read |
 |---|---:|---:|---:|---:|---:|---:|---|
-| **Aividi / Popcorn Ready** | ●●○ | ●○○ | ●○○ | ●○○ | ●●● | ●●○ | Differentiates as a deterministic, prompt-to-timeline assembly layer that can route generation providers while keeping exports inspectable. Not trying to replace pro NLE finishing. |
+| **Popcorn Ready** | ●●○ | ●○○ | ●○○ | ●○○ | ●●● | ●●○ | Differentiates as a deterministic, prompt-to-timeline assembly layer that can route generation providers while keeping exports inspectable. Not trying to replace pro NLE finishing. |
 | Premiere Pro | ●●● | ●●○ | ●●○ | ●●● | ●●○ | ●●○ | Broad pro craft stack with strong Adobe ecosystem and Firefly integration. |
 | Final Cut Pro | ●●● | ●●○ | ●●○ | ●●○ | ●○○ | ●○○ | Mac-native pro editor with fast deterministic craft workflows. |
 | DaVinci Resolve | ●●● | ●●● | ●●● | ●●○ | ●○○ | ●●● | Deepest all-in-one craft, color, audio, VFX, and collaboration stack. |
@@ -33,8 +33,8 @@ Legend: `●●●` strong, `●●○` medium, `●○○` light, `○○○` m
 
 ## Strategic Feature Map
 
-This chart places products by center of gravity. The useful opening for Aividi /
-Popcorn Ready is the upper-right region: high AI orchestration while preserving a
+This chart places products by center of gravity. The useful opening for Popcorn
+Ready is the upper-right region: high AI orchestration while preserving a
 deterministic, inspectable timeline and export path.
 
 ```mermaid
@@ -46,7 +46,7 @@ quadrantChart
     quadrant-2 Classical craft and finishing
     quadrant-3 Lightweight social / template editing
     quadrant-4 Generative studios
-    Aividi / Popcorn Ready: [0.78, 0.70]
+    Popcorn Ready: [0.78, 0.70]
     Premiere Pro: [0.55, 0.88]
     DaVinci Resolve: [0.42, 0.94]
     Final Cut Pro: [0.35, 0.84]
@@ -60,9 +60,9 @@ quadrantChart
     Blackbird: [0.18, 0.78]
 ```
 
-## How Aividi / Popcorn Ready Differentiates
+## How Popcorn Ready Differentiates
 
-Aividi should not be positioned as another timeline NLE or another pure
+Popcorn Ready should not be positioned as another timeline NLE or another pure
 text-to-video generator. The sharper position is:
 
 1. **Prompt to structured plan to deterministic timeline.** The AI plans and
@@ -75,4 +75,3 @@ text-to-video generator. The sharper position is:
 4. **Useful middle layer.** It sits between pro NLE rigor, generative video
    studios, and review/versioning systems instead of trying to replace all of
    them at once.
-

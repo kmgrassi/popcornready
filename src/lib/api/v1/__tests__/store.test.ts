@@ -22,11 +22,11 @@ let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-"));
-  process.env.AIVIDI_LOCAL_DIR = tmpDir;
+  process.env.POPCORN_READY_LOCAL_DIR = tmpDir;
 });
 
 afterEach(async () => {
-  delete process.env.AIVIDI_LOCAL_DIR;
+  delete process.env.POPCORN_READY_LOCAL_DIR;
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 

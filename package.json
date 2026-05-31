@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:fresh": "rm -rf .next && next dev",
+    "dev:preview": "rm -rf .next && next dev -p 3003",
     "build": "next build",
     "start": "next start",
     "test": "tsx --test src/**/*.test.ts",

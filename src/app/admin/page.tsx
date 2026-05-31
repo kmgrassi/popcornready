@@ -131,7 +131,7 @@ export default function AdminPage() {
     <main className="admin-page">
       <header className="admin-topbar">
         <Link href="/" className="admin-wordmark">
-          aividi
+          Popcorn Ready
         </Link>
         <nav>
           <Link href="/studio">Studio</Link>

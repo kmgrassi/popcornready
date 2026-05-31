@@ -136,11 +136,11 @@ A fourth gap is **semantic media intelligence tied to the actual timeline and as
 
 For a product manager deciding where to invest, the best opportunity is to build or back a product in the category I would call **AI-assisted post-production infrastructure**: a timeline-aware system that sits between NLEs and generative tools and makes them work together. The winning product would not try to replace Premiere, Final Cut, or Resolve for high-end craft work, and it would not try to out-model Runway, Pika, or frontier labs on raw generation. Instead, it would win by providing:
 
-1. **Deterministic assembly** with genuine track/timeline semantics rather than only storyboard or prompt semantics.  
-2. **Semantic search and source-aware editing** across footage, transcripts, captions, and generated inserts.  
-3. **Localization orchestration** spanning captions, translation, voice generation, dubbing, and approval.  
-4. **Provenance, rights, and version control** that survive collaboration and distribution.  
-5. **Model routing** so teams can swap among native or third-party generation providers without rebuilding the workflow.  
+1. **Deterministic assembly** with genuine track/timeline semantics rather than only storyboard or prompt semantics.
+2. **Semantic search and source-aware editing** across footage, transcripts, captions, and generated inserts.
+3. **Localization orchestration** spanning captions, translation, voice generation, dubbing, and approval.
+4. **Provenance, rights, and version control** that survive collaboration and distribution.
+5. **Model routing** so teams can swap among native or third-party generation providers without rebuilding the workflow.
 
 That is where the market still looks structurally under-served. The field is crowded in lightweight editors and increasingly crowded in pure text-to-video generation, but it is still comparatively open in the space where **editorial rigor, collaboration, and AI creation converge**.
 

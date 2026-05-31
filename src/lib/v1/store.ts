@@ -135,7 +135,7 @@ export function createStore(rootDir: string): V1Store {
 
 export function defaultDbDir(): string {
   return (
-    process.env.AIVIDI_DEV_DB_DIR || path.join(process.cwd(), ".local", "dev-db")
+    process.env.POPCORN_READY_DEV_DB_DIR || path.join(process.cwd(), ".local", "dev-db")
   );
 }
 

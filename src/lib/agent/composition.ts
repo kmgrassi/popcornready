@@ -32,7 +32,7 @@ Rules:
 - Only reference existing assets by the exact ids in the catalog.
 - Prefer generated images over generated video unless motion is essential, since
   images are cheaper and faster.
-- For narration: mode "generate" when Aividi should write/voice narration,
+- For narration: mode "generate" when Popcorn Ready should write/voice narration,
   "provided" when the brief already supplies a script or audio asset, otherwise
   "none". Put any provided or drafted script text in narration.script.`;
 

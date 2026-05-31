@@ -115,7 +115,7 @@ export function PromptComposer() {
         </p>
       )}
       <p className="lp-prompt-hint">
-        No clips needed — aividi generates the visuals and cuts the video for
+        No clips needed — Popcorn Ready generates the visuals and cuts the video for
         you. Bring your own keys for real footage, or preview with placeholders.
       </p>
     </div>

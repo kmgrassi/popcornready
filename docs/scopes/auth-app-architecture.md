@@ -85,7 +85,7 @@ The goal is fast local iteration, not a weaker production mode.
 ## Supabase Environment Variables
 
 Use the same Supabase environment variable contract as the Parallel Agent
-platform. For now, Aividi should point at the dev environment for the Harper
+platform. For now, Popcorn Ready should point at the dev environment for the Harper
 database.
 
 Server-side variables:
