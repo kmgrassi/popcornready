@@ -46,6 +46,17 @@ trap ourselves in the old, forward-only "edit the timeline with patches" model.
 6. **One engine.** The synchronous one-shot route and the async run pipeline
    **converge into a single engine**. The staged "run" model is the trunk; the
    quick call becomes a thin entry into it.
+7. **Determinism lives in the tool contracts, not in a fixed order — and the
+   agent self-heals.** Each tool (API call) **deterministically validates its
+   inputs** ("a video with a main character requires a character likeness";
+   "because you have X you also need Y") and, on a miss, returns a **structured,
+   actionable failure** instead of doing the wrong thing. The failure bounces
+   back to the agent, which **satisfies the precondition (e.g. generates the
+   missing anchor image) and retries.** Step ordering is therefore *emergent*
+   from the contracts — the agent reacts to what each step says it needs rather
+   than following a hardcoded sequence. This is what makes the flow both flexible
+   (agent-driven) and reliable (every step guards its own preconditions), and it
+   is how the "deterministic first pass" is achieved without prescribing order.
 
 ## 3. Where we are today (the model we must NOT entrench)
 
@@ -145,7 +156,12 @@ edges + invalidation + an orchestrator**.
 `plan/replan` · `generate/regenerate anchor` · `generate/regenerate beat keyframe`
 · `generate/regenerate beat clip` · `generate/regenerate audio` ·
 `assemble/re-assemble timeline` · `critique` · `export`. Each is **granular,
-idempotent, and records its inputs** so the graph stays accurate.
+idempotent, and records its inputs** so the graph stays accurate. Each tool also
+**validates its pre/postconditions and returns typed, actionable errors**
+(missing inputs, implied requirements) so the orchestrator can **self-heal and
+retry** (Principle 7). The dependency graph (§5) is largely *expressed* by these
+contracts: a tool declaring "I need a character likeness" is the edge from a clip
+to its anchor.
 
 ## 7. Scope & phasing (each independently shippable — do NOT implement ahead of agreement)
 
