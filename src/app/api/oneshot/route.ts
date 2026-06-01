@@ -20,6 +20,7 @@ import {
   beatPrompt,
   clampSeconds,
   generateBeatClip,
+  generateBeatKeyframe,
   generateCharacterHeroFrame,
   generateSoundtrack,
   isQuotaError,
@@ -87,6 +88,17 @@ export async function POST(req: NextRequest) {
     const characterReferences = character ? [character.reference] : [];
     const characterClips = character ? [character.clip] : [];
 
+    // Per-beat keyframes: generate a fresh hero-conditioned image per beat and
+    // use it as the image-to-video first frame, so each shot opens on its own
+    // scene instead of the same static hero portrait. Requires Gemini (the only
+    // image model that will edit a photorealistic minor); set
+    // ONESHOT_BEAT_KEYFRAMES=0 to fall back to seeding clips with the hero frame.
+    const heroPath = character?.path;
+    const useBeatKeyframes =
+      Boolean(heroPath) &&
+      Boolean(process.env.GEMINI_API_KEY) &&
+      process.env.ONESHOT_BEAT_KEYFRAMES !== "0";
+
     // 3. Start the soundtrack before video generation and let it run in
     // parallel with the sequential video loop.
     const existingSoundtrack = includeAudio
@@ -139,12 +151,32 @@ export async function POST(req: NextRequest) {
                 providerPrompt: clipInput.prompt,
               })
             : undefined;
+        const firstFramePath =
+          useBeatKeyframes && heroPath
+            ? (await optionalOneShotStep(`beat ${index + 1} keyframe`, () =>
+                generateBeatKeyframe({
+                  goal,
+                  style,
+                  beat,
+                  beatIndex: index,
+                  totalBeats: plan.beats.length,
+                  aspectRatio,
+                  heroPath,
+                })
+              )) || undefined
+            : undefined;
         try {
           console.info(
-            `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
+            `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}` +
+              (firstFramePath ? " (per-beat keyframe)" : "")
           );
           clips.push(
-            await generateBeatClip({ provider, ...clipInput, characterContext })
+            await generateBeatClip({
+              provider,
+              ...clipInput,
+              characterContext,
+              firstFramePath,
+            })
           );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -173,7 +205,12 @@ export async function POST(req: NextRequest) {
           );
           provider = providers.fallback;
           clips.push(
-            await generateBeatClip({ provider, ...clipInput, characterContext })
+            await generateBeatClip({
+              provider,
+              ...clipInput,
+              characterContext,
+              firstFramePath,
+            })
           );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`

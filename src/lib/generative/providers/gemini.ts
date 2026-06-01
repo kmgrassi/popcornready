@@ -16,12 +16,71 @@ import {
 } from "./shared";
 
 const GEMINI_DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
+// "Nano banana" — the only image model that will edit a photorealistic image of
+// a minor (OpenAI's image-edit endpoint rejects that), which one-shot stories
+// frequently feature. Used to generate per-beat keyframes from the hero image.
+const GEMINI_DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 
 async function readAsGeminiImage(filePath: string): Promise<Image> {
   const bytes = await fs.readFile(filePath);
   return {
     imageBytes: Buffer.from(bytes).toString("base64"),
     mimeType: mimeForPath(filePath),
+  };
+}
+
+async function generateGeminiImage(
+  input: Extract<GenerateAssetRequest, { provider: "gemini"; kind: "image" }>
+): Promise<GeneratedAssetResult> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("GEMINI_API_KEY is not set for the Gemini provider.");
+  }
+
+  const prompt = requirePrompt(input.prompt);
+  const model = input.model || GEMINI_DEFAULT_IMAGE_MODEL;
+  const ai = new GoogleGenAI({ apiKey: key });
+
+  // Reference images (e.g. the character hero frame) are passed inline so the
+  // model can keep the same subject while changing pose/scene per beat.
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
+  for (const ref of input.referencePaths || []) {
+    const bytes = await fs.readFile(ref);
+    parts.push({
+      inlineData: {
+        mimeType: mimeForPath(ref),
+        data: Buffer.from(bytes).toString("base64"),
+      },
+    });
+  }
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ role: "user", parts: parts as never }],
+  });
+  const outParts = response.candidates?.[0]?.content?.parts || [];
+  const imagePart = outParts.find(
+    (part) => (part as { inlineData?: { data?: string } }).inlineData?.data
+  ) as { inlineData?: { data: string; mimeType?: string } } | undefined;
+  if (!imagePart?.inlineData?.data) {
+    const text =
+      (outParts.find((part) => (part as { text?: string }).text) as { text?: string })?.text || "";
+    throw new Error(
+      `Gemini image generation returned no image data. ${text.slice(0, 200)}`
+    );
+  }
+
+  const mimeType = imagePart.inlineData.mimeType || "image/png";
+  return {
+    kind: "image",
+    bytes: Buffer.from(imagePart.inlineData.data, "base64"),
+    extension: mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpg" : "png",
+    mimeType,
+    provider: "gemini",
+    model,
+    prompt,
+    costUsd: estimateCostUsd({ provider: "gemini", kind: "image", model }),
+    providerSettings: characterProviderSettings(input),
   };
 }
 
@@ -120,9 +179,11 @@ async function generateGeminiVideo(
 export const geminiProvider: GenerativeProvider = {
   name: "gemini",
   async generateAsset(input) {
-    if (input.provider !== "gemini" || input.kind !== "video") {
-      throw new Error("Gemini provider currently supports video generation only.");
+    if (input.provider !== "gemini") {
+      throw new Error("Gemini provider received a non-gemini request.");
     }
-    return generateGeminiVideo(input);
+    if (input.kind === "video") return generateGeminiVideo(input);
+    if (input.kind === "image") return generateGeminiImage(input);
+    throw new Error("Gemini provider supports video and image generation only.");
   },
 };
