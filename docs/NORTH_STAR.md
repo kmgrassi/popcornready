@@ -154,6 +154,17 @@ edges + invalidation + an orchestrator**.
   over IDs.)
 - **A regeneration vocabulary** beyond timeline patches: `regenerate_asset`,
   `change_beat`, `swap_anchor`, `rescore_audio`, … — the agent's tools.
+- **Assets live in a reusable pool; locations point at an "active" one.**
+  Generated assets (anchors, keyframes, clips, audio) are **immutable items in a
+  shared pool — never deleted.** Each **location/slot** (a beat, an anchor role,
+  a timeline segment) carries an **active selection** referencing the pooled
+  asset it currently uses. Regeneration **adds** a new asset to the pool and may
+  flip the slot's active pointer; the previous asset stays available and **can be
+  reused in a different location** (an asset that's wrong for slot A may be right
+  for slot B). "Not in use" ≠ "unusable." This generalizes today's `Clip[]` pool
+  + `TimelineSegment.clipId` reference to every asset kind, and is exactly what a
+  future dashboard browses ("I like image 10 — use it here" = re-point a slot's
+  active selection, no regeneration).
 - **One creative-state aggregate with versioning**, leaning on the existing
   `VersionedTimeline.provenance` + per-asset `asset_generation` jobs rather than
   the single mutable `Project`.
@@ -196,8 +207,11 @@ to its anchor.
 - ~~**First pass vs edits**~~ **— DECIDED (Principle 7):** no hardcoded order;
   determinism lives in each tool's input validation, and the agent self-heals by
   reacting to structured failures.
-- **Re-run downstream policy** — auto-invalidate everything downstream of a
-  changed node, or keep old outputs until the user/agent confirms?
+- ~~**Re-run downstream policy**~~ **— DECIDED:** an asset **pool** model —
+  assets are immutable and never deleted; each location has an **active**
+  selection; regeneration adds to the pool and may flip the active pointer;
+  idle assets stay reusable across locations. The agent proposes which slots to
+  refresh (Principle 5); old outputs are superseded, not destroyed.
 - **Trunk for creative state** — extend `Project`, or make the `/api/v1`
   versioned stack the home? (Pick one; retire the other.)
 - **Cost guardrails / propose-before-spend UX.**
