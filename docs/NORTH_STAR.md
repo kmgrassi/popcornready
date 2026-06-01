@@ -165,9 +165,19 @@ edges + invalidation + an orchestrator**.
   + `TimelineSegment.clipId` reference to every asset kind, and is exactly what a
   future dashboard browses ("I like image 10 — use it here" = re-point a slot's
   active selection, no regeneration).
-- **One creative-state aggregate with versioning**, leaning on the existing
-  `VersionedTimeline.provenance` + per-asset `asset_generation` jobs rather than
-  the single mutable `Project`.
+- **One project-scoped asset pool — not multiple stores.** A **project** (one
+  video creative effort, under a workspace) is the only container: **every asset
+  carries a `projectId`** and lives in a single flat pool, never deleted.
+  Relationships are carried **on the assets themselves** (provenance + input IDs
+  + role / what-it-depicts) and by the plan/timeline's **active selections** (IDs
+  pointing into the pool) — not by separate versioned-store collections. The
+  agent pulls the project's pool and reasons over it **by ID**; tools receive the
+  specific asset IDs (and prompts) they need. Versioning falls out for free:
+  assets are immutable in the pool, selections move. **Prerequisite: assets must
+  be self-describing** — kind, provenance (what it was generated from, by ID),
+  and what it depicts/role — or the agent can't decide which asset feeds which
+  call. (Today `Clip.generatedBy`/`characterBinding` do half of this; we make it
+  consistent across every asset kind and add `projectId`.)
 - **An orchestrator agent** that holds the creative state, calls the tools, runs
   a sensible default order on the first pass, and computes + **proposes** the
   minimal re-run on any change.
@@ -212,8 +222,12 @@ to its anchor.
   selection; regeneration adds to the pool and may flip the active pointer;
   idle assets stay reusable across locations. The agent proposes which slots to
   refresh (Principle 5); old outputs are superseded, not destroyed.
-- **Trunk for creative state** — extend `Project`, or make the `/api/v1`
-  versioned stack the home? (Pick one; retire the other.)
+- ~~**Trunk for creative state**~~ **— DECIDED:** collapse to **one
+  project-scoped asset pool** (no dual store). A project (under a workspace) is
+  the container; every asset carries `projectId`; relationships live on the
+  assets (self-describing: provenance/input-IDs/role) plus the plan/timeline's
+  active selections. Drop the heavy versioned-store machinery; immutable assets +
+  moving selections give versioning for free.
 - **Cost guardrails / propose-before-spend UX.**
 - **Retire the single-hero character path** in favor of anchors (started in #89).
 
