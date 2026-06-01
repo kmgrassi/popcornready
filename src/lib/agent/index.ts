@@ -4,6 +4,7 @@ import {
   CriticReport,
   EditPlan,
   Patch,
+  PlanCritiqueReport,
   StoryContext,
   Timeline,
   TimelineSegment,
@@ -20,6 +21,7 @@ import {
   criticSchema,
   editDecisionTimelineSchema,
   narrationRewriteSchema,
+  planCritiqueSchema,
   planSchema,
   reviseSchema,
 } from "./schemas";
@@ -107,6 +109,57 @@ Produce the edit plan.`;
   // Honor the user's explicit aspect ratio choice.
   plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
   return plan;
+}
+
+export async function critiquePlan(input: {
+  goal: string;
+  plan: EditPlan;
+  style: string;
+  aspectRatio: string;
+  storyContext?: StoryContext | null;
+}): Promise<PlanCritiqueReport> {
+  const sys = `${PREAMBLE}
+
+TASK: Review the edit plan before any image or video generation happens.
+This is the last cheap checkpoint before expensive provider calls.
+
+Look for:
+- weak or incoherent story arc
+- beat order that will produce a random montage instead of a sequence
+- ambiguous pronouns or missing character identity details
+- beat intents that lack enough concrete visual context for generation
+- impossible requests for short clips
+- timing that cannot support the requested story
+
+Return a revised plan that is ready for generation. Keep the user's core idea,
+target length, style, and aspect ratio. Prefer direct revisions over vague
+advice.`;
+
+  const user = `Creative goal:
+${input.goal}
+
+Target style: ${input.style}
+Aspect ratio: ${input.aspectRatio}
+
+Story context:
+${storyContextForPrompt(input.storyContext)}
+
+Draft edit plan:
+${planText(input.plan)}
+
+Critique and revise this plan before media generation.`;
+
+  const report = await structuredCall<PlanCritiqueReport>({
+    cachedSystem: sys,
+    user,
+    schema: planCritiqueSchema,
+    maxTokens: 4000,
+  });
+
+  report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
+  report.revisedPlan.style = input.style;
+  report.revisedPlan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
+  return report;
 }
 
 export async function selectClips(input: {

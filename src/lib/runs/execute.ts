@@ -8,8 +8,9 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import { critique, planEdit } from "@/lib/agent";
+import { critique, critiquePlan, planEdit } from "@/lib/agent";
 import { providerFor } from "@/lib/generative/providers";
+import { reviewGeneratedVideoSnapshots } from "@/lib/generative/video-snapshot-review";
 import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
@@ -18,10 +19,13 @@ import {
   AspectRatio,
   Beat,
   Clip,
+  EditPlan,
+  PlanCritiqueReport,
   Project,
   StoryContext,
   Timeline,
   TimelineSegment,
+  VideoSnapshotReview,
 } from "@/lib/types";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 import {
@@ -150,6 +154,115 @@ async function generateBeatClip(input: {
   };
 }
 
+async function optionalRunStep<T>(
+  label: string,
+  run: () => Promise<T>
+): Promise<T | null> {
+  try {
+    return await run();
+  } catch (err) {
+    console.warn(`[run] optional step failed: ${label}`, err);
+    return null;
+  }
+}
+
+function attachVideoReview(clip: Clip, review: VideoSnapshotReview | null): Clip {
+  if (!review) return clip;
+  clip.videoReview = review;
+  if (!clip.characterBinding) return clip;
+  clip.characterBinding.consistencyReview = {
+    identity: review.characterMatch,
+    wardrobe: "needs_review",
+    style: review.visualQuality,
+    temporal: review.storyMatch,
+    notes: review.continuityNotes,
+  };
+  clip.characterBinding.videoReview = review;
+  if (clip.generatedBy?.characterBinding) {
+    clip.generatedBy.characterBinding.consistencyReview =
+      clip.characterBinding.consistencyReview;
+    clip.generatedBy.characterBinding.videoReview = review;
+  }
+  return clip;
+}
+
+async function reviewClipIfPossible(input: {
+  goal: string;
+  plan: EditPlan;
+  beat: Beat;
+  beatIndex: number;
+  prompt: string;
+  clip: Clip;
+}): Promise<Clip> {
+  const review = await optionalRunStep("video snapshot review", () =>
+    reviewGeneratedVideoSnapshots({
+      goal: input.goal,
+      plan: input.plan,
+      beat: input.beat,
+      beatIndex: input.beatIndex,
+      providerPrompt: input.prompt,
+      videoPath: path.join(process.cwd(), "public", input.clip.url),
+      durationSec: input.clip.durationSec,
+    })
+  );
+  return attachVideoReview(input.clip, review);
+}
+
+function promptWithVisualFeedback(prompt: string, review: VideoSnapshotReview): string {
+  return [
+    prompt,
+    "[PREVIOUS VISUAL REVIEW FEEDBACK]",
+    `Story match: ${review.storyMatch}.`,
+    `Character match: ${review.characterMatch}.`,
+    `Visual quality: ${review.visualQuality}.`,
+    `Reviewer notes: ${review.continuityNotes}`,
+    "Regenerate the shot to fix these issues while preserving the full story arc, current beat intent, and character identity.",
+  ].join("\n");
+}
+
+async function generateBeatClipWithReview(input: {
+  provider: VisualProvider;
+  clipInput: {
+    prompt: string;
+    description: string;
+    size: string;
+    displaySec: number;
+    seconds: number;
+  };
+  goal: string;
+  plan: EditPlan;
+  beat: Beat;
+  beatIndex: number;
+}): Promise<Clip> {
+  const firstClip = await reviewClipIfPossible({
+    goal: input.goal,
+    plan: input.plan,
+    beat: input.beat,
+    beatIndex: input.beatIndex,
+    prompt: input.clipInput.prompt,
+    clip: await generateBeatClip({ provider: input.provider, ...input.clipInput }),
+  });
+  const review = firstClip.videoReview;
+  if (review?.recommendedAction !== "regenerate") return firstClip;
+
+  const retryPrompt = promptWithVisualFeedback(input.clipInput.prompt, review);
+  console.info(
+    `[run] regenerating clip ${input.beatIndex + 1}/${input.plan.beats.length} from visual review feedback`
+  );
+  return reviewClipIfPossible({
+    goal: input.goal,
+    plan: input.plan,
+    beat: input.beat,
+    beatIndex: input.beatIndex,
+    prompt: retryPrompt,
+    clip: await generateBeatClip({
+      provider: input.provider,
+      ...input.clipInput,
+      prompt: retryPrompt,
+    }),
+  });
+}
+
 function isQuotaError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
@@ -208,7 +321,8 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       "creative_plan",
       `Planning a ${targetLengthSec}-second ${style}…`
     );
-    let plan;
+    let plan: EditPlan;
+    let preGenerationReview: PlanCritiqueReport | null = null;
     try {
       plan = await planEdit({
         goal,
@@ -222,6 +336,18 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       await failStage(runId, "creative_plan", error);
       await markRunFailed(runId, error);
       return;
+    }
+    preGenerationReview = await optionalRunStep("pre-generation plan review", () =>
+      critiquePlan({
+        goal,
+        plan,
+        style,
+        aspectRatio,
+        storyContext,
+      })
+    );
+    if (preGenerationReview?.revisedPlan?.beats?.length) {
+      plan = preGenerationReview.revisedPlan;
     }
     if (!plan.beats || plan.beats.length === 0) {
       const error = {
@@ -265,7 +391,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
         };
         let clip: Clip;
         try {
-          clip = await generateBeatClip({ provider, ...clipInput });
+          clip = await generateBeatClipWithReview({
+            provider,
+            clipInput,
+            goal,
+            plan,
+            beat,
+            beatIndex: completed,
+          });
         } catch (err) {
           if (
             !providers.fallback ||
@@ -280,7 +413,14 @@ export async function executeRun(run: GenerationRun): Promise<void> {
             "asset_generation",
             `Gemini quota was exhausted; continuing with ${provider}…`
           );
-          clip = await generateBeatClip({ provider, ...clipInput });
+          clip = await generateBeatClipWithReview({
+            provider,
+            clipInput,
+            goal,
+            plan,
+            beat,
+            beatIndex: completed,
+          });
         }
         completed += 1;
         await setStageMessage(
@@ -372,6 +512,7 @@ export async function executeRun(run: GenerationRun): Promise<void> {
       clips,
       characterProfiles: [],
       characterReferences: [],
+      preGenerationReview,
       critic: report,
       chat: [],
       updatedAt: new Date().toISOString(),

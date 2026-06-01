@@ -28,6 +28,57 @@ export const planSchema = {
   required: ["targetLengthSec", "style", "aspectRatio", "beats"],
 };
 
+const planCritiqueIssueSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    severity: { type: "string", enum: ["low", "medium", "high"] },
+    area: {
+      type: "string",
+      enum: [
+        "story_arc",
+        "beat_order",
+        "character_continuity",
+        "prompt_specificity",
+        "visual_feasibility",
+        "timing",
+      ],
+    },
+    issue: str,
+    recommendation: str,
+  },
+  required: ["severity", "area", "issue", "recommendation"],
+};
+
+export const planCritiqueSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    storyArc: { type: "string", enum: ["pass", "needs_review", "fail"] },
+    characterContinuity: {
+      type: "string",
+      enum: ["pass", "needs_review", "fail"],
+    },
+    promptReadiness: { type: "string", enum: ["pass", "needs_review", "fail"] },
+    visualFeasibility: {
+      type: "string",
+      enum: ["pass", "needs_review", "fail"],
+    },
+    summary: str,
+    issues: { type: "array", items: planCritiqueIssueSchema },
+    revisedPlan: planSchema,
+  },
+  required: [
+    "storyArc",
+    "characterContinuity",
+    "promptReadiness",
+    "visualFeasibility",
+    "summary",
+    "issues",
+    "revisedPlan",
+  ],
+};
+
 export const compositionSchema = {
   type: "object",
   additionalProperties: false,
