@@ -31,9 +31,14 @@ trap ourselves in the old, forward-only "edit the timeline with patches" model.
 2. **Autonomous by default; stops are opt-in.** With no gates, it runs straight
    through (today's one-shot behavior, just observable). The user — or an
    optional gate — can pause at any artifact.
-3. **Non-one-directional / selective regeneration.** Changing one input
-   recomputes only the affected assets. Editing one part of the story arc should
-   affect only the impacted sub-video(s), never all of them.
+3. **Non-one-directional / selective regeneration — the agent decides, not a
+   rigid cascade.** Changing one input should affect only the impacted
+   sub-video(s), never all of them. The dependency graph + fingerprints (§5)
+   cheaply compute a **candidate** "possibly affected" set; that set, **plus the
+   stable IDs and provenance, is passed to the agent, which makes the final
+   call** — and may prune the cascade when it judges a change semantically
+   irrelevant (e.g. a prompt edit that has nothing to do with a given image).
+   Determinism scopes the *possibilities*; the agent decides the *actuals*.
 4. **A dependency/provenance graph is the foundation — not the agent's
    cleverness.** Minimal re-runs are only possible if the data records *what each
    asset was built from* (which beat, which anchors, which audio, which prompt /
@@ -140,8 +145,13 @@ edges + invalidation + an orchestrator**.
   maybe audio + the cut) are stale; nothing else.
 - **Generation as a first-class node**, not a side effect — so the graph can say
   "this node is stale, regenerate it" and the timeline remains a pure projection.
-- **Invalidation via input fingerprints** (hash the inputs that produced an
-  asset; recompute only what changed).
+- **Invalidation via input fingerprints — a *signal to the agent*, not a hard
+  rule.** Each asset stores a content hash of its semantic inputs (including
+  upstream asset hashes), so a change yields a cheap, deterministic **candidate
+  stale set**. The **IDs + provenance + candidate set are passed to the agent**,
+  which makes the final regeneration decision and may prune cascades it judges
+  irrelevant. (Stable IDs on every node are the prerequisite — the agent reasons
+  over IDs.)
 - **A regeneration vocabulary** beyond timeline patches: `regenerate_asset`,
   `change_beat`, `swap_anchor`, `rescore_audio`, … — the agent's tools.
 - **One creative-state aggregate with versioning**, leaning on the existing
@@ -179,9 +189,13 @@ to its anchor.
 
 ## 8. Open questions to resolve before P1 implementation
 
-- **Invalidation granularity** — per-beat vs per-asset; the input-hash strategy.
-- **First pass vs edits** — keep the initial build a deterministic default order;
-  reserve agent improvisation for re-runs?
+- ~~**Invalidation granularity**~~ **— DECIDED:** per-asset content fingerprints
+  (with nested upstream hashes) produce a *candidate* stale set; the agent
+  receives the IDs/provenance/candidates and makes the final call. Stale is a
+  signal, not a command (Principle 3, §5).
+- ~~**First pass vs edits**~~ **— DECIDED (Principle 7):** no hardcoded order;
+  determinism lives in each tool's input validation, and the agent self-heals by
+  reacting to structured failures.
 - **Re-run downstream policy** — auto-invalidate everything downstream of a
   changed node, or keep old outputs until the user/agent confirms?
 - **Trunk for creative state** — extend `Project`, or make the `/api/v1`
