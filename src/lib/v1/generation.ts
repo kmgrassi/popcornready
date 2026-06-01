@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { critique as realCritique, planEdit as realPlanEdit, selectClips as realSelectClips } from "../agent";
 import {
   EDIT_GRAPH_COMPILER_VERSION,
@@ -7,9 +6,6 @@ import {
   markGraphTimelineProjection,
 } from "../edit-graph";
 import { applyPatches, sanitizeTimeline } from "../timeline";
-import { mergeStoryContext } from "../story-context";
-import { Clip, StoryContext } from "../types";
-import { Actor } from "./actor";
 import { ApiError, ErrorCode } from "./errors";
 import {
   RunProgressEmitter,
@@ -23,16 +19,12 @@ import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
 import { V1Store } from "./store";
 import {
-  BriefVersion,
-  CompositionPlan,
   GenerationJob,
-  GenerationJobInput,
-  GenerationRequest,
   SCHEMA,
   V1Asset,
   VersionedTimeline,
-  VideoBriefInput,
 } from "./types";
+import { assetToClip, briefToStoryContext } from "./generation/prepare";
 
 // PR4 — timeline generation from agent inputs.
 //
@@ -41,287 +33,8 @@ import {
 // (runGenerationJob). The model-backed plan/select/critique calls are injected
 // so the executor can be exercised deterministically and offline in tests.
 
-// --- Mapping helpers -------------------------------------------------------
-
-export function briefToStoryContext(brief: VideoBriefInput): StoryContext {
-  const partial: StoryContext = {};
-  if (brief.audience) partial.audience = brief.audience;
-  if (brief.platform) partial.platform = brief.platform;
-  if (brief.format) partial.format = brief.format;
-  if (brief.constraints?.callToAction) {
-    partial.callToAction = brief.constraints.callToAction;
-  }
-  return mergeStoryContext(partial);
-}
-
-// The agent layer reasons over MVP Clips; map a v1 asset onto that shape.
-export function assetToClip(asset: V1Asset): Clip {
-  return {
-    id: asset.id,
-    filename: asset.filename,
-    url: asset.url,
-    kind: asset.kind,
-    durationSec: asset.durationSec,
-    description: asset.description || "",
-    source: asset.source === "generated" ? "generated" : "upload",
-  };
-}
-
-// --- Validation / resolution ----------------------------------------------
-
-export async function prepareGeneration(
-  store: V1Store,
-  projectId: string,
-  body: GenerationRequest
-): Promise<GenerationJobInput> {
-  const project = await store.getProject(projectId);
-  if (!project || project.status === "deleted") {
-    throw new ApiError("not_found", `Project not found: ${projectId}`);
-  }
-
-  const briefVersionId = String(body.briefVersionId || "").trim();
-  if (!briefVersionId) {
-    throw new ApiError("brief_missing", "briefVersionId is required.", {
-      fields: [{ path: "briefVersionId", message: "Required." }],
-    });
-  }
-  const brief = await store.getBriefVersion(briefVersionId);
-  if (!brief || brief.projectId !== projectId) {
-    throw new ApiError("not_found", `Brief version not found: ${briefVersionId}`);
-  }
-
-  const variantCount = body.variantCount === undefined ? 1 : Number(body.variantCount);
-  if (!Number.isInteger(variantCount) || variantCount < 1) {
-    throw new ApiError("validation_failed", "variantCount must be a positive integer.", {
-      fields: [{ path: "variantCount", message: "Must be an integer >= 1." }],
-    });
-  }
-  if (variantCount > 1) {
-    throw new ApiError(
-      "validation_failed",
-      "Multi-variant generation is not supported in v1; variantCount must be 1.",
-      { fields: [{ path: "variantCount", message: "Only 1 is supported in v1." }] }
-    );
-  }
-
-  const requestedAssetIds: string[] = Array.isArray(body.assetIds)
-    ? body.assetIds.map((id) => String(id))
-    : [];
-  const compositionId = body.compositionId ? String(body.compositionId) : undefined;
-
-  let composition: CompositionPlan | null = null;
-  if (compositionId) {
-    composition = await store.getComposition(compositionId);
-    if (!composition || composition.projectId !== projectId) {
-      throw new ApiError("not_found", `Composition not found: ${compositionId}`);
-    }
-    // The composition must have been planned for this exact brief version,
-    // otherwise its generated assets and the timeline plan would come from
-    // different briefs and the stored provenance would mislink them.
-    if (composition.briefVersionId !== briefVersionId) {
-      throw new ApiError(
-        "validation_failed",
-        `Composition ${compositionId} was planned for a different brief version (${composition.briefVersionId}).`,
-        {
-          fields: [
-            {
-              path: "compositionId",
-              message: "Composition brief version does not match briefVersionId.",
-            },
-          ],
-        }
-      );
-    }
-  }
-
-  let assetIds: string[];
-  if (requestedAssetIds.length > 0) {
-    // Asset-driven or hybrid: the agent supplies the asset set explicitly.
-    assetIds = requestedAssetIds;
-  } else if (composition) {
-    // Prompt-only: assetIds may be empty only when the composition is done.
-    if (composition.status !== "ready_for_timeline") {
-      throw new ApiError(
-        "validation_failed",
-        `Composition ${compositionId} is not ready for timeline (status: ${composition.status}).`
-      );
-    }
-    if (composition.readyAssetIds.length === 0) {
-      throw new ApiError(
-        "validation_failed",
-        `Composition ${compositionId} has no ready assets to build a timeline from.`
-      );
-    }
-    assetIds = composition.readyAssetIds;
-  } else {
-    throw new ApiError(
-      "validation_failed",
-      "assetIds is required unless compositionId points to a completed composition.",
-      { fields: [{ path: "assetIds", message: "Provide assetIds or a ready compositionId." }] }
-    );
-  }
-
-  // Every selected asset must exist, belong to the project, and be ready.
-  const resolved: V1Asset[] = [];
-  for (const id of assetIds) {
-    const asset = await store.getAsset(id);
-    if (!asset || asset.projectId !== projectId) {
-      throw new ApiError("asset_invalid", `Asset not found in project: ${id}`, {
-        fields: [{ path: "assetIds", message: `Unknown asset: ${id}` }],
-      });
-    }
-    if (asset.status !== "ready") {
-      throw new ApiError("asset_not_ready", `Asset ${id} is not ready (status: ${asset.status}).`, {
-        fields: [{ path: "assetIds", message: `Asset ${id} is ${asset.status}.` }],
-      });
-    }
-    resolved.push(asset);
-  }
-
-  // Clip selection needs at least one ready visual (video/image) asset.
-  if (resolved.filter((a) => a.kind !== "audio").length === 0) {
-    throw new ApiError(
-      "validation_failed",
-      "At least one ready video or image asset is required to build a timeline."
-    );
-  }
-
-  const generatedAssetJobIds = new Set<string>(composition?.generatedAssetJobIds ?? []);
-  for (const asset of resolved) {
-    if (asset.generatedAssetJobId) generatedAssetJobIds.add(asset.generatedAssetJobId);
-  }
-
-  const showCaptions = body.showCaptions;
-  if (showCaptions !== undefined && typeof showCaptions !== "boolean") {
-    throw new ApiError("validation_failed", "showCaptions must be a boolean.", {
-      fields: [{ path: "showCaptions", message: "Must be true or false." }],
-    });
-  }
-
-  return {
-    briefVersionId,
-    ...(compositionId ? { compositionId } : {}),
-    assetIds,
-    generatedAssetJobIds: [...generatedAssetJobIds],
-    ...(showCaptions === undefined ? {} : { showCaptions }),
-    variantCount,
-  };
-}
-
-// --- Idempotency -----------------------------------------------------------
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function idempotencyScope(actor: Actor, projectId: string, key: string): string {
-  return sha256(
-    `${actor.workspaceId}|POST|/api/v1/projects/${projectId}/generations|${key}`
-  );
-}
-
-// Canonical hash of the original request body. Idempotency compares the
-// request a client sent, not the resolved inputs — resolved inputs depend on
-// mutable asset/composition state that may change between retries, and a retry
-// after network loss must replay the original job regardless.
-function requestBodyHash(body: GenerationRequest): string {
-  return sha256(
-    JSON.stringify({
-      briefVersionId: body.briefVersionId ?? null,
-      compositionId: body.compositionId ?? null,
-      assetIds: Array.isArray(body.assetIds) ? body.assetIds.map((id) => String(id)) : [],
-      variantCount: body.variantCount ?? 1,
-      audioAlignment: body.audioAlignment ?? null,
-      showCaptions: body.showCaptions ?? null,
-    })
-  );
-}
-
-// --- Job creation ----------------------------------------------------------
-
-function buildJob(
-  actor: Actor,
-  projectId: string,
-  input: GenerationJobInput,
-  options: { idempotencyKey?: string; requestId?: string }
-): GenerationJob {
-  const now = new Date().toISOString();
-  return {
-    id: ids.jobId(),
-    schemaVersion: SCHEMA.job,
-    workspaceId: actor.workspaceId,
-    projectId,
-    ...(options.requestId ? { requestId: options.requestId } : {}),
-    type: "generation",
-    status: "queued",
-    progress: { currentStep: "validating_request", stepStartedAt: now, percent: 0 },
-    input,
-    result: null,
-    error: null,
-    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-export async function createGenerationJob(args: {
-  store: V1Store;
-  actor: Actor;
-  projectId: string;
-  body: GenerationRequest;
-  idempotencyKey?: string;
-  requestId?: string;
-  logger?: Logger;
-}): Promise<GenerationJob> {
-  const { store, actor, projectId, body, idempotencyKey, requestId } = args;
-  const logger =
-    args.logger ??
-    createLogger({
-      requestId,
-      workspaceId: actor.workspaceId,
-      projectId,
-      jobType: "generation",
-    });
-
-  if (idempotencyKey) {
-    const scope = idempotencyScope(actor, projectId, idempotencyKey);
-    const requestHash = requestBodyHash(body);
-    const existing = await store.getIdempotency(scope);
-    if (existing) {
-      if (existing.requestHash !== requestHash) {
-        throw new ApiError(
-          "idempotency_conflict",
-          "Idempotency-Key was reused with a different request body."
-        );
-      }
-      // Same key + same body: replay the original job without re-validating
-      // or re-resolving, so changed asset/composition state can't turn a retry
-      // into a spurious error.
-      const prior = (await store.getJob(existing.jobId)) as GenerationJob | null;
-      if (prior) {
-        logger.info("job.replayed", { jobId: prior.id, idempotencyKey });
-        return prior;
-      }
-      // Record exists but the job is gone — fall through and recreate it.
-    }
-    const input = await prepareGeneration(store, projectId, body);
-    const job = buildJob(actor, projectId, input, { idempotencyKey, requestId });
-    await store.saveJob(job);
-    await store.saveIdempotency(scope, {
-      requestHash,
-      jobId: job.id,
-      createdAt: new Date().toISOString(),
-    });
-    logger.info("job.created", { jobId: job.id, idempotent: true });
-    return job;
-  }
-
-  const input = await prepareGeneration(store, projectId, body);
-  const job = buildJob(actor, projectId, input, { requestId });
-  await store.saveJob(job);
-  logger.info("job.created", { jobId: job.id, idempotent: false });
-  return job;
-}
+export { createGenerationJob } from "./generation/create-job";
+export { assetToClip, briefToStoryContext, prepareGeneration } from "./generation/prepare";
 
 // --- Execution -------------------------------------------------------------
 
