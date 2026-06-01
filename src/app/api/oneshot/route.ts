@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fs } from "fs";
 import path from "path";
 import { saveProject } from "@/lib/store";
 import { critique, critiquePlan, planEdit } from "@/lib/agent";
@@ -55,6 +56,13 @@ export const dynamic = "force-dynamic";
 // Per-beat video generation is slow. Give the request headroom while we move
 // toward the async run/polling pipeline.
 export const maxDuration = 800;
+
+const POPCORN_READY_SCREEN_REFERENCE = path.join(
+  process.cwd(),
+  "public",
+  "reference",
+  "popcorn-ready-screen.png"
+);
 
 function attachVideoReview(clip: Clip, review: VideoSnapshotReview | null): Clip {
   if (!review) return clip;
@@ -301,6 +309,13 @@ export async function POST(req: NextRequest) {
         `[oneshot] resuming with ${clips.length}/${plan.beats.length} existing generated clips`
       );
     }
+    let popcornScreenRef: string | undefined;
+    try {
+      await fs.access(POPCORN_READY_SCREEN_REFERENCE);
+      popcornScreenRef = POPCORN_READY_SCREEN_REFERENCE;
+    } catch {
+      popcornScreenRef = undefined;
+    }
     let provider = providers.primary;
     let soundtrack: Clip | null = existingSoundtrack;
 
@@ -381,7 +396,9 @@ export async function POST(req: NextRequest) {
           }
           firstFrameAssetId = keyframe.asset.id;
         }
-        const firstFramePath = keyframe?.path;
+        const isClosingBeat = index === plan.beats.length - 1;
+        const firstFramePath =
+          isClosingBeat && popcornScreenRef ? popcornScreenRef : keyframe?.path;
         try {
           console.info(
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}` +

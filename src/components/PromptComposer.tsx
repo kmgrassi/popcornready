@@ -8,6 +8,14 @@ import {
   GateableGenerationStageType,
 } from "@/lib/v1/types";
 
+const FEATURED_TEMPLATE: { icon: string; label: string; text: string; prompt: string } = {
+  icon: "🏆",
+  label: "Movie dream montage",
+  text: "The movie-loving boy who trades clunky editing tools for Popcorn Ready and wins Best Picture",
+  prompt:
+    "Create a 30-second cinematic story. Open on a 10-year-old movie-loving boy in his bedroom late at night, hunched over a computer running traditional video editing software — the screen is a cluttered, complex timeline crammed with dozens of video clips he is struggling to splice together. He looks frustrated and overwhelmed as the edit fights him. Then he discovers the website “Popcorn Ready,” and everything changes. Build a montage with gradually rising orchestral music as he creates a movie, goes from idea to production, and sees it released to adoring fans. Show him as a famous filmmaker at a packed premiere, then at an awards show selected for Best Picture as he walks up to the microphone and begins, “I would like to thank...”. End where it began: he is slumped asleep over his desk, then stirs, lifts his head, and looks up to see the Popcorn Ready screen glowing on his computer — the movie of his dreams can now be made.",
+};
+
 const TEMPLATES: { icon: string; label: string; text: string; prompt: string }[] = [
   {
     icon: "🍂",
@@ -126,8 +134,17 @@ export function PromptComposer() {
   const [templateIndex, setTemplateIndex] = useState(0);
   const activeTemplate = TEMPLATES[templateIndex];
   const [activeStage, setActiveStage] = useState(0);
-  const [showReviewConfig, setShowReviewConfig] = useState(false);
   const [reviewGates, setReviewGates] = useState<GateableGenerationStageType[]>([]);
+  // Generation length in seconds — the first real run "config" surfaced in the
+  // settings panel that extends the prompt box.
+  const [lengthSec, setLengthSec] = useState(30);
+  // Settings panel that extends the prompt box (opened from the cog on the
+  // Create button); collapsed by default. More config moves in over time.
+  const [configOpen, setConfigOpen] = useState(false);
+  // Scaffold only: captures a chosen reference image filename for display. It is
+  // not yet uploaded or forwarded to the one-shot route — wiring it into the
+  // request body + per-beat referencePaths is a follow-up.
+  const [referenceImageName, setReferenceImageName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!submitting) {
@@ -152,14 +169,6 @@ export function PromptComposer() {
     }, 5000);
     return () => window.clearInterval(interval);
   }, []);
-
-  function openReviewConfig(promptOverride?: string) {
-    const goal = (promptOverride ?? value).trim();
-    if (!goal || submitting) return;
-    setValue(goal);
-    setError(null);
-    setShowReviewConfig(true);
-  }
 
   function toggleReviewGate(stage: GateableGenerationStageType) {
     setReviewGates((current) =>
@@ -196,7 +205,7 @@ export function PromptComposer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           goal,
-          targetLengthSec: 30,
+          targetLengthSec: lengthSec,
           style: "cinematic story",
           aspectRatio: "9:16",
           reviewGates,
@@ -211,7 +220,9 @@ export function PromptComposer() {
         );
       }
       setActiveStage(5);
-      router.push(`/studio?goal=${encodeURIComponent(goal)}&length=30`);
+      router.push(
+        `/studio?goal=${encodeURIComponent(goal)}&length=${lengthSec}`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -220,6 +231,24 @@ export function PromptComposer() {
 
   return (
     <div className="lp-prompt">
+      <button
+        type="button"
+        className="lp-featured-template"
+        onClick={() => setValue(FEATURED_TEMPLATE.prompt)}
+        disabled={submitting}
+        title={FEATURED_TEMPLATE.prompt}
+      >
+        <span className="lp-featured-template-icon" aria-hidden="true">
+          {FEATURED_TEMPLATE.icon}
+        </span>
+        <span className="lp-featured-template-copy">
+          <span className="lp-featured-template-label">{FEATURED_TEMPLATE.label}</span>
+          <span className="lp-featured-template-text">{FEATURED_TEMPLATE.text}</span>
+        </span>
+        <span className="lp-featured-template-cta" aria-hidden="true">
+          Use this
+        </span>
+      </button>
       <label htmlFor="goal" className="lp-prompt-label">
         What&apos;s your video?
       </label>
@@ -231,7 +260,7 @@ export function PromptComposer() {
         placeholder="e.g. A social ad that hooks fast, shows the problem, demos the product, and ends with a strong CTA."
         rows={3}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) openReviewConfig();
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start();
         }}
       />
       <div className="lp-templates">
@@ -251,93 +280,135 @@ export function PromptComposer() {
         <button
           type="button"
           className="lp-template-generate"
-          onClick={() => openReviewConfig(activeTemplate.prompt)}
+          onClick={() => setValue(activeTemplate.prompt)}
           disabled={submitting}
         >
           Use template
         </button>
       </div>
-      <button
-        type="button"
-        className="lp-prompt-submit"
-        onClick={() => openReviewConfig()}
-        disabled={!value.trim() || submitting}
-      >
-        {submitting
-          ? "Starting your run..."
-          : "Create my 30-second video"}
-      </button>
-      {showReviewConfig && (
-        <div
-          className="lp-review-config"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="lp-review-config-title"
-        >
-          <div className="lp-review-config-panel">
-            <div className="lp-review-config-head">
-              <div>
-                <p className="lp-review-config-eyebrow">Review checkpoints</p>
-                <h2 id="lp-review-config-title">Choose where to pause</h2>
+      <div className="lp-submit">
+        <div className="lp-submit-split">
+          <button
+            type="button"
+            className="lp-prompt-submit"
+            onClick={() => start()}
+            disabled={!value.trim() || submitting}
+          >
+            {submitting
+              ? "Starting your run..."
+              : `Create my ${lengthSec}-second video`}
+          </button>
+          <button
+            type="button"
+            className="lp-submit-config-toggle"
+            onClick={() => setConfigOpen((open) => !open)}
+            disabled={submitting}
+            aria-expanded={configOpen}
+            aria-controls="lp-config-panel"
+            aria-label="Generation settings"
+            title="Generation settings"
+          >
+            <svg
+              className="lp-cog"
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
+        {configOpen && (
+          <div id="lp-config-panel" className="lp-config-panel">
+            <div className="lp-config-panel-head">Settings</div>
+            <section className="lp-config-section">
+              <h3 className="lp-config-heading">Length</h3>
+              <p className="lp-config-hint">
+                How long the finished video should be.
+              </p>
+              <select
+                className="lp-config-select"
+                value={lengthSec}
+                onChange={(e) => setLengthSec(Number(e.target.value))}
+                disabled={submitting}
+              >
+                <option value={15}>15 seconds</option>
+                <option value={30}>30 seconds</option>
+                <option value={60}>60 seconds</option>
+              </select>
+            </section>
+            <section className="lp-config-section">
+              <h3 className="lp-config-heading">Default review checkpoints</h3>
+              <p className="lp-config-hint">
+                Pre-select where the one-shot run should pause for your review.
+                Leave all off to generate end to end.
+              </p>
+              <div className="lp-review-options">
+                {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
+                  const checked = reviewGates.includes(stage);
+                  return (
+                    <label className="lp-review-option" key={stage}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleReviewGate(stage)}
+                        disabled={submitting}
+                      />
+                      <span>
+                        <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
+                        <small>{REVIEW_STAGE_DETAILS[stage]}</small>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
               <button
                 type="button"
-                className="lp-review-config-close"
-                onClick={() => setShowReviewConfig(false)}
-                disabled={submitting}
-                aria-label="Close review checkpoint settings"
-              >
-                x
-              </button>
-            </div>
-            <div className="lp-review-options">
-              {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
-                const checked = reviewGates.includes(stage);
-                return (
-                  <label className="lp-review-option" key={stage}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleReviewGate(stage)}
-                      disabled={submitting}
-                    />
-                    <span>
-                      <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
-                      <small>{REVIEW_STAGE_DETAILS[stage]}</small>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            <div className="lp-review-config-actions">
-              <button
-                type="button"
-                className="lp-review-secondary"
+                className="lp-config-link"
                 onClick={selectAllReviewGates}
                 disabled={submitting}
               >
                 {reviewGates.length === GATEABLE_GENERATION_STAGE_TYPES.length
-                  ? "Clear reviews"
+                  ? "Clear all reviews"
                   : "Review every step"}
               </button>
-              <button
-                type="button"
-                className="lp-review-primary"
-                onClick={() => start()}
-                disabled={submitting}
-              >
-                {submitting
-                  ? "Starting..."
-                  : reviewGates.length === 0
-                    ? "YOLO, let's go"
-                    : `Start with ${reviewGates.length} review${
-                        reviewGates.length === 1 ? "" : "s"
-                      }`}
-              </button>
-            </div>
+            </section>
+
+            <section className="lp-config-section">
+              <h3 className="lp-config-heading">Reference image</h3>
+              <p className="lp-config-hint">
+                Optional. Upload an image (for example a Popcorn Ready
+                screenshot) to anchor a shot. Not yet wired into generation —
+                this is a placeholder for the upcoming image-to-video input.
+              </p>
+              <label className="lp-config-upload">
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) =>
+                    setReferenceImageName(e.target.files?.[0]?.name ?? null)
+                  }
+                  disabled={submitting}
+                />
+                <span>Upload image</span>
+              </label>
+              {referenceImageName && (
+                <p className="lp-config-upload-name">
+                  Selected: {referenceImageName}
+                </p>
+              )}
+            </section>
           </div>
-        </div>
-      )}
+        )}
+      </div>
       {submitting && (
         <div className="lp-generation-progress" aria-live="polite">
           <div className="lp-generation-progress-head">
