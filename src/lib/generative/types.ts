@@ -148,6 +148,13 @@ export interface GeminiVideoRequest extends BaseGenerateAssetRequest {
   seconds?: number;
 }
 
+export interface GeminiImageRequest extends BaseGenerateAssetRequest {
+  provider: "gemini";
+  kind: "image";
+  model?: string;
+  size?: string;
+}
+
 export interface RunwayVideoRequest extends BaseGenerateAssetRequest {
   provider: "runway";
   kind: "video";
@@ -213,6 +220,7 @@ export type GenerateAssetRequest =
   | OpenAIImageRequest
   | OpenAIVideoRequest
   | GeminiVideoRequest
+  | GeminiImageRequest
   | RunwayVideoRequest
   | LtxVideoRequest
   | MockImageRequest

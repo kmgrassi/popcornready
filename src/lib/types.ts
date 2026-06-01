@@ -56,6 +56,44 @@ export interface CharacterConsistencyReview {
   notes?: string;
 }
 
+export type ReviewGrade = "pass" | "needs_review" | "fail";
+
+export interface PlanCritiqueIssue {
+  severity: "low" | "medium" | "high";
+  area:
+    | "story_arc"
+    | "beat_order"
+    | "character_continuity"
+    | "prompt_specificity"
+    | "visual_feasibility"
+    | "timing";
+  issue: string;
+  recommendation: string;
+}
+
+export interface PlanCritiqueReport {
+  storyArc: ReviewGrade;
+  characterContinuity: ReviewGrade;
+  promptReadiness: ReviewGrade;
+  visualFeasibility: ReviewGrade;
+  summary: string;
+  issues: PlanCritiqueIssue[];
+  revisedPlan: EditPlan;
+}
+
+export interface VideoSnapshotReview {
+  storyMatch: ReviewGrade;
+  characterMatch: ReviewGrade;
+  visualQuality: ReviewGrade;
+  continuityNotes: string;
+  recommendedAction: "keep" | "regenerate" | "manual_review";
+  snapshots: string[];
+  reviewer: {
+    provider: string;
+    model?: string;
+  };
+}
+
 export interface GeneratedAssetCharacterBinding {
   assetId: string;
   characterProfileIds: string[];
@@ -74,6 +112,7 @@ export interface GeneratedAssetCharacterBinding {
     promptInvariantVersion: string;
   };
   consistencyReview?: CharacterConsistencyReview;
+  videoReview?: VideoSnapshotReview;
 }
 
 export interface Clip {
@@ -98,6 +137,7 @@ export interface Clip {
     costUsd?: number;
   };
   characterBinding?: GeneratedAssetCharacterBinding;
+  videoReview?: VideoSnapshotReview;
 }
 
 export interface Beat {
@@ -345,6 +385,7 @@ export interface Project {
   characterReferences?: CharacterReference[];
   compositions?: CompositionPlan[];
   assetGenerationJobs?: AssetGenerationJob[];
+  preGenerationReview?: PlanCritiqueReport | null;
   critic: CriticReport | null;
   chat: ChatMessage[];
   updatedAt: string;

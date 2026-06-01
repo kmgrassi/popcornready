@@ -7,6 +7,7 @@ import { OpenAIVideoSeconds } from "@/lib/generative/types";
 import type { CharacterGenerationContext } from "@/lib/generative/types";
 import {
   buildOneShotCharacterDraft,
+  describeRecurringCharacter,
   oneShotCharacterBinding,
   oneShotCharacterContext,
   oneShotHeroFramePrompt,
@@ -20,6 +21,7 @@ import {
 import { soundtrackPrompt } from "./prompts";
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
+const KEYFRAME_DIR = path.join(GENERATED_DIR, "keyframes");
 
 export async function generateBeatClip(input: {
   provider: VideoProvider;
@@ -29,11 +31,13 @@ export async function generateBeatClip(input: {
   displaySec: number;
   seconds?: OpenAIVideoSeconds;
   characterContext?: CharacterGenerationContext;
-  referenceImageOverride?: string;
+  // When set, this image is the image-to-video first frame instead of the
+  // static character hero portrait.
+  firstFramePath?: string;
 }): Promise<Clip> {
   const provider = providerFor(input.provider);
-  const referencePaths = input.referenceImageOverride
-    ? [input.referenceImageOverride]
+  const referencePaths = input.firstFramePath
+    ? [input.firstFramePath]
     : input.characterContext?.references.map((reference) => reference.path);
   const baseRequest = {
     prompt: input.prompt,
@@ -221,6 +225,51 @@ export async function generateCharacterHeroFrame(input: {
     },
     path: filePath,
   };
+}
+
+// Generate a per-beat keyframe: a fresh image of the SAME character (conditioned
+// on the hero frame) in this beat's pose/scene, to seed image-to-video. This
+// replaces seeding every clip with the one static hero portrait, which made
+// every shot open identically. Returns the saved image path, or null if Gemini
+// image generation is unavailable/fails (caller falls back to the hero frame).
+export async function generateBeatKeyframe(input: {
+  goal: string;
+  style: string;
+  beat: Beat;
+  beatIndex: number;
+  totalBeats: number;
+  aspectRatio: string;
+  heroPath: string;
+}): Promise<string | null> {
+  if (!process.env.GEMINI_API_KEY) return null;
+
+  const character = describeRecurringCharacter(input.goal);
+  const prompt = [
+    "Using the SAME character from the reference image (same face, hair, build, and wardrobe anchors), create a NEW cinematic photographic still.",
+    `${input.aspectRatio} aspect-ratio framing.`,
+    "[CHARACTER INVARIANTS]",
+    character.identityInvariants,
+    character.wardrobeInvariants,
+    character.negativePrompt,
+    "[SHOT]",
+    `Beat ${input.beatIndex + 1} of ${input.totalBeats} — ${input.beat.name}: ${input.beat.intent}.`,
+    `Visual style: ${input.style}.`,
+    "Photorealistic live-action, cinematic lighting, strong composition, depth and subject/background separation. No text, logos, captions, or watermarks.",
+  ].join(" ");
+
+  const provider = providerFor("gemini");
+  const result = await provider.generateAsset({
+    provider: "gemini",
+    kind: "image",
+    prompt,
+    referencePaths: [input.heroPath],
+  });
+
+  await fs.mkdir(KEYFRAME_DIR, { recursive: true });
+  const filename = `${newId("kf")}.${result.extension}`;
+  const filePath = path.join(KEYFRAME_DIR, filename);
+  await fs.writeFile(filePath, result.bytes);
+  return filePath;
 }
 
 export async function generateSoundtrack(input: {
