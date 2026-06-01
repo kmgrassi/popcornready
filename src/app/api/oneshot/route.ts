@@ -41,6 +41,17 @@ export const maxDuration = 800;
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
+// Hardcoded for now: a screenshot of the Popcorn Ready landing page, passed as
+// the image-to-video reference on the final beat so the closing shot is anchored
+// to the real product UI ("the boy looks up and sees the Popcorn Ready screen").
+// TODO: replace with a user-supplied reference image from the prompt UI.
+const POPCORN_READY_SCREEN_REFERENCE = path.join(
+  process.cwd(),
+  "public",
+  "reference",
+  "popcorn-ready-screen.png"
+);
+
 type VideoProvider = "openai" | "gemini" | "runway" | "ltx";
 
 function newId(prefix: string): string {
@@ -237,11 +248,14 @@ async function generateBeatClip(input: {
   displaySec: number;
   seconds?: OpenAIVideoSeconds;
   characterContext?: CharacterGenerationContext;
+  // When set, this image is used as the image-to-video reference (first frame)
+  // instead of the character hero frame. Hardcoded today for the final beat.
+  referenceImageOverride?: string;
 }): Promise<Clip> {
   const provider = providerFor(input.provider);
-  const referencePaths = input.characterContext?.references.map(
-    (reference) => reference.path
-  );
+  const referencePaths = input.referenceImageOverride
+    ? [input.referenceImageOverride]
+    : input.characterContext?.references.map((reference) => reference.path);
   const baseRequest = {
     prompt: input.prompt,
     size: input.size,
@@ -659,6 +673,16 @@ export async function POST(req: NextRequest) {
         `[oneshot] resuming with ${clips.length}/${plan.beats.length} existing generated clips`
       );
     }
+    // Hardcoded reference image for the final beat (see constant above). Only
+    // used if the screenshot file is present, so a missing file degrades to the
+    // normal character-reference behavior instead of erroring the run.
+    let popcornScreenRef: string | undefined;
+    try {
+      await fs.access(POPCORN_READY_SCREEN_REFERENCE);
+      popcornScreenRef = POPCORN_READY_SCREEN_REFERENCE;
+    } catch {
+      popcornScreenRef = undefined;
+    }
     let provider = providers.primary;
     let soundtrack: Clip | null = existingSoundtrack;
     try {
@@ -683,12 +707,20 @@ export async function POST(req: NextRequest) {
                 providerPrompt: clipInput.prompt,
               })
             : undefined;
+        // Anchor only the closing shot to the real Popcorn Ready UI.
+        const referenceImageOverride =
+          index === plan.beats.length - 1 ? popcornScreenRef : undefined;
         try {
           console.info(
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
           clips.push(
-            await generateBeatClip({ provider, ...clipInput, characterContext })
+            await generateBeatClip({
+              provider,
+              ...clipInput,
+              characterContext,
+              referenceImageOverride,
+            })
           );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -717,7 +749,12 @@ export async function POST(req: NextRequest) {
           );
           provider = providers.fallback;
           clips.push(
-            await generateBeatClip({ provider, ...clipInput, characterContext })
+            await generateBeatClip({
+              provider,
+              ...clipInput,
+              characterContext,
+              referenceImageOverride,
+            })
           );
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
