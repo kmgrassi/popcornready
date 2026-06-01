@@ -23,6 +23,25 @@ export interface StructuredCallArgs {
   maxTokens?: number;
 }
 
+export interface StructuredVisionImage {
+  path: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+}
+
+export interface StructuredVisionCallArgs extends StructuredCallArgs {
+  images: StructuredVisionImage[];
+}
+
+function parseStructuredText<T>(text: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      "Model did not return valid JSON. Raw output: " + text.slice(0, 500)
+    );
+  }
+}
+
 // One structured JSON call. Uses output_config.format to constrain the
 // response to the given JSON schema, so we can JSON.parse the text block
 // safely. Cast to any keeps this resilient to SDK type-version drift while
@@ -56,11 +75,58 @@ export async function structuredCall<T>({
       .map((b: any) => b.text)
       .join("") || "";
 
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(
-      "Model did not return valid JSON. Raw output: " + text.slice(0, 500)
-    );
-  }
+  return parseStructuredText<T>(text);
+}
+
+export async function structuredVisionCall<T>({
+  cachedSystem,
+  user,
+  schema,
+  images,
+  maxTokens = 4000,
+}: StructuredVisionCallArgs): Promise<T> {
+  const imageBlocks = await Promise.all(
+    images.map(async (image) => {
+      const { promises: fs } = await import("fs");
+      const bytes = await fs.readFile(image.path);
+      return {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: image.mediaType,
+          data: bytes.toString("base64"),
+        },
+      };
+    })
+  );
+
+  const res: any = await client().messages.create({
+    model: MODEL,
+    max_tokens: maxTokens,
+    system: [
+      {
+        type: "text",
+        text: cachedSystem,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    output_config: {
+      effort: "high",
+      format: { type: "json_schema", schema },
+    },
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: user }, ...imageBlocks],
+      },
+    ],
+  } as any);
+
+  const text: string =
+    (res.content || [])
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("") || "";
+
+  return parseStructuredText<T>(text);
 }

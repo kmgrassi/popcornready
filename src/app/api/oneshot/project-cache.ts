@@ -10,6 +10,7 @@ import {
   CharacterReference,
   Clip,
   EditPlan,
+  PlanCritiqueReport,
   StoryContext,
   TimelineSegment,
 } from "@/lib/types";
@@ -19,6 +20,7 @@ export async function savePartialProject(input: {
   goal: string;
   storyContext: StoryContext;
   plan: EditPlan;
+  preGenerationReview?: PlanCritiqueReport | null;
   aspectRatio: AspectRatio;
   clips: Clip[];
   soundtrack?: Clip | null;
@@ -67,6 +69,7 @@ export async function savePartialProject(input: {
     clips,
     characterProfiles: input.characterProfiles,
     characterReferences: input.characterReferences,
+    preGenerationReview: input.preGenerationReview || null,
     critic: null,
     chat: [],
     updatedAt: new Date().toISOString(),

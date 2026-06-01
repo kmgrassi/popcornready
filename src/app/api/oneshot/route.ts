@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import path from "path";
 import { saveProject } from "@/lib/store";
-import { critique, planEdit } from "@/lib/agent";
+import { critique, critiquePlan, planEdit } from "@/lib/agent";
 import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
 import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
+import { reviewGeneratedVideoSnapshots } from "@/lib/generative/video-snapshot-review";
+import type {
+  CharacterGenerationContext,
+  OpenAIVideoSeconds,
+} from "@/lib/generative/types";
 import {
   AspectRatio,
+  Beat,
+  CharacterProfile,
   Clip,
   CriticReport,
+  EditPlan,
   Patch,
   Project,
   StoryContext,
   Timeline,
   TimelineSegment,
+  VideoSnapshotReview,
 } from "@/lib/types";
 import { mergeStoryContext } from "@/lib/story-context";
 import { oneShotCharacterContext } from "@/lib/oneshot/character-reference";
@@ -34,11 +44,138 @@ import {
   savePartialProject,
   videoSizeForAspect,
 } from "./helpers";
+import type { VideoProvider } from "./helpers";
 
 export const dynamic = "force-dynamic";
 // Per-beat video generation is slow. Give the request headroom while we move
 // toward the async run/polling pipeline.
 export const maxDuration = 800;
+
+function attachVideoReview(clip: Clip, review: VideoSnapshotReview | null): Clip {
+  if (!review) return clip;
+  clip.videoReview = review;
+  const consistencyReview = {
+    identity: review.characterMatch,
+    wardrobe: "needs_review" as const,
+    style: review.visualQuality,
+    temporal: review.storyMatch,
+    notes: review.continuityNotes,
+  };
+  if (clip.characterBinding) {
+    clip.characterBinding.consistencyReview = consistencyReview;
+    clip.characterBinding.videoReview = review;
+  }
+  if (clip.generatedBy?.characterBinding) {
+    clip.generatedBy.characterBinding.consistencyReview = consistencyReview;
+    clip.generatedBy.characterBinding.videoReview = review;
+  }
+  return clip;
+}
+
+async function reviewClipIfPossible(input: {
+  goal: string;
+  plan: EditPlan;
+  beat: Beat;
+  beatIndex: number;
+  prompt: string;
+  clip: Clip;
+  characterProfiles: CharacterProfile[];
+  heroReferencePath?: string;
+}): Promise<Clip> {
+  const review = await optionalOneShotStep("video snapshot review", () =>
+    reviewGeneratedVideoSnapshots({
+      goal: input.goal,
+      plan: input.plan,
+      beat: input.beat,
+      beatIndex: input.beatIndex,
+      providerPrompt: input.prompt,
+      videoPath: path.join(process.cwd(), "public", input.clip.url),
+      durationSec: input.clip.durationSec,
+      characterProfiles: input.characterProfiles,
+      heroReferencePath: input.heroReferencePath,
+    })
+  );
+  return attachVideoReview(input.clip, review);
+}
+
+function promptWithVisualFeedback(prompt: string, review: VideoSnapshotReview): string {
+  return [
+    prompt,
+    "[PREVIOUS VISUAL REVIEW FEEDBACK]",
+    `Story match: ${review.storyMatch}.`,
+    `Character match: ${review.characterMatch}.`,
+    `Visual quality: ${review.visualQuality}.`,
+    `Reviewer notes: ${review.continuityNotes}`,
+    "Regenerate the shot to fix these issues while preserving the full story arc, current beat intent, and character identity.",
+  ].join("\n");
+}
+
+async function generateBeatClipWithReview(input: {
+  provider: VideoProvider;
+  clipInput: {
+    prompt: string;
+    description: string;
+    size: string;
+    displaySec: number;
+    seconds: OpenAIVideoSeconds;
+  };
+  characterContext?: CharacterGenerationContext;
+  firstFramePath?: string;
+  goal: string;
+  plan: EditPlan;
+  beat: Beat;
+  beatIndex: number;
+  characterProfiles: CharacterProfile[];
+  heroReferencePath?: string;
+}): Promise<Clip> {
+  const firstClip = await reviewClipIfPossible({
+    goal: input.goal,
+    plan: input.plan,
+    beat: input.beat,
+    beatIndex: input.beatIndex,
+    prompt: input.clipInput.prompt,
+    characterProfiles: input.characterProfiles,
+    heroReferencePath: input.heroReferencePath,
+    clip: await generateBeatClip({
+      provider: input.provider,
+      ...input.clipInput,
+      characterContext: input.characterContext,
+      firstFramePath: input.firstFramePath,
+    }),
+  });
+
+  const review = firstClip.videoReview;
+  if (review?.recommendedAction !== "regenerate") return firstClip;
+
+  const retryPrompt = promptWithVisualFeedback(input.clipInput.prompt, review);
+  console.info(
+    `[oneshot] regenerating clip ${input.beatIndex + 1}/${input.plan.beats.length} from visual review feedback`
+  );
+  try {
+    return await reviewClipIfPossible({
+      goal: input.goal,
+      plan: input.plan,
+      beat: input.beat,
+      beatIndex: input.beatIndex,
+      prompt: retryPrompt,
+      characterProfiles: input.characterProfiles,
+      heroReferencePath: input.heroReferencePath,
+      clip: await generateBeatClip({
+        provider: input.provider,
+        ...input.clipInput,
+        prompt: retryPrompt,
+        characterContext: input.characterContext,
+        firstFramePath: input.firstFramePath,
+      }),
+    });
+  } catch (err) {
+    console.warn(
+      `[oneshot] visual-review regeneration failed for clip ${input.beatIndex + 1}; keeping first reviewed clip`,
+      err
+    );
+    return firstClip;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,7 +197,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Plan: goal -> beats
-    const plan = await planEdit({
+    let plan = await planEdit({
       goal,
       targetLengthSec,
       style,
@@ -75,7 +212,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Create or reuse one hero-frame character reference so every video
+    // 2. Critique and revise the plan before expensive media generation.
+    const preGenerationReview = await optionalOneShotStep(
+      "pre-generation plan review",
+      () =>
+        critiquePlan({
+          goal,
+          plan,
+          style,
+          aspectRatio,
+          storyContext,
+        })
+    );
+    if (preGenerationReview?.revisedPlan?.beats?.length) {
+      plan = preGenerationReview.revisedPlan;
+    }
+
+    // 3. Create or reuse one hero-frame character reference so every video
     // beat can use the same visual anchor.
     const existingCharacter = await resumableCharacterForGoal(goal);
     const generatedCharacter = existingCharacter
@@ -99,7 +252,7 @@ export async function POST(req: NextRequest) {
       Boolean(process.env.GEMINI_API_KEY) &&
       process.env.ONESHOT_BEAT_KEYFRAMES !== "0";
 
-    // 3. Start the soundtrack before video generation and let it run in
+    // 4. Start the soundtrack before video generation and let it run in
     // parallel with the sequential video loop.
     const existingSoundtrack = includeAudio
       ? await resumableSoundtrackForGoal({ goal, style, targetLengthSec })
@@ -116,7 +269,7 @@ export async function POST(req: NextRequest) {
           )
         : Promise.resolve(existingSoundtrack);
 
-    // 4. Generate a video clip per beat from scratch (no uploads required).
+    // 5. Generate a video clip per beat from scratch (no uploads required).
     const videoSize = videoSizeForAspect(aspectRatio);
     const clips: Clip[] = (await resumableClipsForGoal(goal)).slice(
       0,
@@ -170,14 +323,19 @@ export async function POST(req: NextRequest) {
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}` +
               (firstFramePath ? " (per-beat keyframe)" : "")
           );
-          clips.push(
-            await generateBeatClip({
-              provider,
-              ...clipInput,
-              characterContext,
-              firstFramePath,
-            })
-          );
+          const generatedClip = await generateBeatClipWithReview({
+            provider,
+            clipInput,
+            characterContext,
+            firstFramePath,
+            goal,
+            plan,
+            beat,
+            beatIndex: index,
+            characterProfiles,
+            heroReferencePath: character?.path,
+          });
+          clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
@@ -185,6 +343,7 @@ export async function POST(req: NextRequest) {
             goal,
             storyContext,
             plan,
+            preGenerationReview,
             aspectRatio,
             clips: [...characterClips, ...clips],
             soundtrack,
@@ -204,14 +363,19 @@ export async function POST(req: NextRequest) {
             `[oneshot] ${provider} quota/rate-limit failure; retrying clip ${index + 1}/${plan.beats.length} with ${providers.fallback}`
           );
           provider = providers.fallback;
-          clips.push(
-            await generateBeatClip({
-              provider,
-              ...clipInput,
-              characterContext,
-              firstFramePath,
-            })
-          );
+          const generatedClip = await generateBeatClipWithReview({
+            provider,
+            clipInput,
+            characterContext,
+            firstFramePath,
+            goal,
+            plan,
+            beat,
+            beatIndex: index,
+            characterProfiles,
+            heroReferencePath: character?.path,
+          });
+          clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
           );
@@ -219,6 +383,7 @@ export async function POST(req: NextRequest) {
             goal,
             storyContext,
             plan,
+            preGenerationReview,
             aspectRatio,
             clips: [...characterClips, ...clips],
             soundtrack,
@@ -235,6 +400,7 @@ export async function POST(req: NextRequest) {
           goal,
           storyContext,
           plan,
+          preGenerationReview,
           aspectRatio,
           clips: [...characterClips, ...clips],
           soundtrack,
@@ -249,7 +415,7 @@ export async function POST(req: NextRequest) {
     const projectClips = [...characterClips, ...clips];
     if (soundtrack) projectClips.push(soundtrack);
 
-    // 5. Assemble a beat-by-beat timeline from the generated clips.
+    // 6. Assemble a beat-by-beat timeline from the generated clips.
     const segments: TimelineSegment[] = plan.beats.map((beat, i) => ({
       id: newId("seg"),
       clipId: clips[i].id,
@@ -271,7 +437,7 @@ export async function POST(req: NextRequest) {
     );
     timeline.showCaptions = showCaptions;
 
-    // 6. Critique once and apply patches. Critique is useful polish, but it is
+    // 7. Critique once and apply patches. Critique is useful polish, but it is
     // optional: a critic failure should never discard generated clips.
     let report: CriticReport | null = null;
     let patches: Patch[] = [];
@@ -307,6 +473,7 @@ export async function POST(req: NextRequest) {
       clips: projectClips,
       characterProfiles,
       characterReferences,
+      preGenerationReview,
       critic: report,
       chat: [],
       updatedAt: new Date().toISOString(),
