@@ -71,7 +71,11 @@ trap ourselves in the old, forward-only "edit the timeline with patches" model.
    generated **in parallel** and stitched. A repeated scene is **one composite
    referenced many times** (reuse, not regeneration). Today's timeline is just
    one composite kind; we generalize so composites can contain composites, and
-   the composition tree and the dependency graph become the same graph.
+   the composition tree and the dependency graph become the same graph. **The
+   agent owns this decomposition** — deciding *when and how* to split a long
+   piece into parallel sub-videos is a higher-order strategy call the agent makes
+   itself, not a user instruction or a deterministic rule. (We needn't build
+   feature-length tooling now; the model just assumes the agent drives it.)
 9. **Nothing is throwaway — everything is persisted.** Every asset, including
    intermediate anchors/keyframes and every composite, is persisted in the pool
    (never a temp file). Beyond reuse, persistence is the **audit trail** for *why
@@ -228,7 +232,10 @@ to its anchor.
   (ties into `docs/scopes/ooda-feedback-loop.md`). First pass stays a reliable
   default ordering; agent latitude shines in the edit/re-run loop.
 
-## 8. Open questions to resolve before P1 implementation
+## 8. Design decisions (all resolved 2026-06-01)
+
+These were the open P0 questions; all are now decided and are **constraints for
+P1**. Kept here with their resolutions as the design record.
 
 - ~~**Invalidation granularity**~~ **— DECIDED:** per-asset content fingerprints
   (with nested upstream hashes) produce a *candidate* stale set; the agent
@@ -251,9 +258,17 @@ to its anchor.
 - **Pool scope — default for now:** project-scoped; recursive composition
   (Principle 8) handles long-video scale *within* a project. Cross-video reuse
   (promote a recurring character/logo up to the **workspace**) is deferred.
-- **Cost guardrails / propose-before-spend UX.** (open)
-- **Retire the single-hero character path** in favor of anchors (started in
-  #89). (open)
+- ~~**Cost guardrails**~~ **— DECIDED (keep it simple first):** cheap ops
+  (planning, images/anchors/keyframes) just run; expensive/fan-out ops (video,
+  big regenerations) **propose an estimate first**, and autonomous runs honor a
+  **budget ceiling** (pause + ask when hit). The first-pass estimate is
+  deliberately **crude** — a rough rate (~$0.50/sec) plus a few high-level
+  heuristics (e.g. audio) — refine later. Most relevant once videos exceed ~1
+  minute.
+- ~~**Retire the single-hero character path**~~ **— DECIDED:** fold character
+  into the anchor model (a character is an anchor with identity invariants);
+  retire the single-hero `generateCharacterHeroFrame` / single-`CharacterProfile`
+  path.
 
 ## 9. Provenance & related reading
 
