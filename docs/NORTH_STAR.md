@@ -62,6 +62,20 @@ trap ourselves in the old, forward-only "edit the timeline with patches" model.
    than following a hardcoded sequence. This is what makes the flow both flexible
    (agent-driven) and reliable (every step guards its own preconditions), and it
    is how the "deterministic first pass" is achieved without prescribing order.
+8. **Compose recursively; generate in parallel; stitch.** An asset is either
+   *atomic* (a generated clip/image/audio) or *composite* (an ordered selection
+   of other assets, referenced by ID). Composition is **recursive and uniform** —
+   clip → scene → sub-video → movie are the *same* "composite asset" concept at
+   different levels. So long videos are **decomposed, not brute-forced**: a
+   90-minute movie is nine 10-minute sub-videos (each scenes, each clips),
+   generated **in parallel** and stitched. A repeated scene is **one composite
+   referenced many times** (reuse, not regeneration). Today's timeline is just
+   one composite kind; we generalize so composites can contain composites, and
+   the composition tree and the dependency graph become the same graph.
+9. **Nothing is throwaway — everything is persisted.** Every asset, including
+   intermediate anchors/keyframes and every composite, is persisted in the pool
+   (never a temp file). Beyond reuse, persistence is the **audit trail** for *why
+   the agent did what it did*.
 
 ## 3. Where we are today (the model we must NOT entrench)
 
@@ -145,6 +159,12 @@ edges + invalidation + an orchestrator**.
   maybe audio + the cut) are stale; nothing else.
 - **Generation as a first-class node**, not a side effect — so the graph can say
   "this node is stale, regenerate it" and the timeline remains a pure projection.
+- **Atomic vs composite assets (recursive).** An asset is either *atomic*
+  (generated media) or *composite* (an ordered list of child asset IDs it
+  stitches). The same shape models a clip, a scene, a sub-video, and a whole
+  movie; composites can contain composites. Independent composites generate **in
+  parallel**; a reused scene is one composite referenced many times. The
+  composition tree and the provenance/dependency graph are the same graph.
 - **Invalidation via input fingerprints — a *signal to the agent*, not a hard
   rule.** Each asset stores a content hash of its semantic inputs (including
   upstream asset hashes), so a change yields a cheap, deterministic **candidate
@@ -228,8 +248,12 @@ to its anchor.
   assets (self-describing: provenance/input-IDs/role) plus the plan/timeline's
   active selections. Drop the heavy versioned-store machinery; immutable assets +
   moving selections give versioning for free.
-- **Cost guardrails / propose-before-spend UX.**
-- **Retire the single-hero character path** in favor of anchors (started in #89).
+- **Pool scope — default for now:** project-scoped; recursive composition
+  (Principle 8) handles long-video scale *within* a project. Cross-video reuse
+  (promote a recurring character/logo up to the **workspace**) is deferred.
+- **Cost guardrails / propose-before-spend UX.** (open)
+- **Retire the single-hero character path** in favor of anchors (started in
+  #89). (open)
 
 ## 9. Provenance & related reading
 
