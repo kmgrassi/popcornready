@@ -6,10 +6,8 @@
 // project is saved through the existing project store so the editor surface
 // keeps working unchanged.
 
-import { promises as fs } from "fs";
-import path from "path";
 import { critique, planEdit } from "@/lib/agent";
-import { providerFor } from "@/lib/generative/providers";
+import { generateBeatClip } from "@/lib/generative/beat-clip";
 import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import { saveProject } from "@/lib/store";
 import { mergeStoryContext } from "@/lib/story-context";
@@ -34,8 +32,6 @@ import {
   startStage,
 } from "./store";
 import { GenerationRun } from "./types";
-
-const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 
 type VisualProvider = "openai" | "gemini" | "runway" | "ltx";
 
@@ -86,68 +82,6 @@ function beatPrompt(
     `Production quality guidance: ${videoQualityContextForPrompt()}`,
     `Make the shot feel designed, not accidental: strong visual hierarchy, controlled lighting, subject-background separation, cohesive tone, and no on-screen text.`,
   ].join(" ");
-}
-
-async function generateBeatClip(input: {
-  provider: VisualProvider;
-  prompt: string;
-  description: string;
-  size: string;
-  displaySec: number;
-  seconds?: number;
-}): Promise<Clip> {
-  const provider = providerFor(input.provider);
-  const result =
-    input.provider === "gemini"
-      ? await provider.generateAsset({
-          provider: "gemini",
-          kind: "video",
-          prompt: input.prompt,
-          size: input.size,
-          seconds: input.seconds,
-        })
-      : input.provider === "openai"
-        ? await provider.generateAsset({
-            provider: "openai",
-            kind: "video",
-            prompt: input.prompt,
-            size: input.size,
-            seconds: input.seconds,
-          })
-        : input.provider === "runway"
-          ? await provider.generateAsset({
-              provider: "runway",
-              kind: "video",
-              prompt: input.prompt,
-              size: input.size,
-              seconds: input.seconds,
-            })
-          : await provider.generateAsset({
-              provider: "ltx",
-              kind: "video",
-              prompt: input.prompt,
-              size: input.size,
-              seconds: input.seconds,
-            });
-  await fs.mkdir(GENERATED_DIR, { recursive: true });
-  const id = newAssetId("vid");
-  const filename = `${id}.${result.extension}`;
-  await fs.writeFile(path.join(GENERATED_DIR, filename), result.bytes);
-  return {
-    id,
-    filename,
-    url: `/generated/${filename}`,
-    kind: result.kind,
-    durationSec: input.displaySec,
-    description: input.description,
-    source: "generated",
-    generatedBy: {
-      provider: result.provider,
-      model: result.model,
-      prompt: result.prompt,
-      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
-    },
-  };
 }
 
 function isQuotaError(err: unknown): boolean {
