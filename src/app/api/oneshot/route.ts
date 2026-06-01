@@ -116,7 +116,8 @@ export async function POST(req: NextRequest) {
         `[oneshot] resuming with ${clips.length}/${plan.beats.length} existing generated clips`
       );
     }
-    const popcornScreenRef = await popcornReadyScreenReferenceForGoal(goal);
+    const promptRequestedPopcornScreenRef =
+      await popcornReadyScreenReferenceForGoal(goal);
     let provider = providers.primary;
     let soundtrack: Clip | null = existingSoundtrack;
     try {
@@ -142,7 +143,9 @@ export async function POST(req: NextRequest) {
               })
             : undefined;
         const referenceImageOverride =
-          index === plan.beats.length - 1 ? popcornScreenRef : undefined;
+          index === plan.beats.length - 1
+            ? promptRequestedPopcornScreenRef
+            : undefined;
         try {
           console.info(
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}`
