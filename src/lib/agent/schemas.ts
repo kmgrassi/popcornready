@@ -11,6 +11,22 @@ export const planSchema = {
     targetLengthSec: num,
     style: str,
     aspectRatio: { type: "string", enum: ["9:16", "16:9", "1:1"] },
+    // Recurring reference subjects that must stay visually consistent across
+    // shots (a character, a product, a location, a logo/screen, …). Empty when
+    // the video has nothing to keep consistent. Each beat lists which anchors
+    // (by id) its shot should be conditioned on.
+    anchors: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: str,
+          subject: str,
+        },
+        required: ["id", "subject"],
+      },
+    },
     beats: {
       type: "array",
       items: {
@@ -20,12 +36,13 @@ export const planSchema = {
           name: str,
           durationSec: num,
           intent: str,
+          anchorIds: { type: "array", items: str },
         },
-        required: ["name", "durationSec", "intent"],
+        required: ["name", "durationSec", "intent", "anchorIds"],
       },
     },
   },
-  required: ["targetLengthSec", "style", "aspectRatio", "beats"],
+  required: ["targetLengthSec", "style", "aspectRatio", "anchors", "beats"],
 };
 
 export const compositionSchema = {

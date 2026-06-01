@@ -5,6 +5,8 @@ import { applyPatches, sanitizeTimeline } from "@/lib/timeline";
 import { compileTimelineViaEditGraph, synthesizeEditGraph } from "@/lib/edit-graph";
 import {
   AspectRatio,
+  CharacterProfile,
+  CharacterReference,
   Clip,
   CriticReport,
   Patch,
@@ -13,22 +15,21 @@ import {
   Timeline,
   TimelineSegment,
 } from "@/lib/types";
+import type { ResolvedAnchor } from "@/lib/generative/beat-clip";
 import { mergeStoryContext } from "@/lib/story-context";
-import { oneShotCharacterContext } from "@/lib/oneshot/character-reference";
 import {
   audioRequested,
   beatPrompt,
   clampSeconds,
+  generateAnchorImage,
   generateBeatClip,
   generateBeatKeyframe,
-  generateCharacterHeroFrame,
   generateSoundtrack,
   isQuotaError,
   newId,
   optionalOneShotStep,
   parseShowCaptions,
   resolveVideoProviders,
-  resumableCharacterForGoal,
   resumableClipsForGoal,
   resumableSoundtrackForGoal,
   savePartialProject,
@@ -75,29 +76,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Create or reuse one hero-frame character reference so every video
-    // beat can use the same visual anchor.
-    const existingCharacter = await resumableCharacterForGoal(goal);
-    const generatedCharacter = existingCharacter
-      ? null
-      : await optionalOneShotStep("character hero frame", () =>
-          generateCharacterHeroFrame({ goal, style })
-        );
-    const character = existingCharacter || generatedCharacter;
-    const characterProfiles = character ? [character.profile] : [];
-    const characterReferences = character ? [character.reference] : [];
-    const characterClips = character ? [character.clip] : [];
-
-    // Per-beat keyframes: generate a fresh hero-conditioned image per beat and
-    // use it as the image-to-video first frame, so each shot opens on its own
-    // scene instead of the same static hero portrait. Requires Gemini (the only
-    // image model that will edit a photorealistic minor); set
-    // ONESHOT_BEAT_KEYFRAMES=0 to fall back to seeding clips with the hero frame.
-    const heroPath = character?.path;
+    // 2. Resolve the recurring reference anchors the planner identified
+    // (a character, product, location, logo/screen, …) and generate one
+    // reusable helper image per anchor. Per beat, a keyframe is conditioned on
+    // the anchors that shot uses; beats with no anchors run as plain
+    // text-to-video. Requires Gemini (nano-banana — the only image model that
+    // renders/edits a photorealistic minor); set ONESHOT_BEAT_KEYFRAMES=0 to
+    // disable keyframes entirely.
+    const characterProfiles: CharacterProfile[] = [];
+    const characterReferences: CharacterReference[] = [];
+    const characterClips: Clip[] = [];
     const useBeatKeyframes =
-      Boolean(heroPath) &&
       Boolean(process.env.GEMINI_API_KEY) &&
       process.env.ONESHOT_BEAT_KEYFRAMES !== "0";
+    const planAnchorSubjects = new Map(
+      (plan.anchors || []).map((anchor) => [anchor.id, anchor.subject])
+    );
+    const anchorImages = new Map<string, ResolvedAnchor>();
+    if (useBeatKeyframes) {
+      for (const anchor of plan.anchors || []) {
+        const imagePath = await optionalOneShotStep(`anchor ${anchor.id}`, () =>
+          generateAnchorImage({ subject: anchor.subject, style, aspectRatio })
+        );
+        if (imagePath) {
+          anchorImages.set(anchor.id, {
+            id: anchor.id,
+            subject: anchor.subject,
+            imagePath,
+          });
+        }
+      }
+      if (anchorImages.size > 0) {
+        console.info(
+          `[oneshot] generated ${anchorImages.size}/${(plan.anchors || []).length} reference anchor image(s)`
+        );
+      }
+    }
 
     // 3. Start the soundtrack before video generation and let it run in
     // parallel with the sequential video loop.
@@ -133,35 +147,40 @@ export async function POST(req: NextRequest) {
       for (let index = clips.length; index < plan.beats.length; index += 1) {
         const beat = plan.beats[index];
         const seconds = clampSeconds(beat.durationSec);
+        const beatAnchorIds = beat.anchorIds || [];
+        const beatAnchorSubjects = beatAnchorIds
+          .map((id) => planAnchorSubjects.get(id))
+          .filter((subject): subject is string => Boolean(subject));
         const clipInput = {
-          prompt: beatPrompt(goal, plan, beat, index, style, aspectRatio),
+          prompt: beatPrompt(
+            goal,
+            plan,
+            beat,
+            index,
+            style,
+            aspectRatio,
+            beatAnchorSubjects
+          ),
           description: `${beat.name}: ${beat.intent}`,
           size: videoSize,
           displaySec: seconds,
           seconds,
         };
-        const characterContext =
-          character && character.path
-            ? oneShotCharacterContext({
-                profile: character.profile,
-                reference: character.reference,
-                referencePath: character.path,
-                referenceUrl: character.clip.url,
-                originalPrompt: goal,
-                providerPrompt: clipInput.prompt,
-              })
-            : undefined;
+        // Condition this shot's keyframe on the anchors it actually uses;
+        // shots with no anchors generate as plain text-to-video.
+        const beatAnchors = beatAnchorIds
+          .map((id) => anchorImages.get(id))
+          .filter((anchor): anchor is ResolvedAnchor => Boolean(anchor));
         const firstFramePath =
-          useBeatKeyframes && heroPath
+          beatAnchors.length > 0
             ? (await optionalOneShotStep(`beat ${index + 1} keyframe`, () =>
                 generateBeatKeyframe({
-                  goal,
-                  style,
                   beat,
                   beatIndex: index,
                   totalBeats: plan.beats.length,
+                  style,
                   aspectRatio,
-                  heroPath,
+                  anchors: beatAnchors,
                 })
               )) || undefined
             : undefined;
@@ -174,7 +193,6 @@ export async function POST(req: NextRequest) {
             await generateBeatClip({
               provider,
               ...clipInput,
-              characterContext,
               firstFramePath,
             })
           );
@@ -208,7 +226,6 @@ export async function POST(req: NextRequest) {
             await generateBeatClip({
               provider,
               ...clipInput,
-              characterContext,
               firstFramePath,
             })
           );

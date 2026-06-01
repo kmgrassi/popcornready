@@ -87,7 +87,17 @@ TASK: Convert the user's creative goal into a beat-by-beat edit plan. Choose
 beats appropriate to the goal and style (e.g. hook / problem / solution / proof
 / cta for an ad). Beat durations should roughly sum to the target length.
 Make sure the plan has a clear beginning, middle, payoff, and a reason for
-each scene. Avoid random shot collections.`;
+each scene. Avoid random shot collections.
+
+ANCHORS: Identify the recurring reference subjects that MUST stay visually
+consistent across shots — these can be a character/person, a specific product,
+a location/set, or a logo/app screen. Return them in "anchors", each with a
+short stable "id" (e.g. "hero", "product", "app_screen") and a concrete
+"subject" description. If nothing needs to stay consistent (e.g. an abstract or
+scenery-only video), return an empty anchors list. For every beat, set
+"anchorIds" to the ids of the anchors whose appearance that specific shot should
+match — only include an anchor when that subject is actually on screen in the
+shot. Leave a beat's "anchorIds" empty when the shot shows none of the anchors.`;
 
   const user = `Creative goal: ${input.goal}
 Target length: ${input.targetLengthSec}s

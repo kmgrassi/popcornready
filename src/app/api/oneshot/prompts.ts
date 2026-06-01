@@ -1,19 +1,14 @@
 import { AspectRatio, Beat, EditPlan } from "@/lib/types";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
 
-function characterContinuityBlock(goal: string): string {
-  const ageMatch = goal.match(/\b(\d{1,2})[- ]year[- ]old\b/i);
-  const age = ageMatch ? `${ageMatch[1]}-year-old` : "same";
-  const roleMatch = goal.match(
-    /\b(?:\d{1,2}[- ]year[- ]old\s+)?([a-z][a-z -]{1,40}?(?:boy|girl|child|kid|man|woman|filmmaker|creator|founder|teacher|student))\b/i
-  );
-  const role = roleMatch ? roleMatch[1].trim() : "main character";
-
+// Only assert visual consistency for the recurring subjects this specific shot
+// actually uses — so a characterless shot never gets a spurious "protagonist."
+function consistencyBlock(anchorSubjects: string[]): string | null {
+  if (anchorSubjects.length === 0) return null;
   return [
-    "[CHARACTER INVARIANTS]",
-    `The recurring protagonist is the same ${age} ${role} in every shot, including dream/future sequences.`,
-    "Keep the same face, age, hair, build, silhouette, skin tone, wardrobe anchors, emotional throughline, and live-action cinematic style across all generated clips.",
-    "Do not redesign, recast, age-shift, gender-swap, or replace the protagonist. Future/famous versions must clearly read as the same person imagined forward, not a different adult.",
+    "[CONSISTENCY ANCHORS]",
+    `Keep these recurring subjects visually identical to their reference frames in this shot: ${anchorSubjects.join("; ")}.`,
+    "Match their identity, appearance, materials, colors, and design exactly. Do not redesign, recast, restyle, or replace them.",
   ].join(" ");
 }
 
@@ -29,14 +24,16 @@ export function beatPrompt(
   beat: Beat,
   beatIndex: number,
   style: string,
-  ar: AspectRatio
+  ar: AspectRatio,
+  anchorSubjects: string[] = []
 ): string {
   const previousBeat = beatIndex > 0 ? plan.beats[beatIndex - 1] : null;
   const nextBeat =
     beatIndex < plan.beats.length - 1 ? plan.beats[beatIndex + 1] : null;
+  const block = consistencyBlock(anchorSubjects);
   return [
     `${style} cinematic live-action video clip with natural motion and camera movement for a ${ar} short-form video.`,
-    characterContinuityBlock(goal),
+    ...(block ? [block] : []),
     "[FULL STORY ARC]",
     goal,
     "[FULL BEAT MAP]",
@@ -45,11 +42,10 @@ export function beatPrompt(
     `This is beat ${beatIndex + 1} of ${plan.beats.length}: ${beat.name} — ${beat.intent}.`,
     previousBeat
       ? `The previous beat was "${previousBeat.name}" — ${previousBeat.intent}. Preserve continuity from that moment.`
-      : "This is the opening beat. Establish the protagonist clearly and cinematically.",
+      : "This is the opening beat. Establish the scene clearly and cinematically.",
     nextBeat
       ? `The next beat will be "${nextBeat.name}" — ${nextBeat.intent}. End with visual momentum that can cut into it.`
       : "This is the closing beat. Resolve the story clearly.",
-    "Use explicit nouns instead of pronouns: show the same movie-loving boy/protagonist from the story, not an unrelated person.",
     `Production quality guidance: ${videoQualityContextForPrompt()}`,
     `Make the shot feel designed, not accidental: strong visual hierarchy, controlled lighting, subject-background separation, cohesive tone, and no on-screen text.`,
   ].join(" ");

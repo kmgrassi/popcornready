@@ -4,15 +4,21 @@ import path from "path";
 import { providerFor } from "@/lib/generative/providers";
 import type { Beat, Clip } from "@/lib/types";
 import type { CharacterGenerationContext } from "@/lib/generative/types";
-import {
-  describeRecurringCharacter,
-  oneShotCharacterBinding,
-} from "@/lib/oneshot/character-reference";
+import { oneShotCharacterBinding } from "@/lib/oneshot/character-reference";
 
 export type VideoProvider = "openai" | "gemini" | "runway" | "ltx";
 
+// A reference anchor resolved to its generated helper image, ready to seed a
+// per-beat keyframe.
+export interface ResolvedAnchor {
+  id: string;
+  subject: string;
+  imagePath: string;
+}
+
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 const KEYFRAME_DIR = path.join(GENERATED_DIR, "keyframes");
+const ANCHOR_DIR = path.join(GENERATED_DIR, "anchors");
 
 function newId(prefix: string): string {
   return `${prefix}_` + Math.random().toString(36).slice(2, 10);
@@ -104,47 +110,76 @@ export async function generateBeatClip(input: {
   };
 }
 
-// Generate a per-beat keyframe: a fresh image of the SAME character (conditioned
-// on the hero frame) in this beat's pose/scene, to seed image-to-video. This
-// replaces seeding every clip with the one static hero portrait, which made
-// every shot open identically. Returns the saved image path, or null if Gemini
-// image generation is unavailable/fails (caller falls back to the hero frame).
-export async function generateBeatKeyframe(input: {
-  goal: string;
+// Generate a reusable reference image for one anchor (character, product,
+// location, logo/screen, …) from its text description. Used as a consistency
+// reference when seeding per-beat keyframes. Gemini ("nano banana") is used
+// because it will render/edit photorealistic minors, which OpenAI image gen
+// rejects. Returns the saved path, or null if Gemini is unavailable/fails.
+export async function generateAnchorImage(input: {
+  subject: string;
   style: string;
-  beat: Beat;
-  beatIndex: number;
-  totalBeats: number;
   aspectRatio: string;
-  heroPath: string;
 }): Promise<string | null> {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const character = describeRecurringCharacter(input.goal);
   const prompt = [
-    "Using the SAME character from the reference image (same face, hair, build, and wardrobe anchors), create a NEW cinematic photographic still.",
-    `${input.aspectRatio} aspect-ratio framing.`,
-    "[CHARACTER INVARIANTS]",
-    character.identityInvariants,
-    character.wardrobeInvariants,
-    character.negativePrompt,
-    "[SHOT]",
-    `Beat ${input.beatIndex + 1} of ${input.totalBeats} — ${input.beat.name}: ${input.beat.intent}.`,
-    `Visual style: ${input.style}.`,
-    "Photorealistic live-action, cinematic lighting, strong composition, depth and subject/background separation. No text, logos, captions, or watermarks.",
+    "Create one clean cinematic reference image of the subject below, to be reused as a consistency anchor across multiple video shots.",
+    `Subject: ${input.subject}.`,
+    `${input.aspectRatio} aspect-ratio framing. Visual style: ${input.style}.`,
+    "Show the subject clearly and recognizably with even, neutral lighting and a simple uncluttered background. Photorealistic live-action. No text, logos, captions, or watermarks.",
   ].join(" ");
 
-  const provider = providerFor("gemini");
-  const result = await provider.generateAsset({
+  const result = await providerFor("gemini").generateAsset({
     provider: "gemini",
     kind: "image",
     prompt,
-    referencePaths: [input.heroPath],
+  });
+
+  await fs.mkdir(ANCHOR_DIR, { recursive: true });
+  const filePath = path.join(ANCHOR_DIR, `${newId("anchor")}.${result.extension}`);
+  await fs.writeFile(filePath, result.bytes);
+  return filePath;
+}
+
+// Generate a per-beat keyframe: a fresh image for this shot that keeps the given
+// anchor subject(s) visually identical to their reference images, in the beat's
+// pose/scene — used as the image-to-video first frame. Seeding each beat with a
+// purpose-built frame (rather than one static portrait) keeps shots varied while
+// preserving consistency. Returns null when there are no anchors for the beat
+// (caller runs plain text-to-video) or if Gemini is unavailable/fails.
+export async function generateBeatKeyframe(input: {
+  beat: Beat;
+  beatIndex: number;
+  totalBeats: number;
+  style: string;
+  aspectRatio: string;
+  anchors: ResolvedAnchor[];
+}): Promise<string | null> {
+  if (!process.env.GEMINI_API_KEY || input.anchors.length === 0) return null;
+
+  const referenceLines = input.anchors
+    .map((anchor, index) => `Reference ${index + 1} — ${anchor.subject}.`)
+    .join(" ");
+  const prompt = [
+    "Create a NEW cinematic photographic still for this shot. Keep the reference subject(s) below visually identical to the provided reference image(s) — same identity/appearance, materials, colors, and design.",
+    `${input.aspectRatio} aspect-ratio framing.`,
+    "[REFERENCE SUBJECTS]",
+    referenceLines,
+    "[SHOT]",
+    `Beat ${input.beatIndex + 1} of ${input.totalBeats} — ${input.beat.name}: ${input.beat.intent}.`,
+    `Visual style: ${input.style}.`,
+    "Do not redesign, recast, or replace the reference subjects. Photorealistic live-action, cinematic lighting, strong composition, depth and subject/background separation. No text, logos, captions, or watermarks.",
+  ].join(" ");
+
+  const result = await providerFor("gemini").generateAsset({
+    provider: "gemini",
+    kind: "image",
+    prompt,
+    referencePaths: input.anchors.map((anchor) => anchor.imagePath),
   });
 
   await fs.mkdir(KEYFRAME_DIR, { recursive: true });
-  const filename = `${newId("kf")}.${result.extension}`;
-  const filePath = path.join(KEYFRAME_DIR, filename);
+  const filePath = path.join(KEYFRAME_DIR, `${newId("kf")}.${result.extension}`);
   await fs.writeFile(filePath, result.bytes);
   return filePath;
 }

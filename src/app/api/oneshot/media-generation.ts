@@ -16,6 +16,7 @@ import { soundtrackPrompt } from "./prompts";
 // (src/lib/runs/execute.ts), so they live in a provider-agnostic lib module.
 // Re-exported here so the one-shot helpers barrel keeps surfacing them.
 export {
+  generateAnchorImage,
   generateBeatClip,
   generateBeatKeyframe,
 } from "@/lib/generative/beat-clip";

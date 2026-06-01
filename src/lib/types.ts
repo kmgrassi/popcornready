@@ -100,16 +100,30 @@ export interface Clip {
   characterBinding?: GeneratedAssetCharacterBinding;
 }
 
+// A recurring reference subject the video should keep visually consistent — a
+// character, product, location, logo/screen, etc. The planner emits a list of
+// these; each beat references the anchor ids whose helper image should seed it.
+export interface ReferenceAnchor {
+  id: string;
+  subject: string;
+}
+
 export interface Beat {
   name: string; // e.g. "hook", "problem", "solution", "proof", "cta"
   durationSec: number;
   intent: string;
+  // Ids of the plan anchors this beat's shot should be conditioned on. Empty
+  // means the shot needs no consistency anchor (plain text-to-video).
+  anchorIds?: string[];
 }
 
 export interface EditPlan {
   targetLengthSec: number;
   style: string;
   aspectRatio: AspectRatio;
+  // Recurring reference subjects for this video; empty when nothing needs to
+  // stay consistent across shots.
+  anchors?: ReferenceAnchor[];
   beats: Beat[];
 }
 
