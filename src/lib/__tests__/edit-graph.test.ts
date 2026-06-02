@@ -320,3 +320,30 @@ test("legacy plans/segments without ids fall back to role-derived ids", () => {
   assert.deepEqual(graph.story.beats.map((b) => b.id), ["beat_1_hook", "beat_2_proof"]);
   assert.deepEqual(graph.edit.decisions.map((d) => d.beatId), ["beat_1_hook", "beat_2_proof"]);
 });
+
+test("compileTimelineViaEditGraph preserves per-segment beatId (no duplicate-name collapse)", () => {
+  const dupPlan: EditPlan = {
+    targetLengthSec: 6,
+    style: "punchy",
+    aspectRatio: "9:16",
+    beats: [
+      { name: "shot", durationSec: 3, intent: "first shot" },
+      { name: "shot", durationSec: 3, intent: "second shot" },
+    ],
+  };
+  ensureBeatIds(dupPlan);
+  const [b0, b1] = dupPlan.beats;
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      { id: "seg_1", clipId: "clip_a", sourceInSec: 0, sourceOutSec: 3, role: "shot", beatId: b0.id, reason: "first" },
+      { id: "seg_2", clipId: "clip_b", sourceInSec: 0, sourceOutSec: 3, role: "shot", beatId: b1.id, reason: "second" },
+    ],
+  };
+
+  // The wrapper compiles via the graph and must NOT drop beatId — otherwise a
+  // later re-synthesis would collapse both same-named "shot" segments onto one.
+  const compiled = compileTimelineViaEditGraph({ id: "g", goal: "x", plan: dupPlan, timeline, clips });
+  assert.deepEqual(compiled.segments.map((s) => s.beatId), [b0.id, b1.id]);
+});

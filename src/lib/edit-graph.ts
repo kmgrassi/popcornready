@@ -486,7 +486,25 @@ export function compileEditGraph(graph: EditGraph): Timeline {
 export function compileTimelineViaEditGraph(
   input: Parameters<typeof synthesizeEditGraph>[0]
 ): Timeline {
-  return compileEditGraphToTimeline(synthesizeEditGraph(input));
+  const compiled = compileEditGraphToTimeline(synthesizeEditGraph(input));
+  // The raw compiler rebuilds segments and drops `beatId`. Re-attach the
+  // explicit per-segment beat ids from the source timeline so a later
+  // re-synthesis links by id instead of falling back to the role string (which
+  // collapses duplicate-named beats). Only segments that carried a beatId are
+  // touched, so beatId-less timelines compile unchanged.
+  const beatIdById = new Map(
+    input.timeline.segments
+      .filter((segment) => segment.id && segment.beatId)
+      .map((segment) => [segment.id, segment.beatId as string])
+  );
+  if (beatIdById.size === 0) return compiled;
+  return {
+    ...compiled,
+    segments: compiled.segments.map((segment) => {
+      const beatId = segment.id ? beatIdById.get(segment.id) : undefined;
+      return beatId ? { ...segment, beatId } : segment;
+    }),
+  };
 }
 
 export function patchesToEditGraphOperations(input: {
