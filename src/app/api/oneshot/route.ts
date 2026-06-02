@@ -422,6 +422,7 @@ export async function POST(req: NextRequest) {
       sourceInSec: 0,
       sourceOutSec: clips[i].durationSec,
       role: beat.name,
+      beatId: beat.id,
       reason: beat.intent,
     }));
     let timeline: Timeline = sanitizeTimeline(

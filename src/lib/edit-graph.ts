@@ -146,6 +146,17 @@ export function editGraphBeatId(index: number, name: string): string {
   return `beat_${index + 1}_${name || "untitled"}`;
 }
 
+// Mint stable ids for any beats missing one, in place. Called at plan creation
+// so every downstream consumer can reference beats by id. Uses the existing
+// derived scheme, which keeps behaviour identical to today while making the id
+// an explicit, persisted field (a later change can swap in fully rename/reorder-
+// stable ids without touching the threading).
+export function ensureBeatIds(plan: { beats: { id?: string; name: string }[] }): void {
+  plan.beats.forEach((beat, index) => {
+    if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
+  });
+}
+
 function sourceSegmentId(segment: TimelineSegment, index: number): string {
   return `media_${segment.id || index + 1}`;
 }
@@ -307,7 +318,9 @@ export function synthesizeEditGraph(input: {
 }): EditGraph {
   const beatIdsByRole = new Map<string, string>();
   const beats = input.plan.beats.map((beat, index) => {
-    const id = editGraphBeatId(index, beat.name);
+    // Prefer the persisted stable beat id; fall back to the derived id for
+    // legacy plans that predate Beat.id.
+    const id = beat.id || editGraphBeatId(index, beat.name);
     if (!beatIdsByRole.has(beat.name)) beatIdsByRole.set(beat.name, id);
     return {
       id,
@@ -372,7 +385,10 @@ export function synthesizeEditGraph(input: {
       decisions: input.timeline.segments.map((segment, index) => ({
         id: `decision_${segment.id || index + 1}`,
         operation: "select_segment",
-        beatId: beatIdsByRole.get(segment.role) || fallbackBeatId,
+        // Prefer the segment's explicit beat id; the role-string lookup is the
+        // legacy fallback (and breaks when two beats share a name).
+        beatId:
+          segment.beatId || beatIdsByRole.get(segment.role) || fallbackBeatId,
         role: segment.role,
         sourceSegmentIds: [sourceSegmentId(segment, index)],
         ...(segment.id ? { timelineSegmentId: segment.id } : {}),
@@ -470,7 +486,25 @@ export function compileEditGraph(graph: EditGraph): Timeline {
 export function compileTimelineViaEditGraph(
   input: Parameters<typeof synthesizeEditGraph>[0]
 ): Timeline {
-  return compileEditGraphToTimeline(synthesizeEditGraph(input));
+  const compiled = compileEditGraphToTimeline(synthesizeEditGraph(input));
+  // The raw compiler rebuilds segments and drops `beatId`. Re-attach the
+  // explicit per-segment beat ids from the source timeline so a later
+  // re-synthesis links by id instead of falling back to the role string (which
+  // collapses duplicate-named beats). Only segments that carried a beatId are
+  // touched, so beatId-less timelines compile unchanged.
+  const beatIdById = new Map(
+    input.timeline.segments
+      .filter((segment) => segment.id && segment.beatId)
+      .map((segment) => [segment.id, segment.beatId as string])
+  );
+  if (beatIdById.size === 0) return compiled;
+  return {
+    ...compiled,
+    segments: compiled.segments.map((segment) => {
+      const beatId = segment.id ? beatIdById.get(segment.id) : undefined;
+      return beatId ? { ...segment, beatId } : segment;
+    }),
+  };
 }
 
 export function patchesToEditGraphOperations(input: {

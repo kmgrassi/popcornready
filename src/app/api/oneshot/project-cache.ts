@@ -38,6 +38,7 @@ export async function savePartialProject(input: {
       sourceInSec: 0,
       sourceOutSec: clip.durationSec,
       role: beat?.name || `beat ${i + 1}`,
+      beatId: beat?.id,
       reason: beat?.intent || clip.description,
     };
   });
