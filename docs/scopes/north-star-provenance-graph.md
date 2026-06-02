@@ -278,10 +278,17 @@ consumer's surface** and out of scope here beyond making them computable.
    plan creation in both pipelines (`runs/execute.ts`, `oneshot/route.ts`);
    preserve across replans. Add `TimelineSegment.beatId`
    (`src/lib/types.ts:177`); populate at segment build sites
-   (`execute.ts:456-463`, `project-cache.ts:33-43`). Update
-   `compileEditGraphToTimeline` to resolve by id (`edit-graph.ts:440-453`). No
-   behaviour change; keep `role` for display. Migration: derive `beatId` for
-   existing persisted projects from current `editGraphBeatId` logic.
+   (`execute.ts:456-463`, `project-cache.ts:33-43`). Thread `beatId` through
+   graph synthesis: persist stable beat ids on the plan and have
+   `synthesizeEditGraph` set `decision.beatId` from the segment's `beatId`
+   instead of the role-string lookup it does today
+   (`beatIdsByRole.get(segment.role)`, `edit-graph.ts:308-311,375`) — adding the
+   `TimelineSegment.beatId` field alone leaves this path role-string based.
+   `compileEditGraphToTimeline` already resolves by id via `beatsById`
+   (`edit-graph.ts:437,444`), so no change is needed there once synthesis emits
+   real ids. No behaviour change; keep `role` for display. Migration: derive
+   `beatId` for existing persisted projects from current `editGraphBeatId`
+   logic.
 
 2. **Anchor ID alignment (XS, depends on asset-pool).** Adopt asset-pool's
    anchor id, or treat `CharacterReference.id` as the anchor id; document the
