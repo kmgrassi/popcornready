@@ -175,11 +175,12 @@ npm run dev
 NVIDIA_API_KEY=... npm run video:smoke
 ```
 
-The smoke calls `POST /api/v1/video-generation/videos` on the local Next app
-and writes the returned MP4 to
-`artifacts/video-generation/cosmos3-nano-smoke.mp4`. Override the prompt and
-output path with `VIDEO_GENERATION_SMOKE_PROMPT` and
-`VIDEO_GENERATION_SMOKE_OUTPUT`.
+The smoke uses the existing v1 generated-assets adapter:
+`POST /api/v1/projects/:projectId/generated-assets`, then polls the returned job,
+reads the persisted local asset, and writes it to
+`artifacts/video-generation/cosmos3-nano-smoke.mp4`. Override the prompt, project,
+and output path with `VIDEO_GENERATION_SMOKE_PROMPT`,
+`VIDEO_GENERATION_SMOKE_PROJECT_ID`, and `VIDEO_GENERATION_SMOKE_OUTPUT`.
 
 ## Project layout
 

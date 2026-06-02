@@ -90,6 +90,13 @@ interface ParsedRequest {
   loop?: boolean;
   promptInfluence?: number;
   forceInstrumental?: boolean;
+  seed?: number;
+  frameCount?: number;
+  fps?: number;
+  steps?: number;
+  guidanceScale?: number;
+  negativePrompt?: string;
+  resolution?: string;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -144,6 +151,12 @@ function parseQuality(value: unknown): ParsedRequest["quality"] {
   return q === "low" || q === "medium" || q === "high" || q === "auto"
     ? q
     : undefined;
+}
+
+function parseNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseGeneratedAssetRequest(body: unknown): ParsedRequest {
@@ -263,6 +276,15 @@ function parseGeneratedAssetRequest(body: unknown): ParsedRequest {
       typeof body.forceInstrumental === "boolean"
         ? body.forceInstrumental
         : undefined,
+    seed: parseNumber(body.seed),
+    frameCount: parseNumber(body.frameCount),
+    fps: parseNumber(body.fps),
+    steps: parseNumber(body.steps),
+    guidanceScale: parseNumber(body.guidanceScale),
+    negativePrompt: body.negativePrompt
+      ? String(body.negativePrompt)
+      : undefined,
+    resolution: body.resolution ? String(body.resolution) : undefined,
   };
 }
 
@@ -326,6 +348,13 @@ async function runGeneration(
     loop: parsed.loop,
     promptInfluence: parsed.promptInfluence,
     forceInstrumental: parsed.forceInstrumental,
+    seed: parsed.seed,
+    frameCount: parsed.frameCount,
+    fps: parsed.fps,
+    steps: parsed.steps,
+    guidanceScale: parsed.guidanceScale,
+    negativePrompt: parsed.negativePrompt,
+    resolution: parsed.resolution,
   };
 
   let result;
@@ -440,6 +469,13 @@ async function runGeneration(
     loop: parsed.loop,
     promptInfluence: parsed.promptInfluence,
     forceInstrumental: parsed.forceInstrumental,
+    seed: parsed.seed,
+    frameCount: parsed.frameCount,
+    fps: parsed.fps,
+    steps: parsed.steps,
+    guidanceScale: parsed.guidanceScale,
+    negativePrompt: parsed.negativePrompt,
+    resolution: parsed.resolution,
     consistency: result.providerSettings as Record<string, unknown> | undefined,
   });
 
