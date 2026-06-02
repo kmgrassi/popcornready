@@ -61,6 +61,7 @@ const PROVIDER_KIND_SUPPORT: Record<
   gemini: ["video"],
   runway: ["video"],
   ltx: ["video"],
+  nvidia_api_catalog: ["video"],
   elevenlabs: ["audio"],
   mock: ["image", "video", "audio"],
   nanobanano: [],
@@ -115,6 +116,16 @@ function normalizeProvider(
   if (name === "gemini") return "gemini";
   if (name === "runway" || name === "runwayml") return "runway";
   if (name === "ltx" || name === "ltxvideo" || name === "ltx-video") return "ltx";
+  if (
+    name === "nvidia" ||
+    name === "nvidia_api_catalog" ||
+    name === "nvidia-api-catalog" ||
+    name === "cosmos" ||
+    name === "cosmos3" ||
+    name === "cosmos3-nano"
+  ) {
+    return "nvidia_api_catalog";
+  }
   if (name === "elevenlabs") return "elevenlabs";
   if (name === "mock") return "mock";
   if (name === "nanobanano" || name === "nano-banano" || name === "nano_banano") {
@@ -345,6 +356,12 @@ async function runGeneration(
   } else if (parsed.provider === "ltx" && parsed.kind === "video") {
     result = await provider.generateAsset({
       provider: "ltx",
+      kind: "video",
+      ...baseRequest,
+    });
+  } else if (parsed.provider === "nvidia_api_catalog" && parsed.kind === "video") {
+    result = await provider.generateAsset({
+      provider: "nvidia_api_catalog",
       kind: "video",
       ...baseRequest,
     });
