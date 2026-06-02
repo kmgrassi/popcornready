@@ -13,6 +13,7 @@ import {
 } from "./types";
 import { ensureBeatIds } from "./edit-graph";
 import type { Asset } from "./assets/types";
+import { poolAssets } from "./assets/pool";
 import {
   buildProvenanceGraph,
   computeCandidateStaleSet,
@@ -114,14 +115,23 @@ export async function saveProject(p: Project): Promise<Project> {
 // Provenance read API (provenance-graph lane, task #7) — the surface the
 // orchestrator/agent reasons over. The candidate set is a *signal*: it names
 // assets whose inputs drifted from the current plan, never an auto-regeneration.
+//
+// Reads build over the UNIFIED pool (`poolAssets`): explicit pooled assets
+// (keyframes, character anchor) PLUS the generated beat videos that still live
+// in `clips[]`, projected via `clipToAsset`. Until Clip/Asset convergence (the
+// store-consolidation lane) the generated clips are not pooled explicitly, so
+// without this projection the graph would omit clip nodes and their
+// `generatedBy.inputs.firstFrameAssetId` keyframe edges entirely. (Clips carry
+// no frozen fingerprint baseline yet, so they appear as graph nodes/edges but
+// not as stale candidates — full clip staleness arrives with convergence.)
 export async function getProvenanceGraph(): Promise<ProvenanceGraph> {
   const p = await getProject();
-  return buildProvenanceGraph(p.assets ?? []);
+  return buildProvenanceGraph(poolAssets(p));
 }
 
 export async function getStaleCandidates(): Promise<StaleCandidate[]> {
   const p = await getProject();
-  return computeCandidateStaleSet(p.assets ?? [], p.plan);
+  return computeCandidateStaleSet(poolAssets(p), p.plan);
 }
 
 export async function addClip(clip: Clip): Promise<Project> {
