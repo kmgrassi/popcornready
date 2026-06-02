@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Clip } from "@/lib/types";
 import { soundtrackRequestFingerprint } from "../prompts";
-import { soundtrackMatchesRequest } from "../project-cache";
+import {
+  legacySoundtrackContentMatches,
+  soundtrackMatchesRequest,
+} from "../project-cache";
 
 const REQUEST = { goal: "explain photosynthesis", style: "cinematic", targetLengthSec: 30 };
 
@@ -46,6 +49,32 @@ test("changing goal, style, or length stops the match", () => {
 
 test("a clip without a request fingerprint never matches (regenerates once)", () => {
   assert.equal(soundtrackMatchesRequest(soundtrackClip(undefined), REQUEST), false);
+});
+
+test("a legacy clip (no fingerprint) still matches on style + approximate length", () => {
+  // Pre-fingerprint soundtracks must not be dropped on upgrade. The prompt
+  // carries "Visual style: <style>"; duration is within tolerance.
+  const legacy = soundtrackClip(undefined);
+  legacy.generatedBy!.prompt = "instrumental. Visual style: cinematic. beats…";
+  legacy.measuredDurationSec = 30.4;
+  assert.equal(
+    legacySoundtrackContentMatches(legacy, { style: "cinematic", targetLengthSec: 30 }),
+    true
+  );
+});
+
+test("a legacy clip stops matching when style or length drifts", () => {
+  const legacy = soundtrackClip(undefined);
+  legacy.generatedBy!.prompt = "instrumental. Visual style: cinematic.";
+  legacy.measuredDurationSec = 30;
+  assert.equal(
+    legacySoundtrackContentMatches(legacy, { style: "playful", targetLengthSec: 30 }),
+    false
+  );
+  assert.equal(
+    legacySoundtrackContentMatches(legacy, { style: "cinematic", targetLengthSec: 45 }),
+    false
+  );
 });
 
 test("the fingerprint depends only on goal/style/length (beats excluded by design)", () => {
