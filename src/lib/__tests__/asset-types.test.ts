@@ -103,3 +103,29 @@ test("asset -> clip drops asset-only fields (role/projectId/depicts not on Clip)
   assert.ok(!("projectId" in clip));
   assert.ok(!("depicts" in clip));
 });
+
+test("clip -> asset -> clip preserves a top-level binding that diverges from generatedBy", () => {
+  // Review metadata is written onto the top-level binding (updateGeneratedAssetReview)
+  // and can differ from the generation-time generatedBy.characterBinding.
+  const reviewed: Clip = {
+    ...generatedClip,
+    characterBinding: {
+      ...generatedClip.characterBinding!,
+      consistencyReview: {
+        identity: "pass",
+        wardrobe: "needs_review",
+        style: "pass",
+      },
+    },
+  };
+  const asset = clipToAsset(reviewed, { projectId: "default", role: "beat_clip" });
+  // The reviewed top-level binding is carried on its own field, not conflated
+  // with the (un-reviewed) provenance binding.
+  assert.deepEqual(asset.characterBinding?.consistencyReview, {
+    identity: "pass",
+    wardrobe: "needs_review",
+    style: "pass",
+  });
+  assert.equal(asset.provenance?.characterBinding?.consistencyReview, undefined);
+  assert.deepEqual(assetToClip(asset), reviewed);
+});

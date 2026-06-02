@@ -84,6 +84,11 @@ export interface Asset {
   // Only meaningful for role: "character_anchor" — folds the single-hero
   // CharacterProfile identity model onto the anchor asset.
   characterInvariants?: CharacterInvariants;
+  // Top-level character binding, mirroring Clip.characterBinding. Kept distinct
+  // from provenance.characterBinding because review metadata
+  // (updateGeneratedAssetReview) is written onto the top-level binding and can
+  // diverge from the generation-time one — so both must round-trip.
+  characterBinding?: GeneratedAssetCharacterBinding;
   videoReview?: VideoSnapshotReview;
 }
 
@@ -122,6 +127,8 @@ export function clipToAsset(
     // Clip.generatedBy is a subset of AssetProvenance (no `inputs`).
     ...(clip.generatedBy ? { provenance: { ...clip.generatedBy } } : {}),
     source: clip.source ?? "generated",
+    // Preserve the top-level binding independently of provenance.characterBinding.
+    ...(clip.characterBinding ? { characterBinding: clip.characterBinding } : {}),
     ...(clip.videoReview ? { videoReview: clip.videoReview } : {}),
   };
 }
@@ -167,8 +174,13 @@ export function assetToClip(asset: Asset): Clip {
     description: asset.description ?? "",
     source: asset.source,
     ...(generatedBy ? { generatedBy } : {}),
-    ...(generatedBy?.characterBinding
-      ? { characterBinding: generatedBy.characterBinding }
+    // Restore the top-level binding from the dedicated field (preferred), so a
+    // binding updated separately from generation (review metadata) round-trips.
+    ...(asset.characterBinding || generatedBy?.characterBinding
+      ? {
+          characterBinding:
+            asset.characterBinding ?? generatedBy?.characterBinding,
+        }
       : {}),
     ...(asset.videoReview ? { videoReview: asset.videoReview } : {}),
   };
