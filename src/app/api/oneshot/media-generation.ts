@@ -128,6 +128,9 @@ export async function optionalOneShotStep<T>(
 export async function generateCharacterHeroFrame(input: {
   goal: string;
   style: string;
+  // Project the generated character belongs to. Threaded so assets are
+  // project-scoped instead of hard-coded (asset-pool PR B).
+  projectId?: string;
 }): Promise<{
   profile: CharacterProfile;
   reference: CharacterReference;
@@ -160,7 +163,7 @@ export async function generateCharacterHeroFrame(input: {
   const now = new Date().toISOString();
   const draft = buildOneShotCharacterDraft({
     goal: input.goal,
-    projectId: "default",
+    projectId: input.projectId ?? "default",
     profileId,
     referenceId,
     assetId: clipId,
