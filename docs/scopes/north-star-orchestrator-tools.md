@@ -318,9 +318,13 @@ Three tiers, driven by `estimate()`:
   audio ~$0.01/sec per `pricing.ts`.)
 - **Expensive / fan-out → propose first:** video clips and big regenerations.
   Estimate via the existing rate: **~$0.50/sec** of generated video
-  (`pricing.ts:27`, already the openai/gemini constant) × clamped seconds
-  (`clampSeconds`, 4–8s) × beat count, plus simple heuristics (e.g. add audio
-  estimate). Emit a `Proposal { steps, estimatedUsd, reason }`; in interactive
+  (`pricing.ts:27`, already the openai/gemini constant) × clamped seconds ×
+  beat count, plus simple heuristics (e.g. add audio estimate). Use the **actual
+  clamp ceiling**, not a 4–8s assumption: one-shot `clampSeconds`
+  (`src/app/api/oneshot/config.ts:115-116`) delegates to
+  `normalizeOpenAIVideoSeconds` (`src/lib/generative/types.ts:76-78`), which
+  snaps to 4s (≤6s), 8s (≤10s), or **up to 12s** (>10s) — so per-clip estimates
+  must allow up to 12s, or one-shot video spend is under-estimated. Emit a `Proposal { steps, estimatedUsd, reason }`; in interactive
   mode await approval, surfacing through the inspection-feedback UI.
 - **Budget ceiling (autonomous mode):** the loop tracks cumulative `costUsd`
   (sum the per-asset `Clip.generatedBy.costUsd` already stamped at
