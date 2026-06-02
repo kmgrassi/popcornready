@@ -15,7 +15,7 @@ import {
 } from "@/lib/oneshot/character-reference";
 import { newId } from "./config";
 import type { VideoProvider } from "./config";
-import { soundtrackPrompt } from "./prompts";
+import { soundtrackPrompt, soundtrackRequestFingerprint } from "./prompts";
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
 const KEYFRAME_DIR = path.join(GENERATED_DIR, "keyframes");
@@ -391,6 +391,8 @@ export async function generateSoundtrack(input: {
       model: result.model,
       prompt: result.prompt,
       ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
+      // Reuse key compared on resume (provenance-graph lane task #7).
+      requestFingerprint: soundtrackRequestFingerprint(input),
     },
   };
 }

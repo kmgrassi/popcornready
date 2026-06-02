@@ -77,6 +77,9 @@ export interface AssetProvenance {
   // Frozen at generation time (provenance-graph lane). Absent on assets minted
   // before fingerprints existed; treated as "no stored hash" by the stale walk.
   fingerprint?: AssetFingerprint;
+  // Canonical hash of the stable request inputs this asset was generated for
+  // (mirrors Clip.generatedBy.requestFingerprint); drives reuse-vs-regenerate.
+  requestFingerprint?: string;
 }
 
 export interface CharacterInvariants {
@@ -201,6 +204,9 @@ export function assetToClip(asset: Asset): Clip {
                 firstFrameAssetId: asset.provenance.inputs.firstFrameAssetId,
               },
             }
+          : {}),
+        ...(asset.provenance.requestFingerprint !== undefined
+          ? { requestFingerprint: asset.provenance.requestFingerprint }
           : {}),
       }
     : undefined;
