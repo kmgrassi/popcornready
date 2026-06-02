@@ -109,8 +109,9 @@ clips with the full editor below.
    slice).
 2. If the library is missing a visual, use **Generate missing asset** to create
    an image or short video asset. OpenAI is live when `OPENAI_API_KEY` is set;
-   Gemini video generation is live when `GEMINI_API_KEY` is set. ElevenLabs
-   audio generation is live when `ELEVENLABS_API_KEY` is set.
+   Gemini video generation is live when `GEMINI_API_KEY` is set; NVIDIA API
+   Catalog Cosmos3 Nano video generation is live when `NVIDIA_API_KEY` is set.
+   ElevenLabs audio generation is live when `ELEVENLABS_API_KEY` is set.
 3. Write a creative goal, set length/aspect/style, and **Generate rough cut**.
 4. Inspect the plan, timeline, and critic scores; preview plays in the browser.
 5. **Revise (chat)**: "make it punchier", "shorten to 15s", "add captions",
@@ -152,6 +153,34 @@ Set the provider keys from `.env.local.example` as Railway service variables.
 For a hosted demo, be aware that the current MVP stores project state and media
 on the local filesystem; see the Railway deployment doc for the persistence
 limitations and production storage recommendations.
+
+## NVIDIA Cosmos Video Generation
+
+Popcorn Ready includes an NVIDIA API Catalog provider for Cosmos3 Nano video
+generation. It is wired into the existing generative provider layer as
+`nvidia_api_catalog` and can be used anywhere the app accepts a video provider.
+
+Configuration:
+
+```bash
+NVIDIA_API_KEY=...
+NVIDIA_VIDEO_GENERATION_BASE_URL=https://ai.api.nvidia.com/v1/genai
+NVIDIA_VIDEO_GENERATION_MODEL=nvidia/cosmos3-nano
+```
+
+Manual local smoke:
+
+```bash
+npm run dev
+NVIDIA_API_KEY=... npm run video:smoke
+```
+
+The smoke uses the existing v1 generated-assets adapter:
+`POST /api/v1/projects/:projectId/generated-assets`, then polls the returned job,
+reads the persisted local asset, and writes it to
+`artifacts/video-generation/cosmos3-nano-smoke.mp4`. Override the prompt, project,
+and output path with `VIDEO_GENERATION_SMOKE_PROMPT`,
+`VIDEO_GENERATION_SMOKE_PROJECT_ID`, and `VIDEO_GENERATION_SMOKE_OUTPUT`.
 
 ## Project layout
 

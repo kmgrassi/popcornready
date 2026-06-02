@@ -18,6 +18,13 @@ export interface GeneratedAssetProviderSettings {
   loop?: boolean;
   promptInfluence?: number;
   forceInstrumental?: boolean;
+  seed?: number;
+  frameCount?: number;
+  fps?: number;
+  steps?: number;
+  guidanceScale?: number;
+  negativePrompt?: string;
+  resolution?: string;
   // Provider-returned consistency/reference settings, when present.
   consistency?: Record<string, unknown>;
 }

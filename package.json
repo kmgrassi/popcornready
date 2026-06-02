@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "harness:character-ref-video": "node scripts/run-character-reference-harness.mjs",
+    "video:smoke": "tsx scripts/video-generation-smoke.ts",
     "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "eval:grader": "tsx scripts/eval-prompt-grader.ts"

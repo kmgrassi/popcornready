@@ -92,6 +92,16 @@ function normalizeProviderName(
   if (name === "gemini") return "gemini";
   if (name === "runway" || name === "runwayml") return "runway";
   if (name === "ltx" || name === "ltxvideo" || name === "ltx-video") return "ltx";
+  if (
+    name === "nvidia" ||
+    name === "nvidia_api_catalog" ||
+    name === "nvidia-api-catalog" ||
+    name === "cosmos" ||
+    name === "cosmos3" ||
+    name === "cosmos3-nano"
+  ) {
+    return "nvidia_api_catalog";
+  }
   if (name === "elevenlabs") return "elevenlabs";
   if (name === "mock") return "mock";
   if (name === "nanobanano" || name === "nano-banano" || name === "nano_banano") {
@@ -110,6 +120,7 @@ function validateProviderKind(
   if (providerName === "gemini" && kind === "video") return null;
   if (providerName === "runway" && kind === "video") return null;
   if (providerName === "ltx" && kind === "video") return null;
+  if (providerName === "nvidia_api_catalog" && kind === "video") return null;
   if (providerName === "elevenlabs" && kind === "audio") return null;
   if (providerName === "mock" && kind === "image") return null;
   if (providerName === "nanobanano") {
@@ -318,6 +329,47 @@ export async function POST(req: NextRequest) {
         provider: "ltx",
         kind: "video",
         seconds,
+        ...baseRequest,
+      });
+    } else if (providerName === "nvidia_api_catalog" && kind === "video") {
+      result = await provider.generateAsset({
+        provider: "nvidia_api_catalog",
+        kind: "video",
+        seconds,
+        seed:
+          typeof body.seed === "number"
+            ? body.seed
+            : body.seed !== undefined
+              ? Number(body.seed)
+              : undefined,
+        frameCount:
+          typeof body.frameCount === "number"
+            ? body.frameCount
+            : body.frameCount !== undefined
+              ? Number(body.frameCount)
+              : undefined,
+        fps:
+          typeof body.fps === "number"
+            ? body.fps
+            : body.fps !== undefined
+              ? Number(body.fps)
+              : undefined,
+        steps:
+          typeof body.steps === "number"
+            ? body.steps
+            : body.steps !== undefined
+              ? Number(body.steps)
+              : undefined,
+        guidanceScale:
+          typeof body.guidanceScale === "number"
+            ? body.guidanceScale
+            : body.guidanceScale !== undefined
+              ? Number(body.guidanceScale)
+              : undefined,
+        negativePrompt: body.negativePrompt
+          ? String(body.negativePrompt)
+          : undefined,
+        resolution: body.resolution ? String(body.resolution) : undefined,
         ...baseRequest,
       });
     } else if (providerName === "elevenlabs" && kind === "audio") {

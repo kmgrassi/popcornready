@@ -19,6 +19,14 @@ test("video cost scales at ~$0.50 per second", () => {
     estimateCostUsd({ provider: "ltx", kind: "video", durationSec: 6 }),
     0.36
   );
+  assert.equal(
+    estimateCostUsd({
+      provider: "nvidia_api_catalog",
+      kind: "video",
+      durationSec: 6,
+    }),
+    0
+  );
 });
 
 test("image cost is a flat per-generation rate", () => {

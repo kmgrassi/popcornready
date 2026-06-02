@@ -3,6 +3,7 @@ import { elevenLabsProvider } from "./providers/elevenlabs";
 import { geminiProvider } from "./providers/gemini";
 import { ltxProvider } from "./providers/ltx";
 import { mockProvider, unsupportedProvider } from "./providers/mock";
+import { nvidiaCosmosProvider } from "./providers/nvidia-cosmos";
 import { openAIProvider } from "./providers/openai";
 import { runwayProvider } from "./providers/runway";
 
@@ -21,6 +22,13 @@ export function providerFor(name: string): GenerativeProvider {
     case "ltxvideo":
     case "ltx-video":
       return ltxProvider;
+    case "nvidia":
+    case "nvidia_api_catalog":
+    case "nvidia-api-catalog":
+    case "cosmos":
+    case "cosmos3":
+    case "cosmos3-nano":
+      return nvidiaCosmosProvider;
     case "elevenlabs":
       return elevenLabsProvider;
     case "nanobanano":

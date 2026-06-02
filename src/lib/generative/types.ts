@@ -9,6 +9,7 @@ export type GenerativeProviderName =
   | "gemini"
   | "runway"
   | "ltx"
+  | "nvidia_api_catalog"
   | "elevenlabs"
   | "nanobanano"
   | "mock";
@@ -171,6 +172,21 @@ export interface LtxVideoRequest extends BaseGenerateAssetRequest {
   seconds?: number;
 }
 
+export interface NvidiaApiCatalogVideoRequest extends BaseGenerateAssetRequest {
+  provider: "nvidia_api_catalog";
+  kind: "video";
+  model?: string;
+  size?: string;
+  seconds?: number;
+  seed?: number;
+  frameCount?: number;
+  fps?: number;
+  steps?: number;
+  guidanceScale?: number;
+  negativePrompt?: string;
+  resolution?: string;
+}
+
 export interface MockImageRequest extends BaseGenerateAssetRequest {
   provider: "mock";
   kind: "image";
@@ -223,6 +239,7 @@ export type GenerateAssetRequest =
   | GeminiImageRequest
   | RunwayVideoRequest
   | LtxVideoRequest
+  | NvidiaApiCatalogVideoRequest
   | MockImageRequest
   | MockVideoRequest
   | MockAudioRequest
