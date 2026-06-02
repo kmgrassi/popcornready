@@ -12,6 +12,7 @@ import {
   Project,
 } from "./types";
 import { ensureBeatIds } from "./edit-graph";
+import type { Asset } from "./assets/types";
 
 // MVP persistence: a single project in a JSON file. Swap for Postgres later.
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -74,6 +75,8 @@ function ensureCollections(p: Project): Project {
   p.characterReferences ||= [];
   p.compositions ||= [];
   p.assetGenerationJobs ||= [];
+  p.assets ||= [];
+  p.selections ||= [];
   // Migration: backfill stable beat ids for plans persisted before Beat.id.
   if (p.plan) ensureBeatIds(p.plan);
   return p;
@@ -100,6 +103,17 @@ export async function saveProject(p: Project): Promise<Project> {
 export async function addClip(clip: Clip): Promise<Project> {
   const p = await getProject();
   p.clips.push(clip);
+  return saveProject(p);
+}
+
+// Append a self-describing asset to the project-scoped pool (append-only; never
+// deletes). Used by the keyframe/anchor flows (asset-pool PRs D/E).
+export async function addAsset(asset: Asset): Promise<Project> {
+  const p = await getProject();
+  p.assets ??= [];
+  if (!p.assets.some((existing) => existing.id === asset.id)) {
+    p.assets.push(asset);
+  }
   return saveProject(p);
 }
 

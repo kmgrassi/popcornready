@@ -92,6 +92,17 @@ export interface Asset {
   videoReview?: VideoSnapshotReview;
 }
 
+// An "active pointer" from a location/slot into the pool. Regeneration adds a
+// new Asset and flips `activeAssetId`; prior assets stay pooled and reusable.
+// `slotKind` examples: "timeline_segment", "character_anchor", "beat_keyframe",
+// "beat_clip", "soundtrack". `slotKey` is the location id (a beatId, characterId,
+// segment id, or "main").
+export interface AssetSelection {
+  slotKind: string;
+  slotKey: string;
+  activeAssetId: string;
+}
+
 // Best-effort role when a bare Clip doesn't tell us its slot-class. Callers that
 // know better should pass an explicit role.
 export function defaultRoleForKind(kind: AssetKind): AssetRole {
