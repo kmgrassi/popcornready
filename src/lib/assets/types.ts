@@ -171,6 +171,16 @@ export function assetToClip(asset: Asset): Clip {
         ...(asset.provenance.costUsd !== undefined
           ? { costUsd: asset.provenance.costUsd }
           : {}),
+        // Restore the recorded input edges Clip.generatedBy supports (the
+        // first-frame keyframe). Asset-only edges (anchorIds, audioId, …) have
+        // no Clip home, so Asset -> Clip stays lossy on those by design.
+        ...(asset.provenance.inputs?.firstFrameAssetId !== undefined
+          ? {
+              inputs: {
+                firstFrameAssetId: asset.provenance.inputs.firstFrameAssetId,
+              },
+            }
+          : {}),
       }
     : undefined;
   return {

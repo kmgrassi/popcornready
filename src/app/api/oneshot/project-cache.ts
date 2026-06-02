@@ -100,6 +100,26 @@ export async function resumableClipsForGoal(goal: string): Promise<Clip[]> {
     .filter((clip): clip is Clip => Boolean(clip && clip.kind !== "audio"));
 }
 
+// Pooled assets/selections persisted by a prior (possibly interrupted) run for
+// the same goal. `savePartialProject` rewrites the whole project from the
+// in-memory pool, so the route must seed that pool with what's already
+// persisted — otherwise keyframes generated before an interruption are dropped
+// on resume even though their clips are reused (asset-pool PR D, North Star
+// Principle 9 "nothing is throwaway").
+export async function resumablePoolForGoal(goal: string): Promise<{
+  assets: Asset[];
+  selections: AssetSelection[];
+}> {
+  const existing = await getProject();
+  if (existing.goal !== goal || !existing.timeline) {
+    return { assets: [], selections: [] };
+  }
+  return {
+    assets: existing.assets ?? [],
+    selections: existing.selections ?? [],
+  };
+}
+
 // Tolerance (seconds) for treating a cached soundtrack's duration as matching
 // the current request. Audio durations decoded from media bytes rarely land
 // exactly on the requested length.

@@ -42,6 +42,7 @@ import {
   resolveVideoProviders,
   resumableCharacterForGoal,
   resumableClipsForGoal,
+  resumablePoolForGoal,
   resumableSoundtrackForGoal,
   savePartialProject,
   videoSizeForAspect,
@@ -301,14 +302,18 @@ export async function POST(req: NextRequest) {
     // North Star Principle 9 "nothing is throwaway"). Accumulate them and their
     // active beat_keyframe selections in an in-memory project so the append-only
     // pool helpers stay the single source of truth; persist via savePartialProject.
+    // On resume, seed the pool from what a prior run already persisted —
+    // otherwise savePartialProject (which rewrites the whole project from this
+    // pool) would drop keyframes generated before the interruption.
+    const resumedPool = await resumablePoolForGoal(goal);
     const poolProject: Project = {
       id: DEFAULT_PROJECT_ID,
       goal,
       plan,
       timeline: null,
       clips: [],
-      assets: [],
-      selections: [],
+      assets: resumedPool.assets,
+      selections: resumedPool.selections,
       critic: null,
       chat: [],
       updatedAt: new Date().toISOString(),
