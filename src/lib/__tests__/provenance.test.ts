@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Asset } from "../assets/types";
-import type { EditPlan } from "../types";
+import type { EditPlan, Project } from "../types";
+import { poolAssets } from "../assets/pool";
 import {
   buildProvenanceGraph,
   canonicalJSON,
   computeCandidateStaleSet,
+  freezeFingerprints,
   recomputeFingerprints,
 } from "../provenance";
 
@@ -236,6 +238,37 @@ test("a beat edit ripples to a no-beat composite as upstream_stale", () => {
   assert.deepEqual(final!.changedInputs, ["clip_1"]);
 });
 
+// --- freezeFingerprints ---------------------------------------------------
+
+test("freezeFingerprints stamps a fingerprint onto generated assets", () => {
+  const frozen = freezeFingerprints([anchor, keyframe1, clip1], plan());
+  for (const a of frozen) {
+    assert.ok(a.provenance?.fingerprint, `${a.id} should be frozen`);
+    assert.equal(a.provenance!.fingerprint!.fingerprintVersion, "fp.v1");
+  }
+});
+
+test("freezeFingerprints is write-once: existing fingerprints are preserved", () => {
+  // Freeze against the original plan, then edit a beat and re-freeze.
+  const first = freezeFingerprints([keyframe1], plan());
+  const originalHash = first[0].provenance!.fingerprint!.inputHash;
+  const edited = plan();
+  edited.beats[0].intent = "changed";
+  const second = freezeFingerprints(first, edited);
+  // The already-frozen baseline must NOT be overwritten, or staleness is lost.
+  assert.equal(second[0].provenance!.fingerprint!.inputHash, originalHash);
+});
+
+test("freeze then edit then compute surfaces the candidate end-to-end", () => {
+  const frozen = freezeFingerprints([anchor, keyframe1, clip1], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest moment";
+  const ids = computeCandidateStaleSet(frozen, edited)
+    .map((c) => c.assetId)
+    .sort();
+  assert.deepEqual(ids, ["clip_1", "kf_1"]);
+});
+
 test("assets without a stored fingerprint are never candidates", () => {
   // anchor frozen, keyframe NOT frozen (legacy asset)
   const frozen = freeze([anchor], plan());
@@ -244,4 +277,33 @@ test("assets without a stored fingerprint are never candidates", () => {
   edited.beats[0].intent = "changed";
   const candidates = computeCandidateStaleSet(mixed, edited);
   assert.ok(!candidates.some((c) => c.assetId === "kf_1"));
+});
+
+// --- unified pool: generated clips still in clips[] become graph nodes --------
+
+test("a generated beat video in clips[] surfaces as a graph node + keyframe edge", () => {
+  // Until Clip/Asset convergence, generated videos live in clips[], not assets[].
+  // The read API builds over poolAssets() so the graph still sees the clip and
+  // its firstFrameAssetId edge to the pooled keyframe.
+  const project = {
+    id: "default",
+    assets: [keyframe1],
+    clips: [
+      {
+        id: "vid_1",
+        filename: "vid_1.mp4",
+        url: "/generated/vid_1.mp4",
+        kind: "video",
+        durationSec: 4,
+        description: "beat 1 clip",
+        source: "generated",
+        generatedBy: { provider: "gemini", prompt: "shot", inputs: { firstFrameAssetId: "kf_1" } },
+      },
+    ],
+  } as unknown as Project;
+
+  const graph = buildProvenanceGraph(poolAssets(project));
+  assert.ok(graph.byId.has("vid_1"), "clip should be a graph node");
+  assert.deepEqual(graph.byId.get("vid_1")!.upstreamAssetIds, ["kf_1"]);
+  assert.deepEqual(graph.dependentsOf.get("kf_1"), ["vid_1"]);
 });
