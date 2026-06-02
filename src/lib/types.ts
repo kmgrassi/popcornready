@@ -1,4 +1,5 @@
 import type { EditGraph } from "./edit-graph";
+import type { Asset, AssetSelection } from "./assets/types";
 
 // Core domain types. The whole product revolves around the Timeline — the AI
 // never touches raw video, it only edits this structured representation.
@@ -388,6 +389,12 @@ export interface Project {
   timeline: Timeline | null;
   renderPlan?: RenderPlan | null;
   clips: Clip[];
+  // Project-scoped pool of self-describing assets (keyframes, character anchors,
+  // …) and the active-selection pointers into it. Additive for now: `clips[]`
+  // remains the runtime/render shape; PR F converges them. See
+  // docs/scopes/north-star-asset-pool.md.
+  assets?: Asset[];
+  selections?: AssetSelection[];
   characterProfiles?: CharacterProfile[];
   characterReferences?: CharacterReference[];
   compositions?: CompositionPlan[];
