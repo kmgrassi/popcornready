@@ -177,6 +177,13 @@ type CompositeAsset = {
 };
 
 type CompositeChild = {
+  // Stable per-child id. MUST round-trip today's TimelineSegment.id: Remotion
+  // keys its <Sequence> by it (src/remotion/VideoComposition.tsx:81) and the
+  // edit graph references segments by it (VisualEntity/AudioEvent.segmentId,
+  // src/lib/edit-graph/types.ts:425,435; patch lookups in
+  // src/lib/edit-graph/schemas.ts:581,598). Not derivable from assetId, since
+  // the same asset can appear as multiple children (reuse/repeat).
+  id: string;
   // The child IS a pool asset — atomic OR another composite (recursion here).
   assetId: string;
   // Trim/placement, generalizing today's TimelineSegment in/out.
@@ -193,10 +200,18 @@ type CompositeChild = {
 - `Timeline` → a `CompositeAsset { compositeKind: "timeline" }` whose `children`
   are `CompositeChild` (from today's `TimelineSegment`); `aspectRatio/fps/
   showCaptions` move onto the composite (or a sibling `RenderHints`).
-- `TimelineSegment { clipId, sourceInSec, sourceOutSec, role, reason, caption }`
-  → `CompositeChild { assetId: clipId, sourceInSec, sourceOutSec, role, reason,
-  caption }` (`src/lib/types.ts:177-185`). One-to-one; today's timeline is the
-  degenerate single-level case.
+- `TimelineSegment { id, clipId, sourceInSec, sourceOutSec, role, reason,
+  caption }` → `CompositeChild { id, assetId: clipId, sourceInSec,
+  sourceOutSec, role, reason, caption }` (`src/lib/types.ts:177-185`).
+  One-to-one; today's timeline is the degenerate single-level case. **The
+  segment `id` is preserved on the child** (`CompositeChild.id ===
+  TimelineSegment.id`) — it is required on the type (`src/lib/types.ts:178`),
+  Remotion keys each `<Sequence>` by it (`src/remotion/VideoComposition.tsx:81`),
+  and the edit graph addresses segments by it (`segmentId` on
+  `VisualEntity`/`AudioEvent`, `src/lib/edit-graph/types.ts:425,435`; patch/
+  decision lookups in `src/lib/edit-graph/schemas.ts:581,598`). Dropping it
+  would break Remotion keying and orphan edit-graph patches, so the mapping is
+  lossless only with the id carried through.
 - `Clip` → `AtomicAsset` (`composite: false`) (`src/lib/types.ts:118-141`).
 - `Project.timeline: Timeline | null` → `Project.rootCompositeId: string` (the
   top of the tree; pool ownership is lane 1). A flat short video is a root
@@ -214,12 +229,23 @@ type CompositeChild = {
 ```
 
 - A `CompositeChild.assetId` may point at another `CompositeAsset` → recursion.
-- **Independence rule:** two composites are independently generable iff neither
-  is an ancestor of the other. Independent composites are the **unit of parallel
-  fan-out** (lane 5/6 schedule them; we define the unit).
+- **Independence rule:** two composites are independently generable iff their
+  **reachable subtrees are disjoint** — i.e. the sets of composites/assets each
+  can reach by following `children[].assetId` share no node. (The weaker
+  "neither is an ancestor of the other" is *not* sufficient: with
+  reuse-by-reference two sibling composites can both reach a shared descendant,
+  so scheduling them in parallel would duplicate or race that descendant's
+  generation + stitch.) Composites with disjoint subtrees are the **unit of
+  parallel fan-out** (lane 5/6 schedule them; we define the unit).
+- **Scheduling implication:** when subtrees overlap (a shared descendant
+  composite), the scheduler must **memoize/lock the shared node** — generate and
+  stitch it once, then let both referencers consume its `stitchedAssetId` — so
+  reuse-by-reference does not become duplicated work or a write race.
 - **Reuse-by-reference:** a repeated scene = the same `CompositeAsset.id` listed
   as a child in multiple parents. No copy, no regeneration. (Edits to a shared
   composite ripple to all referencers — a signal for lane 2, the agent decides.)
+  This sharing is exactly what makes pure ancestry insufficient for the
+  independence test above.
 
 **Stitching = a first-class, recursive operation that produces a new asset.**
 
