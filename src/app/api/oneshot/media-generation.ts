@@ -126,6 +126,49 @@ export async function optionalOneShotStep<T>(
   }
 }
 
+// Fold the single-hero CharacterProfile identity model onto a self-describing
+// `character_anchor` Asset (asset-pool PR E; docs/scopes/north-star-asset-pool.md
+// "character fold", NORTH_STAR.md §8 "Retire the single-hero character path").
+// The recurring character is now an anchor asset with identity invariants and
+// `depicts.characterId`; the `character_anchor` selection holds the active
+// likeness. The legacy CharacterProfile/CharacterReference are still produced in
+// parallel because the keyframe/clip reference path reads them — a later PR
+// removes them once that path consumes the anchor.
+export function characterAnchorAsset(input: {
+  profile: CharacterProfile;
+  clip: Clip;
+}): Asset {
+  const { profile, clip } = input;
+  return {
+    id: clip.id,
+    schemaVersion: "asset.v1",
+    projectId: profile.projectId,
+    kind: "image",
+    role: "character_anchor",
+    depicts: { characterId: profile.id },
+    ...(clip.description !== undefined ? { description: clip.description } : {}),
+    media: {
+      url: clip.url,
+      filename: clip.filename,
+      durationSec: clip.durationSec,
+      ...(clip.measuredDurationSec !== undefined
+        ? { measuredDurationSec: clip.measuredDurationSec }
+        : {}),
+    },
+    ...(clip.generatedBy ? { provenance: { ...clip.generatedBy } } : {}),
+    source: clip.source ?? "generated",
+    characterInvariants: {
+      ...(profile.identityInvariants
+        ? { identity: profile.identityInvariants }
+        : {}),
+      ...(profile.wardrobeInvariants
+        ? { wardrobe: profile.wardrobeInvariants }
+        : {}),
+      ...(profile.negativePrompt ? { negative: profile.negativePrompt } : {}),
+    },
+  };
+}
+
 export async function generateCharacterHeroFrame(input: {
   goal: string;
   style: string;
@@ -137,6 +180,11 @@ export async function generateCharacterHeroFrame(input: {
   reference: CharacterReference;
   clip: Clip;
   path: string;
+  // The recurring character represented as a pooled `character_anchor` Asset
+  // (asset-pool PR E). The route adds this to the pool and sets the
+  // `character_anchor` selection; the legacy profile/reference/clip below remain
+  // for the keyframe/clip reference path until a later PR migrates it.
+  anchor: Asset;
 } | null> {
   if (!process.env.OPENAI_API_KEY) {
     console.warn(
@@ -193,25 +241,28 @@ export async function generateCharacterHeroFrame(input: {
 
   await fs.writeFile(filePath, result.bytes);
 
-  return {
-    ...draft,
-    clip: {
-      id: clipId,
-      filename,
-      url: referenceUrl,
-      kind: "image",
-      durationSec: 4,
-      description: "Generated one-shot protagonist hero reference.",
-      source: "generated",
-      generatedBy: {
-        provider: result.provider,
-        model: result.model,
-        prompt: result.prompt,
-        characterBinding,
-      },
+  const clip: Clip = {
+    id: clipId,
+    filename,
+    url: referenceUrl,
+    kind: "image",
+    durationSec: 4,
+    description: "Generated one-shot protagonist hero reference.",
+    source: "generated",
+    generatedBy: {
+      provider: result.provider,
+      model: result.model,
+      prompt: result.prompt,
       characterBinding,
     },
+    characterBinding,
+  };
+
+  return {
+    ...draft,
+    clip,
     path: filePath,
+    anchor: characterAnchorAsset({ profile: draft.profile, clip }),
   };
 }
 

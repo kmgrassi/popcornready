@@ -30,12 +30,14 @@ import { oneShotCharacterContext } from "@/lib/oneshot/character-reference";
 import {
   audioRequested,
   beatPrompt,
+  characterAnchorPool,
   clampSeconds,
   generateBeatClip,
   generateBeatKeyframe,
   generateCharacterHeroFrame,
   generateSoundtrack,
   isQuotaError,
+  mergePool,
   newId,
   optionalOneShotStep,
   parseShowCaptions,
@@ -249,12 +251,16 @@ export async function POST(req: NextRequest) {
     const generatedCharacter = existingCharacter
       ? null
       : await optionalOneShotStep("character hero frame", () =>
-          generateCharacterHeroFrame({ goal, style })
+          generateCharacterHeroFrame({ goal, style, projectId: "default" })
         );
     const character = existingCharacter || generatedCharacter;
     const characterProfiles = character ? [character.profile] : [];
     const characterReferences = character ? [character.reference] : [];
     const characterClips = character ? [character.clip] : [];
+    // The recurring character as a pooled `character_anchor` asset + selection
+    // (asset-pool PR E). Persisted on every save so resume reads the active
+    // selection; the legacy profile/reference/clip above feed the keyframe path.
+    const characterAnchor = character?.anchor ?? null;
 
     // Per-beat keyframes: generate a fresh hero-conditioned image per beat and
     // use it as the image-to-video first frame, so each shot opens on its own
@@ -408,6 +414,7 @@ export async function POST(req: NextRequest) {
             soundtrack,
             characterProfiles,
             characterReferences,
+            characterAnchor,
             showCaptions,
             assets: keyframeAssets(),
             selections: keyframeSelections(),
@@ -451,6 +458,7 @@ export async function POST(req: NextRequest) {
             soundtrack,
             characterProfiles,
             characterReferences,
+            characterAnchor,
             showCaptions,
             assets: keyframeAssets(),
             selections: keyframeSelections(),
@@ -470,6 +478,7 @@ export async function POST(req: NextRequest) {
           soundtrack,
           characterProfiles,
           characterReferences,
+          characterAnchor,
           showCaptions,
           assets: keyframeAssets(),
           selections: keyframeSelections(),
@@ -538,10 +547,20 @@ export async function POST(req: NextRequest) {
       plan,
       timeline,
       clips: projectClips,
-      ...(keyframeAssets().length ? { assets: keyframeAssets() } : {}),
-      ...(keyframeSelections().length
-        ? { selections: keyframeSelections() }
-        : {}),
+      // The pool is the union of the per-beat keyframes (PR D) and the
+      // character_anchor asset + selection (PR E) — both are first-class pooled
+      // assets, so the recurring character lives in the pool, not only as a
+      // legacy reference. Deduped so a resume-seeded anchor isn't double-counted.
+      ...(() => {
+        const { assets, selections } = mergePool(
+          { assets: keyframeAssets(), selections: keyframeSelections() },
+          characterAnchorPool(characterAnchor)
+        );
+        return {
+          ...(assets.length ? { assets } : {}),
+          ...(selections.length ? { selections } : {}),
+        };
+      })(),
       characterProfiles,
       characterReferences,
       preGenerationReview,
