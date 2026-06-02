@@ -129,3 +129,29 @@ test("clip -> asset -> clip preserves a top-level binding that diverges from gen
   assert.equal(asset.provenance?.characterBinding?.consistencyReview, undefined);
   assert.deepEqual(assetToClip(asset), reviewed);
 });
+
+test("clip -> asset -> clip preserves the firstFrameAssetId provenance input edge", () => {
+  // A beat clip records the keyframe it grew from as a provenance input edge
+  // (recordFirstFrameEdge). assetToClip must copy it back so materializing a
+  // pooled asset doesn't lose the keyframe edge.
+  const withEdge: Clip = {
+    id: "vid_2",
+    filename: "vid_2.mp4",
+    url: "/generated/vid_2.mp4",
+    kind: "video",
+    durationSec: 4,
+    description: "beat clip seeded from a keyframe",
+    source: "generated",
+    generatedBy: {
+      provider: "gemini",
+      prompt: "a cinematic shot",
+      inputs: { firstFrameAssetId: "kf_1" },
+    },
+  };
+  const asset = clipToAsset(withEdge, {
+    projectId: "default",
+    role: "beat_clip",
+  });
+  assert.equal(asset.provenance?.inputs?.firstFrameAssetId, "kf_1");
+  assert.deepEqual(assetToClip(asset), withEdge);
+});
