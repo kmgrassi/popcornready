@@ -1,0 +1,210 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Asset } from "../assets/types";
+import type { EditPlan } from "../types";
+import {
+  buildProvenanceGraph,
+  canonicalJSON,
+  computeCandidateStaleSet,
+  recomputeFingerprints,
+} from "../provenance";
+
+// --- canonicalJSON --------------------------------------------------------
+
+test("canonicalJSON is insensitive to key order and drops undefined", () => {
+  assert.equal(
+    canonicalJSON({ b: 1, a: 2, c: undefined }),
+    canonicalJSON({ a: 2, b: 1 })
+  );
+});
+
+test("canonicalJSON preserves array order (order is semantic)", () => {
+  assert.notEqual(canonicalJSON([1, 2, 3]), canonicalJSON([3, 2, 1]));
+});
+
+test("canonicalJSON sorts keys of nested objects", () => {
+  assert.equal(
+    canonicalJSON({ outer: { z: 1, a: 2 } }),
+    JSON.stringify({ outer: { a: 2, z: 1 } })
+  );
+});
+
+// --- fixture --------------------------------------------------------------
+
+function plan(): EditPlan {
+  return {
+    targetLengthSec: 12,
+    style: "cinematic",
+    aspectRatio: "9:16",
+    beats: [
+      { id: "beat_1", name: "hook", durationSec: 4, intent: "open strong" },
+      { id: "beat_2", name: "proof", durationSec: 4, intent: "show the result" },
+    ],
+  };
+}
+
+const anchor: Asset = {
+  id: "anchor_1",
+  projectId: "default",
+  kind: "image",
+  role: "character_anchor",
+  depicts: { characterId: "char_1" },
+  media: { url: "/generated/anchor_1.png", filename: "anchor_1.png", durationSec: 4 },
+  source: "generated",
+  provenance: { provider: "openai", prompt: "hero portrait" },
+};
+
+// keyframe for beat_1, conditioned on the anchor
+const keyframe1: Asset = {
+  id: "kf_1",
+  projectId: "default",
+  kind: "image",
+  role: "beat_keyframe",
+  media: { url: "/generated/kf_1.png", filename: "kf_1.png", durationSec: 4 },
+  source: "generated",
+  provenance: {
+    provider: "gemini",
+    prompt: "beat 1 keyframe",
+    inputs: { beatId: "beat_1", anchorIds: ["anchor_1"] },
+  },
+};
+
+// clip for beat_1, seeded from keyframe1
+const clip1: Asset = {
+  id: "clip_1",
+  projectId: "default",
+  kind: "video",
+  role: "beat_clip",
+  media: { url: "/generated/clip_1.mp4", filename: "clip_1.mp4", durationSec: 4 },
+  source: "generated",
+  provenance: {
+    provider: "gemini",
+    prompt: "beat 1 clip",
+    inputs: { beatId: "beat_1", anchorIds: ["anchor_1"], firstFrameAssetId: "kf_1" },
+  },
+};
+
+// a stitched "final" video with NO beat of its own — depends only on the clips.
+const finalVideo: Asset = {
+  id: "final_1",
+  projectId: "default",
+  kind: "video",
+  role: "beat_clip",
+  media: { url: "/generated/final_1.mp4", filename: "final_1.mp4", durationSec: 8 },
+  source: "generated",
+  provenance: {
+    provider: "internal",
+    prompt: "stitch",
+    inputs: { upstreamAssetIds: ["clip_1"] },
+  },
+};
+
+// Freeze fingerprints onto a copy of the assets, computed against `p`.
+function freeze(assets: Asset[], p: EditPlan): Asset[] {
+  const fps = recomputeFingerprints(assets, p);
+  return assets.map((a) => ({
+    ...a,
+    provenance: a.provenance
+      ? { ...a.provenance, fingerprint: fps.get(a.id) }
+      : a.provenance,
+  }));
+}
+
+// --- recomputeFingerprints ------------------------------------------------
+
+test("recomputeFingerprints is deterministic for identical inputs", () => {
+  const a = recomputeFingerprints([anchor, keyframe1, clip1], plan());
+  const b = recomputeFingerprints([anchor, keyframe1, clip1], plan());
+  assert.equal(a.get("clip_1")!.inputHash, b.get("clip_1")!.inputHash);
+});
+
+test("editing a beat changes the hash of assets that serve it", () => {
+  const before = recomputeFingerprints([keyframe1], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest, most surprising moment";
+  const after = recomputeFingerprints([keyframe1], edited);
+  assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
+});
+
+test("editing an unrelated beat does NOT change an asset's hash", () => {
+  const before = recomputeFingerprints([keyframe1], plan());
+  const edited = plan();
+  edited.beats[1].intent = "totally different proof";
+  const after = recomputeFingerprints([keyframe1], edited);
+  assert.equal(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
+});
+
+test("a downstream asset folds in its upstream's hash (ripple)", () => {
+  const fps = recomputeFingerprints([anchor, keyframe1, clip1], plan());
+  assert.equal(fps.get("clip_1")!.upstreamHashes["kf_1"], fps.get("kf_1")!.inputHash);
+  assert.equal(
+    fps.get("kf_1")!.upstreamHashes["anchor_1"],
+    fps.get("anchor_1")!.inputHash
+  );
+});
+
+// --- buildProvenanceGraph -------------------------------------------------
+
+test("buildProvenanceGraph indexes edges and dependents", () => {
+  const g = buildProvenanceGraph([anchor, keyframe1, clip1, finalVideo]);
+  assert.deepEqual(g.byId.get("clip_1")!.upstreamAssetIds, ["anchor_1", "kf_1"]);
+  assert.deepEqual(g.dependentsOf.get("kf_1"), ["clip_1"]);
+  assert.deepEqual(g.dependentsOf.get("clip_1"), ["final_1"]);
+});
+
+test("buildProvenanceGraph drops dangling upstream references", () => {
+  const orphan: Asset = {
+    ...clip1,
+    id: "clip_orphan",
+    provenance: {
+      provider: "gemini",
+      prompt: "x",
+      inputs: { firstFrameAssetId: "missing_kf" },
+    },
+  };
+  const g = buildProvenanceGraph([orphan]);
+  assert.deepEqual(g.byId.get("clip_orphan")!.upstreamAssetIds, []);
+});
+
+// --- computeCandidateStaleSet ---------------------------------------------
+
+test("no change yields an empty candidate set", () => {
+  const frozen = freeze([anchor, keyframe1, clip1], plan());
+  assert.deepEqual(computeCandidateStaleSet(frozen, plan()), []);
+});
+
+test("editing beat_1 flags exactly its keyframe and clip, nothing else", () => {
+  const frozen = freeze([anchor, keyframe1, clip1], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest moment";
+  const candidates = computeCandidateStaleSet(frozen, edited);
+  const ids = candidates.map((c) => c.assetId).sort();
+  assert.deepEqual(ids, ["clip_1", "kf_1"]);
+  // The anchor (no beat) is untouched.
+  assert.ok(!ids.includes("anchor_1"));
+  for (const c of candidates) {
+    assert.equal(c.reason, "input_changed");
+    assert.deepEqual(c.changedInputs, ["beat_1"]);
+  }
+});
+
+test("a beat edit ripples to a no-beat composite as upstream_stale", () => {
+  const frozen = freeze([anchor, keyframe1, clip1, finalVideo], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest moment";
+  const candidates = computeCandidateStaleSet(frozen, edited);
+  const final = candidates.find((c) => c.assetId === "final_1");
+  assert.ok(final, "final video should be a candidate");
+  assert.equal(final!.reason, "upstream_stale");
+  assert.deepEqual(final!.changedInputs, ["clip_1"]);
+});
+
+test("assets without a stored fingerprint are never candidates", () => {
+  // anchor frozen, keyframe NOT frozen (legacy asset)
+  const frozen = freeze([anchor], plan());
+  const mixed = [...frozen, keyframe1];
+  const edited = plan();
+  edited.beats[0].intent = "changed";
+  const candidates = computeCandidateStaleSet(mixed, edited);
+  assert.ok(!candidates.some((c) => c.assetId === "kf_1"));
+});
