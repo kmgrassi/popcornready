@@ -245,10 +245,21 @@ feedback mutate production behavior (`ooda-feedback-loop.md:13`).
 - **Act (the closure).** Make `videoQualityContextForPrompt()` accept a
   `projectId`/`workspaceId` and return the static base **plus** the
   highest-confidence learned `PromptConfigVersion` additions
-  (`ooda-feedback-loop.md:128`). All injection sites already call this one
-  function (`oneshot/prompts.ts:53`, `runs/execute.ts:90`), so closing the loop is
-  a **single chokepoint change** plus the capture/aggregate plumbing. Global/
-  workspace changes stay gated by human approval (`ooda-feedback-loop.md:108`).
+  (`ooda-feedback-loop.md:128`). This is **not** a single chokepoint:
+  `videoQualityContextForPrompt()` is injected at multiple prompt-assembly
+  sites that must each be updated to thread `projectId`/`workspaceId`:
+  - the agent module-level `PREAMBLE`, where the result is baked in at import
+    time and reused across every agent system prompt
+    (`src/lib/agent/index.ts:47`, consumed at `:86`, `:121`, `:171`, `:244`,
+    `:286`) — note the constant `PREAMBLE` will have to become a per-call
+    builder so scope can be passed in;
+  - the composition prompt (`src/lib/agent/composition.ts:57`);
+  - the one-shot beat prompt (`src/app/api/oneshot/prompts.ts:53`).
+  (`src/lib/runs/execute.ts` previously injected this too, but that async run
+  pipeline was deleted in PR #100, so it is intentionally dropped from this
+  plan.) Closing the loop therefore means updating every site above plus the
+  capture/aggregate plumbing. Global/workspace changes stay gated by human
+  approval (`ooda-feedback-loop.md:108`).
 
 ## Work breakdown (ordered, PR-sized)
 
