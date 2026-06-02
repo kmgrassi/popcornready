@@ -9,6 +9,7 @@ import {
   computeCandidateStaleSet,
   freezeFingerprints,
   recomputeFingerprints,
+  requestFingerprint,
 } from "../provenance";
 
 // --- canonicalJSON --------------------------------------------------------
@@ -29,6 +30,22 @@ test("canonicalJSON sorts keys of nested objects", () => {
     canonicalJSON({ outer: { z: 1, a: 2 } }),
     JSON.stringify({ outer: { a: 2, z: 1 } })
   );
+});
+
+// --- requestFingerprint ---------------------------------------------------
+
+test("requestFingerprint is stable and key-order independent", () => {
+  assert.equal(
+    requestFingerprint({ goal: "g", style: "s", len: 30 }),
+    requestFingerprint({ len: 30, style: "s", goal: "g" })
+  );
+});
+
+test("requestFingerprint changes when any input changes", () => {
+  const base = requestFingerprint({ goal: "g", style: "s", len: 30 });
+  assert.notEqual(base, requestFingerprint({ goal: "g2", style: "s", len: 30 }));
+  assert.notEqual(base, requestFingerprint({ goal: "g", style: "s2", len: 30 }));
+  assert.notEqual(base, requestFingerprint({ goal: "g", style: "s", len: 45 }));
 });
 
 // --- fixture --------------------------------------------------------------

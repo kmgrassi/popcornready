@@ -19,6 +19,7 @@ import {
   TimelineSegment,
 } from "@/lib/types";
 import { newId } from "./config";
+import { soundtrackRequestFingerprint } from "./prompts";
 
 // Build the pool `assets`/`selections` contribution for the recurring character
 // (asset-pool PR E): the `character_anchor` asset plus the `character_anchor`
@@ -184,32 +185,64 @@ export async function resumablePoolForGoal(goal: string): Promise<{
   };
 }
 
-// Tolerance (seconds) for treating a cached soundtrack's duration as matching
-// the current request. Audio durations decoded from media bytes rarely land
-// exactly on the requested length.
+type SoundtrackRequest = { goal: string; style: string; targetLengthSec: number };
+
+// Tolerance (seconds) for the LEGACY fallback only: a soundtrack from before
+// request fingerprints rarely lands exactly on the requested length.
 const SOUNDTRACK_DURATION_TOLERANCE_SEC = 1.5;
 
-export async function resumableSoundtrackForGoal(input: {
-  goal: string;
-  style: string;
-  targetLengthSec: number;
-}): Promise<Clip | null> {
+// Whether a freshly-generated cached soundtrack satisfies the current request:
+// its frozen request fingerprint must equal the current one. Pure + exported so
+// the match rule is unit-testable without the store. Returns false when the clip
+// predates request fingerprints — the caller then applies the legacy fallback.
+export function soundtrackMatchesRequest(
+  clip: Clip,
+  request: SoundtrackRequest
+): boolean {
+  const stored = clip.generatedBy?.requestFingerprint;
+  return stored !== undefined && stored === soundtrackRequestFingerprint(request);
+}
+
+// Legacy fallback for soundtracks generated before request fingerprints existed:
+// the prior heuristic (style + approximate length; goal checked by the caller).
+// Without this, an upgrade would drop an otherwise-usable track — and if
+// ELEVENLABS_API_KEY is unset, regeneration returns null and the project saves
+// with no audio at all. Style/length content match is pure + exported for tests.
+export function legacySoundtrackContentMatches(
+  clip: Clip,
+  request: Pick<SoundtrackRequest, "style" | "targetLengthSec">
+): boolean {
+  const duration = clip.measuredDurationSec ?? clip.durationSec;
+  const lengthMatches =
+    Math.abs(duration - request.targetLengthSec) <=
+    SOUNDTRACK_DURATION_TOLERANCE_SEC;
+  const styleMatches = clip.generatedBy?.prompt
+    ? clip.generatedBy.prompt.includes(`Visual style: ${request.style}`)
+    : true;
+  return lengthMatches && styleMatches;
+}
+
+export async function resumableSoundtrackForGoal(
+  input: SoundtrackRequest
+): Promise<Clip | null> {
   const existing = await getProject();
-  if (existing.goal !== input.goal) return null;
-  // Only reuse a cached soundtrack when it still matches the current request.
-  // The editor exposes target length and style independently of the brief, so
-  // rerunning the same goal at a different length/style must regenerate audio
-  // rather than auto-selecting a stale clip of the wrong duration.
   const candidate = existing.clips.find((clip) => clip.kind === "audio");
   if (!candidate) return null;
-  const duration = candidate.measuredDurationSec ?? candidate.durationSec;
-  const durationMatches =
-    Math.abs(duration - input.targetLengthSec) <=
-    SOUNDTRACK_DURATION_TOLERANCE_SEC;
-  const styleMatches = candidate.generatedBy?.prompt
-    ? candidate.generatedBy.prompt.includes(`Visual style: ${input.style}`)
-    : true;
-  return durationMatches && styleMatches ? candidate : null;
+
+  // Fresh path: an exact request-fingerprint match (goal included) — replaces
+  // the old goal-equality + duration-tolerance + style-substring heuristic.
+  if (candidate.generatedBy?.requestFingerprint !== undefined) {
+    return soundtrackMatchesRequest(candidate, input) ? candidate : null;
+  }
+
+  // Legacy path: a track generated before fingerprints. Reuse it when the goal
+  // still matches and style/length are close, rather than dropping a usable clip
+  // (especially when regeneration is unavailable). It will pick up a fingerprint
+  // the next time it is regenerated.
+  return existing.goal === input.goal &&
+    legacySoundtrackContentMatches(candidate, input)
+    ? candidate
+    : null;
 }
 
 type ResumableCharacter = {
