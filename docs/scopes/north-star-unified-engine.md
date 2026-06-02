@@ -1,10 +1,11 @@
 # North Star — Unified Generation Engine
 
-> **One-line goal:** Collapse the live synchronous one-shot pipeline and the
-> dormant async run twin into a **single staged generation engine**, where the
-> run is the trunk and both a synchronous entry and a background run are thin
-> wrappers — killing the duplicated helpers (and the real 1:1 aspect-ratio bug)
-> along the way.
+> **One-line goal:** Collapse the live synchronous generation routes
+> (`/api/oneshot`'s prompt-to-asset pipeline and `/api/generate`'s library cut)
+> and the dormant, non-generating run stack into a **single staged generation
+> engine**, where the run is the trunk and both synchronous entries and a
+> background run are thin wrappers — killing the duplicated `planEdit`/`critique`
+> logic (and the real 1:1 aspect-ratio bug) along the way.
 
 ## Status & sibling cross-references
 
@@ -56,9 +57,12 @@ be structured as **discrete, individually-callable stages**, not a monolith.
 
 ## Current state (cited)
 
-### The two pipelines
+### The generation surfaces (three, not two)
 
-1. **LIVE synchronous pipeline — `src/app/api/oneshot/route.ts`.**
+The product wires **two** live generation endpoints from the editor, plus a
+**dormant** modeled-but-non-generating run stack:
+
+1. **LIVE synchronous one-shot pipeline — `src/app/api/oneshot/route.ts`.**
    - One blocking `POST` handler (`src/app/api/oneshot/route.ts:180`),
      `maxDuration = 800` (line 52). It runs, in order: plan
      (`planEdit`, line 200) → pre-gen plan critique (`critiquePlan`, line 219) →
@@ -68,9 +72,11 @@ be structured as **discrete, individually-callable stages**, not a monolith.
      soundtrack in parallel (line 260) → timeline assembly via edit graph
      (line 427) → post critique + patch (`critique`, line 444) → `saveProject`
      (line 481).
-   - **Called by** `src/components/Editor.tsx:245` and
-     `src/components/PromptComposer.tsx:194` — this is the only generation path
-     the product actually invokes today.
+   - **Called by** `BriefPanel.onOneShot` →
+     `Editor.tsx#handleOneShot` (`src/components/Editor.tsx:237`, fetch at
+     `src/components/Editor.tsx:245`) and `src/components/PromptComposer.tsx:194`.
+     This is the path that generates clips *from a text prompt* (no pre-existing
+     library required).
    - Persists incrementally via `savePartialProject` (lines 342, 382, 399) so a
      crash leaves resumable clips; resume helpers
      (`resumableClipsForGoal` / `resumableCharacterForGoal` /
@@ -79,34 +85,60 @@ be structured as **discrete, individually-callable stages**, not a monolith.
      barrel) from `config.ts`, `media-generation.ts`, `prompts.ts`,
      `project-cache.ts`.
 
-2. **DORMANT async twin — `src/lib/runs/execute.ts`.**
-   - `executeRun(run: GenerationRun)` (`src/lib/runs/execute.ts:298`) reimplements
-     the same flow — `markRunRunning` → `brief_intake` →
-     `creative_plan` (plan + critique) → `asset_generation` (per-beat loop) →
-     `timeline_assembly` → `quality_review` → `ready` — writing stage progress
-     into a `runs.json` store (`src/lib/runs/store.ts`).
-   - **`executeRun` has NO caller.** `grep -rn "executeRun" src/` returns only
-     its own definition. Nothing outside `src/lib/runs/` imports `lib/runs` at
-     all — the entire directory (`execute.ts`, `store.ts`, `types.ts`) is
-     orphaned dead code.
+2. **LIVE synchronous library-cut pipeline — `src/app/api/generate/route.ts`.**
+   - A second blocking `POST` handler (`src/app/api/generate/route.ts:16`),
+     `maxDuration = 300` (line 14). It runs a **shorter, library-based** flow:
+     plan (`planEdit`, `src/app/api/generate/route.ts:41`) → select clips from the
+     existing library (`selectClips`, `src/app/api/generate/route.ts:51`) →
+     critique + apply patches (`critique`, `src/app/api/generate/route.ts:57`) →
+     edit graph (`synthesizeEditGraph`, line 67) → `saveProject`
+     (`src/app/api/generate/route.ts:79`). It requires at least one uploaded clip
+     (`route.ts:27`) and does **no** asset generation (no keyframes, clips,
+     character frames, or soundtrack) — it arranges already-present library clips.
+   - **Called by** `BriefPanel.onGenerate` →
+     `Editor.tsx#handleGenerate` (`src/components/Editor.tsx:211`, fetch at
+     `src/components/Editor.tsx:216`), wired through `BriefPanel`
+     (`src/components/Editor.tsx:550`).
+   - This is a real, live generation path. It shares the `planEdit` and
+     `critique` stages with one-shot but uses `selectClips` instead of asset
+     generation, so it is a **third** convergence target for the unified engine
+     (its stages are a subset of one-shot's), not a duplicate of either.
 
-### A third, adjacent surface (context, not in-lane to rewrite)
+3. **DORMANT modeled run stack — `src/lib/v1/generation-runs/` + the v1 API.**
+   - A polling run system (create/get/list/cancel/retry/approve/reject) with its
+     own store, `progress-emitter.ts`, and review-gate machinery. Its create
+     route only *seeds queued stages*
+     (`src/app/api/v1/projects/[projectId]/generation-runs/route.ts:16` comment:
+     *"Backend progress emission (scope PR 3) wires real stage transitions"*) — it
+     does **no real generation** (no `planEdit` / `generateBeatClip` /
+     `generateAsset` anywhere under `src/lib/v1/generation-runs/`). The live runs
+     page (`src/app/projects/[projectId]/runs/[runId]/page.tsx:12`) renders this
+     v1 store. **store-consolidation owns reconciling the run model**; this doc
+     must wrap whichever single model survives.
 
-`src/lib/v1/generation-runs/` + `src/app/api/v1/projects/[projectId]/generation-runs/**`
-is a **separate** run system: a real polling API (create/get/list/cancel/retry/
-approve/reject routes) with its own store, `progress-emitter.ts`, and review-gate
-machinery. But its create route only *seeds queued stages*
-(`src/app/api/v1/projects/[projectId]/generation-runs/route.ts:16` comment:
-*"Backend progress emission (scope PR 3) wires real stage transitions"*) — it
-does **no real generation** (no `planEdit` / `generateBeatClip` /
-`generateAsset` anywhere under `src/lib/v1/generation-runs/`). The live runs page
-(`src/app/projects/[projectId]/runs/[runId]/page.tsx:12`) renders this v1 store.
-So today: one path generates (oneshot, no run model), one path models runs
-without generating (v1 generation-runs), and one path does both but is dead
-(`src/lib/runs`). **store-consolidation** owns reconciling the run model; this
-doc must wrap whichever single model survives.
+### Surface summary
 
-### Duplicated helpers (the drift — enumerated)
+So today there are three generation surfaces:
+
+- **`/api/oneshot`** generates from a prompt (full asset pipeline), no run model.
+- **`/api/generate`** cuts an existing library (`planEdit` → `selectClips` →
+  `critique`), no run model and no asset generation.
+- **v1 generation-runs** models runs (stages, gates, polling) but generates
+  nothing.
+
+No single surface both generates assets *and* models a run; the unified engine
+must give all three a common trunk.
+
+> **Note on `src/lib/runs/execute.ts`.** An earlier draft of this doc treated
+> `src/lib/runs/` (`executeRun`) as a "second pipeline" — a dormant async twin of
+> one-shot. That orphaned stack was removed in PR #100, so it is dropped from the
+> inventory above. The duplicated-helper drift it caused (the table below) is
+> retained here only as the historical motivation for promoting one canonical set
+> of helpers; the surviving live drift to reconcile is between `/api/oneshot` and
+> `/api/generate` (both call `planEdit`/`critique`; one-shot owns the richer asset
+> stages `/api/generate` lacks).
+
+### Duplicated helpers (historical drift — motivation)
 
 | Helper | LIVE (oneshot) | DORMANT (execute.ts) | Drift |
 | --- | --- | --- | --- |
@@ -150,12 +182,15 @@ doc must wrap whichever single model survives.
 
 ## Gap vs North Star
 
-1. **No single engine.** The only thing the product runs is a monolithic route
-   handler (`src/app/api/oneshot/route.ts`) whose stages are inlined `await`s,
-   not callable units. The "run as trunk" the North Star wants (Principle 6)
-   exists only as dead code (`executeRun`) and as a non-generating polling
-   surface (`v1/generation-runs`). There is no shared engine for a sync entry
-   and an async run to wrap.
+1. **No single engine.** The product runs **two** monolithic route handlers —
+   `src/app/api/oneshot/route.ts` (asset generation) and
+   `src/app/api/generate/route.ts` (library cut) — whose stages are inlined
+   `await`s, not callable units, and which independently re-implement the shared
+   `planEdit`/`critique` steps (`src/app/api/oneshot/route.ts:200,444` vs
+   `src/app/api/generate/route.ts:41,57`). The "run as trunk" the North Star
+   wants (Principle 6) exists only as a non-generating polling surface
+   (`v1/generation-runs`). There is no shared engine for the two sync entries and
+   an async run to wrap.
 2. **Drift is shipping risk.** Eleven-plus duplicated helpers (above) mean any
    fix to provider selection, prompting, clamping, or character handling must be
    made twice and is already inconsistent (the 1:1 bug, the weaker `beatPrompt`,
@@ -218,19 +253,28 @@ Key properties:
 
 ### How sync and async wrap the one engine
 
-- **Synchronous entry (the thin one-shot call).** `/api/oneshot` becomes a thin
-  adapter: build `EngineContext` from the request, create a run via the shared
-  store, call `runEngine(ctx, { onStage, onArtifact })` with callbacks that
+- **Synchronous prompt entry (the thin one-shot call).** `/api/oneshot` becomes a
+  thin adapter: build `EngineContext` from the request, create a run via the
+  shared store, call `runEngine(ctx, { onStage, onArtifact })` with callbacks that
   (optionally) stream NDJSON/SSE progress to the caller, `await` to completion,
   return the final `project`. Same single-request UX
   (`docs/streaming-generation-plan.md` Workstream C), now backed by the engine.
-  Editor.tsx / PromptComposer.tsx keep calling the same endpoint.
-- **Async / background run (the trunk).** A worker entry — the real replacement
-  for the dead `executeRun` — pulls a queued run and calls the **same**
-  `runEngine` with callbacks that persist stage transitions + artifacts to the
-  run store. This is what the v1 generation-runs polling API has been waiting on
-  ("scope PR 3"); wiring the engine here turns that surface from a stub into a
-  live async pipeline.
+  `Editor.tsx#handleOneShot` / `PromptComposer.tsx` keep calling the same
+  endpoint.
+- **Synchronous library-cut entry (the thin generate call).** `/api/generate`
+  (`src/app/api/generate/route.ts`) becomes a second thin adapter over the **same**
+  `runEngine`, configured to run the **subset** of stages it already uses —
+  `creative_plan` (`planEdit`) → a `clip_selection` stage (`selectClips`) →
+  `quality_review` (`critique`) → `timeline_assembly`/`saveProject` — skipping the
+  asset-generation/character/audio stages. `Editor.tsx#handleGenerate`
+  (`src/components/Editor.tsx:211`, wired via `BriefPanel`,
+  `src/components/Editor.tsx:550`) keeps calling the same endpoint. This unifies
+  the `planEdit`/`critique` logic the two sync routes duplicate today.
+- **Async / background run (the trunk).** A worker entry pulls a queued run and
+  calls the **same** `runEngine` with callbacks that persist stage transitions +
+  artifacts to the run store. This is what the v1 generation-runs polling API has
+  been waiting on ("scope PR 3"); wiring the engine here turns that surface from a
+  stub into a live async pipeline.
 - Both wrappers differ only in their callbacks and lifecycle (await vs
   fire-and-forget + poll). The generation logic exists exactly once.
 
@@ -254,17 +298,20 @@ Key properties:
    migrated yet; just the contracts (lets orchestrator-tools and
    inspection-feedback build against a stable seam).
 
-3. **PR3 — Carve the live pipeline into stage functions behind the engine. [L]**
-   Refactor `route.ts`'s inlined steps into engine stages
+3. **PR3 — Carve the one-shot pipeline into stage functions behind the engine. [L]**
+   Refactor `src/app/api/oneshot/route.ts`'s inlined steps into engine stages
    (`planStage`, `planCritiqueStage`, `characterStage`, `assetGenerationStage`,
    `audioStage`, `assembleStage`, `critiqueStage`), preserving exact current
    behavior including resume + partial-save (now via `onArtifact`). `/api/oneshot`
    becomes the thin sync wrapper calling `runEngine`. Behavior-preserving.
 
-4. **PR4 — Retire the dormant twin. [S]**
-   Delete `src/lib/runs/execute.ts`, `src/lib/runs/store.ts`,
-   `src/lib/runs/types.ts` (orphaned; no callers). Verify no imports break
-   (already none outside the dir). Removes the drift source permanently.
+4. **PR4 — Fold `/api/generate` onto the same engine. [M]**
+   Add a `clipSelectionStage` (`selectClips`) and re-point
+   `src/app/api/generate/route.ts` (`route.ts:41,51,57`) at `runEngine` running
+   the library-cut **subset** of stages (`planStage` → `clipSelectionStage` →
+   `critiqueStage` → assemble/save), skipping asset/character/audio stages. This
+   collapses the duplicated `planEdit`/`critique` calls the two sync routes carry
+   today into one shared implementation. Behavior-preserving for both endpoints.
 
 5. **PR5 — Async run wrapper on the engine. [M]**
    Add a background-run entry that calls `runEngine` with persistence callbacks
@@ -281,9 +328,13 @@ Key properties:
 
 - **PR1 → PR2 → PR3 → PR4** are internal to this lane and can land back-to-back;
   PR1 alone already kills the 1:1 bug and the worst drift.
-- **PR4** (delete dead code) can land any time after PR1 (it is independent of
-  the refactor; the code is unreferenced today). Sequenced after PR3 only to
-  avoid churn while the helpers are in flux.
+- **PR4** (fold `/api/generate` onto the engine) depends on PR2's stage interface
+  and the shared `planStage`/`critiqueStage` extracted in PR3; it adds only the
+  `clipSelectionStage`. It is behavior-preserving and can land independently of
+  PR5/PR6.
+- The old "retire the dormant twin" PR is gone: `src/lib/runs/` (`executeRun`,
+  `store.ts`, `types.ts`) was already deleted in PR #100, so there is no dead
+  async twin left to remove in this lane.
 - **PR5 depends on store-consolidation** landing the single `GenerationRun`
   model (otherwise this PR would re-entrench a second model). Until then, the
   async wrapper can target the v1 model as an interim, but coordinate to avoid
@@ -317,8 +368,9 @@ Key properties:
   PR2/PR3 become the eventual tool boundaries. **Open:** align the stage split
   with orchestrator-tools' intended tool surface (`docs/NORTH_STAR.md` §6) so we
   don't re-split later.
-- **Three run surfaces today.** Fully retiring `src/lib/runs/` (PR4) is safe, but
-  the v1 generation-runs surface and the oneshot path must converge on one
-  engine + one model without breaking the live runs page
-  (`src/app/projects/[projectId]/runs/[runId]/page.tsx`). Coordinate the cutover
-  with store-consolidation.
+- **Three generation surfaces today.** With `src/lib/runs/` already removed
+  (PR #100), the live `/api/oneshot` and `/api/generate` routes and the
+  non-generating v1 generation-runs surface must converge on one engine + one
+  model without breaking the live runs page
+  (`src/app/projects/[projectId]/runs/[runId]/page.tsx`) or either live endpoint.
+  Coordinate the cutover with store-consolidation.
