@@ -110,7 +110,10 @@ underway; this log tracks merged + in-flight work (newest first).
 - **Lane 2 #1 — stable beat IDs** (#101). `Beat.id` + `TimelineSegment.beatId`
   minted on plan creation and threaded through graph synthesis.
 - **Lane 1 — asset pool (FULL lane)** (#102–#105): unified self-describing
-  `Asset` + lossless `Clip<->Asset` adapters; project-scoped pool +
+  `Asset` + `Clip<->Asset` adapters (lossless only `Clip -> Asset -> Clip`;
+  `assetToClip` drops Asset-only fields — `role`/`projectId`/`depicts`/`inputs`/
+  `characterInvariants` — so the convergence work must not round-trip pooled
+  assets through `Clip`); project-scoped pool +
   `AssetSelection` active-pointers; `projectId` threaded into generation; per-beat
   keyframes persisted as first-class pooled assets; character folded into a
   `character_anchor` asset + selection. This also satisfied Lane 2 #2 (anchor-id
