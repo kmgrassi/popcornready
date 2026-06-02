@@ -7,16 +7,24 @@
 
 import type { Asset } from "@/lib/assets/types";
 import type { EditPlan } from "@/lib/types";
-import { hashAsset, recomputeFingerprints, upstreamIdsOf } from "./fingerprint";
+import {
+  FINGERPRINT_VERSION,
+  hashAsset,
+  recomputeFingerprints,
+  upstreamIdsOf,
+} from "./fingerprint";
 
 export interface StaleCandidate {
   assetId: string;
-  // input_changed: the asset's OWN inputs drifted (in practice the beat it
-  // serves was edited). upstream_stale: the asset's own inputs are unchanged but
-  // an asset it was built from is itself a candidate.
+  // input_changed: the asset's OWN plan context drifted (a beat edit, or a
+  // style/aspect change — the prompt is rebuilt from the whole arc). upstream_stale:
+  // the asset's own inputs are unchanged but an asset it was built from is itself
+  // a candidate.
   reason: "input_changed" | "upstream_stale";
-  // Which input IDs drifted: the beatId for input_changed, the upstream asset
-  // IDs whose hash changed for upstream_stale.
+  // Which inputs drifted: "plan" for input_changed (the change is in the plan
+  // context the prompt is built from — we don't store the prior plan, so we
+  // can't pinpoint which beat), plus the asset's beatId when it has one; the
+  // upstream asset IDs whose hash changed for upstream_stale.
   changedInputs: string[];
   storedHash: string;
   recomputedHash: string;
@@ -32,22 +40,25 @@ export function computeCandidateStaleSet(
   for (const asset of assets) {
     const stored = asset.provenance?.fingerprint;
     if (!stored) continue; // minted before fingerprints existed → no baseline
+    // A stored hash from a different fingerprint version is not comparable to a
+    // freshly-computed one — treat it as having no baseline rather than flagging
+    // it stale purely because the hashed shape was bumped.
+    if (stored.fingerprintVersion !== FINGERPRINT_VERSION) continue;
     const fresh = recomputed.get(asset.id);
     if (!fresh) continue;
     if (fresh.inputHash === stored.inputHash) continue; // unchanged
 
     // Recompute using the asset's OWN current content but the STORED upstream
-    // hashes. If that already differs from the stored hash, the asset's own
-    // inputs drifted (the beat changed); otherwise the only difference is from
-    // upstream, so it's upstream_stale.
+    // hashes. If that already differs from the stored hash, the asset's own plan
+    // context drifted (a beat/style/aspect edit); otherwise the only difference
+    // is from upstream, so it's upstream_stale.
     const ownHash = hashAsset(asset, plan, stored.upstreamHashes).inputHash;
     if (ownHash !== stored.inputHash) {
+      const beatId = asset.provenance?.inputs?.beatId;
       candidates.push({
         assetId: asset.id,
         reason: "input_changed",
-        changedInputs: asset.provenance?.inputs?.beatId
-          ? [asset.provenance.inputs.beatId]
-          : ["self"],
+        changedInputs: beatId ? ["plan", beatId] : ["plan"],
         storedHash: stored.inputHash,
         recomputedHash: fresh.inputHash,
       });

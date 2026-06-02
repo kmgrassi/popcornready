@@ -5,12 +5,12 @@
 // upward into a different recomputed hash — the basis for the candidate-stale
 // set (see ./stale.ts).
 //
-// Determinism rule: for a *frozen* generated asset the only semantic input that
-// can change after generation is the content of the beat it serves (resolved
-// from the mutable plan) and its upstream hashes; prompt/model/providerSettings
-// are stored on the asset and never change (regeneration mints a NEW asset).
-// That split is what lets the stale walk tell "this beat changed" apart from
-// "an upstream asset changed".
+// Determinism rule: for a *frozen* generated asset the only semantic inputs that
+// can change after generation are the plan context its prompt is built from
+// (resolved from the mutable plan — see planContent) and its upstream hashes;
+// prompt/model/providerSettings are stored on the asset and never change
+// (regeneration mints a NEW asset). That split is what lets the stale walk tell
+// "the plan changed" apart from "an upstream asset changed".
 
 import { createHash } from "crypto";
 import type { Asset, AssetFingerprint, AssetInputs } from "@/lib/assets/types";
@@ -46,7 +46,7 @@ function canonicalize(value: unknown): unknown {
 
 // Every other-asset reference an asset's inputs point at, deduped and sorted.
 // beatId is deliberately excluded — a beat is plan content, not an asset, and is
-// hashed as content (see beatContent below).
+// hashed as content (see planContent below).
 export function upstreamIdsOf(inputs: AssetInputs | undefined): string[] {
   if (!inputs) return [];
   const ids = new Set<string>();
@@ -58,18 +58,45 @@ export function upstreamIdsOf(inputs: AssetInputs | undefined): string[] {
   return [...ids].sort();
 }
 
-// The content of the beat an asset serves, resolved from the (mutable) plan.
-// Returns null when the asset has no beatId or the beat is gone. Only the
-// semantic fields are hashed — `id` is excluded so renaming/reordering beats
-// without changing their content does not flag a candidate.
-function beatContent(
-  inputs: AssetInputs | undefined,
-  plan: EditPlan | null
-): { name: string; intent: string; durationSec: number } | null {
-  if (!inputs?.beatId || !plan) return null;
-  const beat = plan.beats.find((b) => b.id === inputs.beatId);
-  if (!beat) return null;
-  return { name: beat.name, intent: beat.intent, durationSec: beat.durationSec };
+// The mutable, plan-derived context an asset's provider prompt is built from.
+// This must cover EVERYTHING in the prompt that can change, or the stale walk
+// under-flags. For beat clips/keyframes that means the whole arc: `beatPrompt`
+// (src/app/api/oneshot/prompts.ts) threads the full beat map + neighbouring
+// beats + style + aspect into every shot, so an edit to ANY beat — or to
+// style/aspect — changes the prompt context. We include the full beat list on
+// purpose: over-flagging is safe (the agent prunes the candidate set, NORTH_STAR
+// Principle 3); under-flagging would silently miss a real prompt change.
+// Anchors depend only on style; the soundtrack on style + length (its beats are
+// deliberately excluded — they are re-planned non-deterministically each run,
+// see `soundtrackRequestFingerprint`). Goal is a project-level constant (not on
+// the plan) handled by the resume/goal gates, so it is intentionally outside the
+// per-plan candidate computation. Uploads have no plan dependence.
+function planContent(asset: Asset, plan: EditPlan | null): unknown {
+  if (!plan || asset.source === "upload") return null;
+  const inputs = asset.provenance?.inputs;
+  if (asset.role === "soundtrack") {
+    return {
+      kind: "soundtrack",
+      style: plan.style,
+      targetLengthSec: plan.targetLengthSec,
+    };
+  }
+  if (inputs?.beatId) {
+    return {
+      kind: "beat",
+      beatId: inputs.beatId,
+      style: plan.style,
+      aspectRatio: plan.aspectRatio,
+      // The full arc — every shot's prompt is built from the whole beat map.
+      beats: plan.beats.map((b) => ({
+        name: b.name,
+        intent: b.intent,
+        durationSec: b.durationSec,
+      })),
+    };
+  }
+  // Anchors and any other generated asset: only style-sensitive.
+  return { kind: "other", style: plan.style };
 }
 
 // The frozen, generation-time part of an asset's identity: what it was made
@@ -105,7 +132,7 @@ export function hashAsset(
   const inputHash = sha256(
     canonicalJSON({
       frozen: frozenPayload(asset),
-      beat: beatContent(asset.provenance?.inputs, plan),
+      plan: planContent(asset, plan),
       upstreamHashes,
     })
   );

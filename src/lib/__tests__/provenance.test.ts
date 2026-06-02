@@ -126,12 +126,33 @@ test("editing a beat changes the hash of assets that serve it", () => {
   assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
 });
 
-test("editing an unrelated beat does NOT change an asset's hash", () => {
+test("editing ANY beat changes a beat-asset's hash (prompt threads the full arc)", () => {
+  // beatPrompt builds every shot from the whole beat map, so editing a different
+  // beat still changes this asset's prompt context and must change its hash.
   const before = recomputeFingerprints([keyframe1], plan());
   const edited = plan();
   edited.beats[1].intent = "totally different proof";
   const after = recomputeFingerprints([keyframe1], edited);
-  assert.equal(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
+  assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
+});
+
+test("a style change ripples to beat assets and the anchor (style is in every prompt)", () => {
+  const before = recomputeFingerprints([anchor, keyframe1], plan());
+  const edited = plan();
+  edited.style = "playful hand-drawn animation";
+  const after = recomputeFingerprints([anchor, keyframe1], edited);
+  assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
+  assert.notEqual(before.get("anchor_1")!.inputHash, after.get("anchor_1")!.inputHash);
+});
+
+test("a beat edit does NOT change the anchor hash (anchors are style-only)", () => {
+  // The role-level insulation that keeps the candidate set meaningful: editing a
+  // beat flags beat assets, but the character anchor (no beat dependence) stays.
+  const before = recomputeFingerprints([anchor], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest moment";
+  const after = recomputeFingerprints([anchor], edited);
+  assert.equal(before.get("anchor_1")!.inputHash, after.get("anchor_1")!.inputHash);
 });
 
 test("a downstream asset folds in its upstream's hash (ripple)", () => {
@@ -173,19 +194,35 @@ test("no change yields an empty candidate set", () => {
   assert.deepEqual(computeCandidateStaleSet(frozen, plan()), []);
 });
 
-test("editing beat_1 flags exactly its keyframe and clip, nothing else", () => {
+test("a beat edit flags the beat assets (not the anchor) as input_changed", () => {
   const frozen = freeze([anchor, keyframe1, clip1], plan());
   const edited = plan();
   edited.beats[0].intent = "open on the strongest moment";
   const candidates = computeCandidateStaleSet(frozen, edited);
   const ids = candidates.map((c) => c.assetId).sort();
   assert.deepEqual(ids, ["clip_1", "kf_1"]);
-  // The anchor (no beat) is untouched.
+  // The anchor (no beat dependence) is untouched — role-level selectivity.
   assert.ok(!ids.includes("anchor_1"));
   for (const c of candidates) {
     assert.equal(c.reason, "input_changed");
-    assert.deepEqual(c.changedInputs, ["beat_1"]);
+    // The drift is in the plan context; we report "plan" plus the asset's beat.
+    assert.deepEqual(c.changedInputs, ["plan", "beat_1"]);
   }
+});
+
+test("a fingerprint-version mismatch is treated as no baseline, not stale", () => {
+  const frozen = freeze([keyframe1], plan()).map((a) => ({
+    ...a,
+    provenance: {
+      ...a.provenance!,
+      fingerprint: { ...a.provenance!.fingerprint!, fingerprintVersion: "fp.v0" },
+    },
+  }));
+  // Even with a wildly different plan, an incomparable (old-version) hash must
+  // not be reported stale — otherwise a shape bump flags the whole pool.
+  const edited = plan();
+  edited.beats[0].intent = "changed";
+  assert.deepEqual(computeCandidateStaleSet(frozen, edited), []);
 });
 
 test("a beat edit ripples to a no-beat composite as upstream_stale", () => {
