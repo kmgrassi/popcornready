@@ -136,6 +136,13 @@ export interface Clip {
     originalPrompt?: string;
     preflight?: GenerationPreflightResult;
     costUsd?: number;
+    // Recorded input edges into the asset pool (asset-pool PR D). Mirrors
+    // AssetInputs in src/lib/assets/types.ts — e.g. the beat_keyframe asset a
+    // clip grew from, so provenance names the keyframe instead of losing its
+    // file path. Owned/extended by the provenance-graph lane.
+    inputs?: {
+      firstFrameAssetId?: string;
+    };
   };
   characterBinding?: GeneratedAssetCharacterBinding;
   videoReview?: VideoSnapshotReview;

@@ -3,6 +3,7 @@ import path from "path";
 
 import { providerFor } from "@/lib/generative/providers";
 import { Beat, CharacterProfile, CharacterReference, Clip } from "@/lib/types";
+import type { Asset } from "@/lib/assets/types";
 import { OpenAIVideoSeconds } from "@/lib/generative/types";
 import type { CharacterGenerationContext } from "@/lib/generative/types";
 import {
@@ -217,7 +218,14 @@ export async function generateCharacterHeroFrame(input: {
 // Generate a per-beat keyframe: a fresh image of the SAME character (conditioned
 // on the hero frame) in this beat's pose/scene, to seed image-to-video. This
 // replaces seeding every clip with the one static hero portrait, which made
-// every shot open identically. Returns the saved image path, or null if Gemini
+// every shot open identically.
+//
+// The keyframe is now a first-class, pooled `Asset` (asset-pool PR D, North Star
+// Principle 9 "nothing is throwaway"): the PNG still lives under public/generated
+// because the provider needs a real file/url to do image-to-video, but the
+// result is a recorded `beat_keyframe` asset (with `depicts.beatId` and
+// provenance) rather than a discarded path. Returns the asset plus its local
+// file `path` (the provider's image-to-video first frame), or null if Gemini
 // image generation is unavailable/fails (caller falls back to the hero frame).
 export async function generateBeatKeyframe(input: {
   goal: string;
@@ -227,7 +235,11 @@ export async function generateBeatKeyframe(input: {
   totalBeats: number;
   aspectRatio: string;
   heroPath: string;
-}): Promise<string | null> {
+  // Project the keyframe asset belongs to (asset-pool PR B). The character
+  // anchor it was conditioned on, recorded as an input edge.
+  projectId: string;
+  anchorAssetId?: string;
+}): Promise<{ asset: Asset; path: string } | null> {
   if (!process.env.GEMINI_API_KEY) return null;
 
   const character = describeRecurringCharacter(input.goal);
@@ -253,10 +265,42 @@ export async function generateBeatKeyframe(input: {
   });
 
   await fs.mkdir(KEYFRAME_DIR, { recursive: true });
-  const filename = `${newId("kf")}.${result.extension}`;
+  const id = newId("kf");
+  const filename = `${id}.${result.extension}`;
   const filePath = path.join(KEYFRAME_DIR, filename);
   await fs.writeFile(filePath, result.bytes);
-  return filePath;
+
+  const asset: Asset = {
+    id,
+    schemaVersion: "asset.v1",
+    projectId: input.projectId,
+    kind: "image",
+    role: "beat_keyframe",
+    depicts: {
+      ...(input.beat.id ? { beatId: input.beat.id } : {}),
+    },
+    description: `Beat ${input.beatIndex + 1} keyframe — ${input.beat.name}: ${input.beat.intent}`,
+    media: {
+      url: `/generated/keyframes/${filename}`,
+      filename,
+      durationSec: 0,
+    },
+    provenance: {
+      provider: result.provider,
+      ...(result.model !== undefined ? { model: result.model } : {}),
+      prompt: result.prompt,
+      providerPrompt: prompt,
+      originalPrompt: input.goal,
+      ...(typeof result.costUsd === "number" ? { costUsd: result.costUsd } : {}),
+      inputs: {
+        ...(input.beat.id ? { beatId: input.beat.id } : {}),
+        ...(input.anchorAssetId ? { anchorIds: [input.anchorAssetId] } : {}),
+      },
+    },
+    source: "generated",
+  };
+
+  return { asset, path: filePath };
 }
 
 export async function generateSoundtrack(input: {

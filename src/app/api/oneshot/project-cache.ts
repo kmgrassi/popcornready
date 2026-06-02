@@ -14,6 +14,7 @@ import {
   StoryContext,
   TimelineSegment,
 } from "@/lib/types";
+import type { Asset, AssetSelection } from "@/lib/assets/types";
 import { newId } from "./config";
 
 export async function savePartialProject(input: {
@@ -27,6 +28,11 @@ export async function savePartialProject(input: {
   characterProfiles: CharacterProfile[];
   characterReferences: CharacterReference[];
   showCaptions: boolean;
+  // Self-describing pooled assets (e.g. per-beat keyframes) and the active
+  // selection pointers into them (asset-pool PR D). Persisted alongside clips so
+  // keyframes are no longer throwaway (North Star Principle 9).
+  assets?: Asset[];
+  selections?: AssetSelection[];
 }): Promise<void> {
   const videoClips = input.clips.filter((clip) => clip.kind === "video");
   const clips = input.soundtrack ? [...input.clips, input.soundtrack] : input.clips;
@@ -68,6 +74,10 @@ export async function savePartialProject(input: {
     plan: input.plan,
     timeline,
     clips,
+    ...(input.assets && input.assets.length ? { assets: input.assets } : {}),
+    ...(input.selections && input.selections.length
+      ? { selections: input.selections }
+      : {}),
     characterProfiles: input.characterProfiles,
     characterReferences: input.characterReferences,
     preGenerationReview: input.preGenerationReview || null,
