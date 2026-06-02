@@ -7,6 +7,7 @@ export {
   canonicalJSON,
   hashAsset,
   recomputeFingerprints,
+  requestFingerprint,
   upstreamIdsOf,
 } from "./fingerprint";
 export { buildProvenanceGraph } from "./graph";

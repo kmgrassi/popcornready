@@ -143,6 +143,11 @@ export interface Clip {
     inputs?: {
       firstFrameAssetId?: string;
     };
+    // Canonical hash of the stable request inputs this asset was generated for
+    // (e.g. the soundtrack's goal/style/length). Drives reuse-vs-regenerate on
+    // resume in place of brittle string/duration matching. Owned by the
+    // provenance-graph lane (src/lib/provenance/fingerprint.ts).
+    requestFingerprint?: string;
   };
   characterBinding?: GeneratedAssetCharacterBinding;
   videoReview?: VideoSnapshotReview;

@@ -25,6 +25,15 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+// Fingerprint of a request descriptor (not a graph node): the canonical hash of
+// the stable inputs a generated asset was *requested* with. Used to decide reuse
+// vs regenerate for request-driven assets like the soundtrack, generalising the
+// ad-hoc string/duration matching they used before. Distinct from an asset's
+// graph fingerprint (which folds upstream hashes); this hashes only the request.
+export function requestFingerprint(value: unknown): string {
+  return sha256(canonicalJSON(value));
+}
+
 // Deterministic JSON: object keys sorted recursively so key insertion order
 // never affects the hash. Arrays keep their order (it is semantic). undefined
 // members are dropped (treated as absent).

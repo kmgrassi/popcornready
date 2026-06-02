@@ -19,6 +19,7 @@ import {
   TimelineSegment,
 } from "@/lib/types";
 import { newId } from "./config";
+import { soundtrackRequestFingerprint } from "./prompts";
 
 // Build the pool `assets`/`selections` contribution for the recurring character
 // (asset-pool PR E): the `character_anchor` asset plus the `character_anchor`
@@ -184,32 +185,32 @@ export async function resumablePoolForGoal(goal: string): Promise<{
   };
 }
 
-// Tolerance (seconds) for treating a cached soundtrack's duration as matching
-// the current request. Audio durations decoded from media bytes rarely land
-// exactly on the requested length.
-const SOUNDTRACK_DURATION_TOLERANCE_SEC = 1.5;
+type SoundtrackRequest = { goal: string; style: string; targetLengthSec: number };
 
-export async function resumableSoundtrackForGoal(input: {
-  goal: string;
-  style: string;
-  targetLengthSec: number;
-}): Promise<Clip | null> {
+// Whether a cached soundtrack still satisfies the current request: its frozen
+// request fingerprint must equal the current one. Pure + exported so the match
+// rule is unit-testable without the store. A clip generated before request
+// fingerprints existed has none, so it never matches → it regenerates once.
+export function soundtrackMatchesRequest(
+  clip: Clip,
+  request: SoundtrackRequest
+): boolean {
+  const stored = clip.generatedBy?.requestFingerprint;
+  return stored !== undefined && stored === soundtrackRequestFingerprint(request);
+}
+
+export async function resumableSoundtrackForGoal(
+  input: SoundtrackRequest
+): Promise<Clip | null> {
   const existing = await getProject();
-  if (existing.goal !== input.goal) return null;
-  // Only reuse a cached soundtrack when it still matches the current request.
   // The editor exposes target length and style independently of the brief, so
-  // rerunning the same goal at a different length/style must regenerate audio
-  // rather than auto-selecting a stale clip of the wrong duration.
+  // rerunning at a different goal/length/style must regenerate audio rather than
+  // auto-selecting a stale clip. A single request-fingerprint comparison
+  // captures all three (goal included) — replacing the old goal-equality +
+  // duration-tolerance + style-substring heuristic.
   const candidate = existing.clips.find((clip) => clip.kind === "audio");
   if (!candidate) return null;
-  const duration = candidate.measuredDurationSec ?? candidate.durationSec;
-  const durationMatches =
-    Math.abs(duration - input.targetLengthSec) <=
-    SOUNDTRACK_DURATION_TOLERANCE_SEC;
-  const styleMatches = candidate.generatedBy?.prompt
-    ? candidate.generatedBy.prompt.includes(`Visual style: ${input.style}`)
-    : true;
-  return durationMatches && styleMatches ? candidate : null;
+  return soundtrackMatchesRequest(candidate, input) ? candidate : null;
 }
 
 type ResumableCharacter = {
