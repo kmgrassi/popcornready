@@ -10,7 +10,11 @@ import {
   TimelineSegment,
 } from "../types";
 import { clipCatalog, timelineForPrompt } from "../timeline";
-import { compileTimelineViaEditGraph, editGraphBeatId } from "../edit-graph";
+import {
+  compileTimelineViaEditGraph,
+  editGraphBeatId,
+  ensureBeatIds,
+} from "../edit-graph";
 import { storyContextForPrompt } from "../story-context";
 import {
   estimateWordsForDuration,
@@ -71,7 +75,8 @@ function storyPlanText(p: EditPlan): string {
     planText(p),
     "story beat ids:",
     ...p.beats.map(
-      (beat, index) => `  - ${editGraphBeatId(index, beat.name)}: ${beat.name}`
+      (beat, index) =>
+        `  - ${beat.id || editGraphBeatId(index, beat.name)}: ${beat.name}`
     ),
   ].join("\n");
 }
@@ -108,6 +113,8 @@ Produce the edit plan.`;
   });
   // Honor the user's explicit aspect ratio choice.
   plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
+  // Mint stable beat ids at creation so the whole chain links by id, not role.
+  ensureBeatIds(plan);
   return plan;
 }
 
@@ -159,6 +166,8 @@ Critique and revise this plan before media generation.`;
   report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
   report.revisedPlan.style = input.style;
   report.revisedPlan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
+  // The revised plan is a fresh plan; ensure its beats are addressable.
+  ensureBeatIds(report.revisedPlan);
   return report;
 }
 
@@ -205,7 +214,10 @@ Produce the edit decisions now.`;
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
   const beatsById = new Map(
-    input.plan.beats.map((beat, index) => [editGraphBeatId(index, beat.name), beat])
+    input.plan.beats.map((beat, index) => [
+      beat.id || editGraphBeatId(index, beat.name),
+      beat,
+    ])
   );
   const timeline: Timeline = {
     aspectRatio: input.plan.aspectRatio,
@@ -218,6 +230,7 @@ Produce the edit decisions now.`;
         sourceInSec: decision.sourceInSec,
         sourceOutSec: decision.sourceOutSec,
         role: beat?.name || decision.beatId,
+        beatId: beat?.id || decision.beatId,
         reason: decision.rationale,
         ...(decision.caption === undefined ? {} : { caption: decision.caption }),
       };

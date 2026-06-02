@@ -141,6 +141,10 @@ export interface Clip {
 }
 
 export interface Beat {
+  // Stable id minted at plan creation so assets/segments reference a beat by id
+  // rather than its (non-unique, rename-fragile) `name`. Optional for backward
+  // compatibility with plans persisted before stable ids existed.
+  id?: string;
   name: string; // e.g. "hook", "problem", "solution", "proof", "cta"
   durationSec: number;
   intent: string;
@@ -179,7 +183,10 @@ export interface TimelineSegment {
   clipId: string;
   sourceInSec: number;
   sourceOutSec: number;
-  role: string; // which beat this serves
+  role: string; // which beat this serves (display label)
+  // Stable id of the beat this segment serves. Preferred over `role` for
+  // beat↔segment linkage; `role` is kept for display and legacy fallback.
+  beatId?: string;
   reason: string;
   caption?: string;
 }

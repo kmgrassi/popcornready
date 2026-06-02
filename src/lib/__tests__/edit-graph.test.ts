@@ -5,6 +5,7 @@ import {
   compileEditGraphToTimeline,
   compileTimelineViaEditGraph,
   createEditGraphFromTimeline,
+  ensureBeatIds,
   patchesToEditGraphOperations,
   synthesizeEditGraph,
 } from "../edit-graph";
@@ -263,4 +264,59 @@ test("applyPatches compatibility uses the edit graph compiler", () => {
   assert.deepEqual(viaGraph.timeline, direct);
   assert.equal(viaGraph.editGraph.edit.decisions.length, 1);
   assert.equal(viaGraph.graphOperations.length, 2);
+});
+
+test("same-name beats get distinct ids and the graph links by beatId", () => {
+  const dupPlan: EditPlan = {
+    targetLengthSec: 6,
+    style: "punchy",
+    aspectRatio: "9:16",
+    beats: [
+      { name: "shot", durationSec: 3, intent: "first shot" },
+      { name: "shot", durationSec: 3, intent: "second shot" },
+    ],
+  };
+  ensureBeatIds(dupPlan);
+  const [b0, b1] = dupPlan.beats;
+  assert.ok(b0.id && b1.id && b0.id !== b1.id, "duplicate-name beats get distinct ids");
+
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      { id: "seg_1", clipId: "clip_a", sourceInSec: 0, sourceOutSec: 3, role: "shot", beatId: b0.id, reason: "first" },
+      { id: "seg_2", clipId: "clip_b", sourceInSec: 0, sourceOutSec: 3, role: "shot", beatId: b1.id, reason: "second" },
+    ],
+  };
+  const graph = synthesizeEditGraph({ id: "g", goal: "x", plan: dupPlan, timeline, clips });
+
+  // Story beats keep the distinct minted ids...
+  assert.deepEqual(graph.story.beats.map((b) => b.id), [b0.id, b1.id]);
+  // ...and each decision links to its own beat by id, not collapsed by the
+  // shared "shot" role (the bug stable ids fix).
+  assert.deepEqual(graph.edit.decisions.map((d) => d.beatId), [b0.id, b1.id]);
+});
+
+test("legacy plans/segments without ids fall back to role-derived ids", () => {
+  const legacyPlan: EditPlan = {
+    targetLengthSec: 6,
+    style: "p",
+    aspectRatio: "9:16",
+    beats: [
+      { name: "hook", durationSec: 3, intent: "a" },
+      { name: "proof", durationSec: 3, intent: "b" },
+    ],
+  };
+  const timeline: Timeline = {
+    aspectRatio: "9:16",
+    fps: 30,
+    segments: [
+      { id: "seg_1", clipId: "clip_a", sourceInSec: 0, sourceOutSec: 3, role: "hook", reason: "" },
+      { id: "seg_2", clipId: "clip_b", sourceInSec: 0, sourceOutSec: 3, role: "proof", reason: "" },
+    ],
+  };
+  const graph = synthesizeEditGraph({ id: "g", goal: "x", plan: legacyPlan, timeline, clips });
+
+  assert.deepEqual(graph.story.beats.map((b) => b.id), ["beat_1_hook", "beat_2_proof"]);
+  assert.deepEqual(graph.edit.decisions.map((d) => d.beatId), ["beat_1_hook", "beat_2_proof"]);
 });

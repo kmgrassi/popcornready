@@ -11,6 +11,7 @@ import {
   CompositionPlan,
   Project,
 } from "./types";
+import { ensureBeatIds } from "./edit-graph";
 
 // MVP persistence: a single project in a JSON file. Swap for Postgres later.
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -73,6 +74,8 @@ function ensureCollections(p: Project): Project {
   p.characterReferences ||= [];
   p.compositions ||= [];
   p.assetGenerationJobs ||= [];
+  // Migration: backfill stable beat ids for plans persisted before Beat.id.
+  if (p.plan) ensureBeatIds(p.plan);
   return p;
 }
 
