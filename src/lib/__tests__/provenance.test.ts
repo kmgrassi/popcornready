@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Asset } from "../assets/types";
-import type { EditPlan } from "../types";
+import type { EditPlan, Project } from "../types";
+import { poolAssets } from "../assets/pool";
 import {
   buildProvenanceGraph,
   canonicalJSON,
@@ -276,4 +277,33 @@ test("assets without a stored fingerprint are never candidates", () => {
   edited.beats[0].intent = "changed";
   const candidates = computeCandidateStaleSet(mixed, edited);
   assert.ok(!candidates.some((c) => c.assetId === "kf_1"));
+});
+
+// --- unified pool: generated clips still in clips[] become graph nodes --------
+
+test("a generated beat video in clips[] surfaces as a graph node + keyframe edge", () => {
+  // Until Clip/Asset convergence, generated videos live in clips[], not assets[].
+  // The read API builds over poolAssets() so the graph still sees the clip and
+  // its firstFrameAssetId edge to the pooled keyframe.
+  const project = {
+    id: "default",
+    assets: [keyframe1],
+    clips: [
+      {
+        id: "vid_1",
+        filename: "vid_1.mp4",
+        url: "/generated/vid_1.mp4",
+        kind: "video",
+        durationSec: 4,
+        description: "beat 1 clip",
+        source: "generated",
+        generatedBy: { provider: "gemini", prompt: "shot", inputs: { firstFrameAssetId: "kf_1" } },
+      },
+    ],
+  } as unknown as Project;
+
+  const graph = buildProvenanceGraph(poolAssets(project));
+  assert.ok(graph.byId.has("vid_1"), "clip should be a graph node");
+  assert.deepEqual(graph.byId.get("vid_1")!.upstreamAssetIds, ["kf_1"]);
+  assert.deepEqual(graph.dependentsOf.get("kf_1"), ["vid_1"]);
 });
