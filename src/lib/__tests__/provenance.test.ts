@@ -6,6 +6,7 @@ import {
   buildProvenanceGraph,
   canonicalJSON,
   computeCandidateStaleSet,
+  freezeFingerprints,
   recomputeFingerprints,
 } from "../provenance";
 
@@ -234,6 +235,37 @@ test("a beat edit ripples to a no-beat composite as upstream_stale", () => {
   assert.ok(final, "final video should be a candidate");
   assert.equal(final!.reason, "upstream_stale");
   assert.deepEqual(final!.changedInputs, ["clip_1"]);
+});
+
+// --- freezeFingerprints ---------------------------------------------------
+
+test("freezeFingerprints stamps a fingerprint onto generated assets", () => {
+  const frozen = freezeFingerprints([anchor, keyframe1, clip1], plan());
+  for (const a of frozen) {
+    assert.ok(a.provenance?.fingerprint, `${a.id} should be frozen`);
+    assert.equal(a.provenance!.fingerprint!.fingerprintVersion, "fp.v1");
+  }
+});
+
+test("freezeFingerprints is write-once: existing fingerprints are preserved", () => {
+  // Freeze against the original plan, then edit a beat and re-freeze.
+  const first = freezeFingerprints([keyframe1], plan());
+  const originalHash = first[0].provenance!.fingerprint!.inputHash;
+  const edited = plan();
+  edited.beats[0].intent = "changed";
+  const second = freezeFingerprints(first, edited);
+  // The already-frozen baseline must NOT be overwritten, or staleness is lost.
+  assert.equal(second[0].provenance!.fingerprint!.inputHash, originalHash);
+});
+
+test("freeze then edit then compute surfaces the candidate end-to-end", () => {
+  const frozen = freezeFingerprints([anchor, keyframe1, clip1], plan());
+  const edited = plan();
+  edited.beats[0].intent = "open on the strongest moment";
+  const ids = computeCandidateStaleSet(frozen, edited)
+    .map((c) => c.assetId)
+    .sort();
+  assert.deepEqual(ids, ["clip_1", "kf_1"]);
 });
 
 test("assets without a stored fingerprint are never candidates", () => {
