@@ -1,5 +1,6 @@
 import { AspectRatio, Beat, EditPlan } from "@/lib/types";
 import { videoQualityContextForPrompt } from "@/lib/video-quality-context";
+import { requestFingerprint } from "@/lib/provenance";
 
 function characterContinuityBlock(goal: string): string {
   const ageMatch = goal.match(/\b(\d{1,2})[- ]year[- ]old\b/i);
@@ -72,4 +73,24 @@ export function soundtrackPrompt(input: {
     `Story beats: ${beatSummary}`,
     `The music should support the edit, rise and fall with the scene progression, and leave room for future dialogue or narration.`,
   ].join(" ");
+}
+
+// Reuse key for a cached soundtrack: the canonical hash of the stable, user-
+// controlled request inputs. The story beats are deliberately EXCLUDED — they
+// are re-planned non-deterministically by the LLM on every run, so folding them
+// in would needlessly invalidate a perfectly good track each resume. This
+// generalises the old goal-equality + duration-tolerance + style-substring
+// check into one exact comparison (goal is now inside the hash). See
+// docs/scopes/north-star-provenance-graph.md task #7.
+export function soundtrackRequestFingerprint(input: {
+  goal: string;
+  style: string;
+  targetLengthSec: number;
+}): string {
+  return requestFingerprint({
+    kind: "soundtrack",
+    goal: input.goal,
+    style: input.style,
+    targetLengthSec: input.targetLengthSec,
+  });
 }

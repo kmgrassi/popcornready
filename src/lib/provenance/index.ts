@@ -7,9 +7,11 @@ export {
   canonicalJSON,
   hashAsset,
   recomputeFingerprints,
+  requestFingerprint,
   upstreamIdsOf,
 } from "./fingerprint";
 export { buildProvenanceGraph } from "./graph";
 export type { ProvenanceGraph, ProvenanceNode } from "./graph";
 export { computeCandidateStaleSet } from "./stale";
 export type { StaleCandidate } from "./stale";
+export { freezeFingerprints } from "./freeze";

@@ -13,6 +13,13 @@ import {
 } from "./types";
 import { ensureBeatIds } from "./edit-graph";
 import type { Asset } from "./assets/types";
+import { poolAssets } from "./assets/pool";
+import {
+  buildProvenanceGraph,
+  computeCandidateStaleSet,
+  freezeFingerprints,
+} from "./provenance";
+import type { ProvenanceGraph, StaleCandidate } from "./provenance";
 
 // MVP persistence: a single project in a JSON file. Swap for Postgres later.
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -95,9 +102,36 @@ export async function getProject(): Promise<Project> {
 
 export async function saveProject(p: Project): Promise<Project> {
   p.updatedAt = new Date().toISOString();
+  // Freeze provenance fingerprints onto any newly-pooled assets (write-once), so
+  // the candidate-stale walk has a baseline to compare the current plan against.
+  if (p.assets && p.assets.length) {
+    p.assets = freezeFingerprints(p.assets, p.plan);
+  }
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(PROJECT_FILE, JSON.stringify(p, null, 2), "utf8");
   return p;
+}
+
+// Provenance read API (provenance-graph lane, task #7) — the surface the
+// orchestrator/agent reasons over. The candidate set is a *signal*: it names
+// assets whose inputs drifted from the current plan, never an auto-regeneration.
+//
+// Reads build over the UNIFIED pool (`poolAssets`): explicit pooled assets
+// (keyframes, character anchor) PLUS the generated beat videos that still live
+// in `clips[]`, projected via `clipToAsset`. Until Clip/Asset convergence (the
+// store-consolidation lane) the generated clips are not pooled explicitly, so
+// without this projection the graph would omit clip nodes and their
+// `generatedBy.inputs.firstFrameAssetId` keyframe edges entirely. (Clips carry
+// no frozen fingerprint baseline yet, so they appear as graph nodes/edges but
+// not as stale candidates — full clip staleness arrives with convergence.)
+export async function getProvenanceGraph(): Promise<ProvenanceGraph> {
+  const p = await getProject();
+  return buildProvenanceGraph(poolAssets(p));
+}
+
+export async function getStaleCandidates(): Promise<StaleCandidate[]> {
+  const p = await getProject();
+  return computeCandidateStaleSet(poolAssets(p), p.plan);
 }
 
 export async function addClip(clip: Clip): Promise<Project> {
