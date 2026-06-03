@@ -28,3 +28,8 @@ timeline with patches" model.
   Next skip `.env.local` and drop API keys).
 - Character/keyframe images of minors must use Gemini (OpenAI image-edit rejects
   editing photorealistic minors).
+- Supabase/RLS: `public.users.id` (app/domain id) is **not** `auth.uid()` — they
+  are linked by `public.users.auth_id`. RLS policies on app tables must compare
+  to `public.current_app_user_id()`, not `auth.uid()`. Before writing any
+  migration or policy that touches users, read
+  [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-rls.md).
