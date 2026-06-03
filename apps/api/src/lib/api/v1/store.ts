@@ -6,6 +6,7 @@
 // the function signatures below.
 
 import { promises as fs } from "fs";
+import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { notFound } from "./errors";
 import { newId } from "./ids";
@@ -138,10 +139,17 @@ interface V1Db {
 }
 
 const DB_SCHEMA_VERSION = "agentDb.v1";
+const localDirContext = new AsyncLocalStorage<string>();
 
 // Resolved per call so tests can point POPCORN_READY_LOCAL_DIR at a temp directory.
 export function localDir(): string {
+  const contextualDir = localDirContext.getStore();
+  if (contextualDir) return contextualDir;
   return process.env.POPCORN_READY_LOCAL_DIR || path.join(process.cwd(), ".local");
+}
+
+export function withLocalDir<T>(dir: string, fn: () => T): T {
+  return localDirContext.run(dir, fn);
 }
 
 function dbFile(): string {

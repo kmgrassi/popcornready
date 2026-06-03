@@ -15,6 +15,7 @@ import {
   updateAssetAnalysis,
   V1Asset,
   V1AssetAnalysis,
+  withLocalDir,
 } from "./store";
 
 const execFileAsync = promisify(execFile);
@@ -411,6 +412,25 @@ async function runAnalysisJob(args: {
   });
 }
 
+function startAnalysisJob(args: {
+  auth: AuthContext;
+  projectId: string;
+  input: AnalyzeBatchInput;
+  job: V1Job;
+}): void {
+  const queuedLocalDir = localDir();
+  void withLocalDir(queuedLocalDir, () =>
+    runAnalysisJob(args).catch(async (err) => {
+      const message = err instanceof Error ? err.message : "Asset analysis failed.";
+      await updateJob(args.job.id, {
+        status: "failed",
+        progress: { currentStep: "asset_analysis", percent: 100 },
+        error: { code: "asset_analysis_failed", message },
+      });
+    })
+  );
+}
+
 export async function analyzeAssetBatch(args: {
   auth: AuthContext;
   projectId: string;
@@ -432,8 +452,8 @@ export async function analyzeAssetBatch(args: {
     error: null,
   });
 
-  const completed = await runAnalysisJob({ ...args, job });
-  return { status: 202, body: { job: completed } };
+  startAnalysisJob({ ...args, job });
+  return { status: 202, body: { job } };
 }
 
 export async function getAssetAnalysisJob(args: {

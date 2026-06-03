@@ -61,6 +61,24 @@ async function fakeFfmpeg(): Promise<string> {
   return script;
 }
 
+async function waitForAnalysisJob(
+  jobId: string,
+  terminalStatus: "succeeded" | "failed"
+): Promise<{ status: string; error?: { code: string } }> {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    const polled = await getAssetAnalysisJob({
+      auth,
+      projectId: project.id,
+      jobId,
+    });
+    const job = polled.body.job as { status: string; error?: { code: string } };
+    if (job.status === terminalStatus) return job;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for asset analysis job ${jobId}.`);
+}
+
 test("videoSampleTimes uses five default samples and ten for long videos", () => {
   assert.deepEqual(videoSampleTimes(50, 5, 10), [
     8.3,
@@ -94,6 +112,20 @@ test("parseAnalyzeBatch applies PR2 defaults and validates sample counts", () =>
         "between 1 and 10"
       )
   );
+
+  assert.throws(
+    () =>
+      parseAnalyzeBatch({
+        assetIds: ["asset_1"],
+        analysisOptions: { transcribeAudio: true },
+      }),
+    (err: unknown) =>
+      Boolean(
+        (err as { details?: { fields?: { message: string }[] } }).details?.fields?.some(
+          (field) => field.message.includes("Audio transcription is not implemented")
+        )
+      )
+  );
 });
 
 test("analyzeAssetBatch samples frames and persists structured low-confidence observations", async () => {
@@ -113,7 +145,9 @@ test("analyzeAssetBatch samples frames and persists structured low-confidence ob
   const job = response.body.job as { id: string; status: string; type: string };
   assert.equal(response.status, 202);
   assert.equal(job.type, "asset_analysis");
-  assert.equal(job.status, "succeeded");
+  assert.equal(job.status, "queued");
+
+  await waitForAnalysisJob(job.id, "succeeded");
 
   const updated = await getAsset(LOCAL_WORKSPACE_ID, project.id, asset.id);
   assert.equal(updated.analysis?.status, "succeeded");
@@ -148,8 +182,9 @@ test("analyzeAssetBatch records a failed analysis when ffmpeg is unavailable", a
     input: parseAnalyzeBatch({ assetIds: [asset.id] }),
   });
   const job = response.body.job as { status: string; error?: { code: string } };
-  assert.equal(job.status, "failed");
-  assert.equal(job.error?.code, "asset_analysis_failed");
+  assert.equal(job.status, "queued");
+  const completed = await waitForAnalysisJob((response.body.job as { id: string }).id, "failed");
+  assert.equal(completed.error?.code, "asset_analysis_failed");
 
   const updated = await getAsset(LOCAL_WORKSPACE_ID, project.id, asset.id);
   assert.equal(updated.analysis?.status, "failed");

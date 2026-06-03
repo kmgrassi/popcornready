@@ -1160,6 +1160,12 @@ export function parseAnalyzeBatch(input: unknown): AnalyzeBatchInput {
     "analysisOptions.transcribeAudio",
     fields
   );
+  if (transcribeAudio) {
+    fields.push({
+      path: "analysisOptions.transcribeAudio",
+      message: "Audio transcription is not implemented for asset analysis yet.",
+    });
+  }
 
   throwIfInvalid(fields);
 
