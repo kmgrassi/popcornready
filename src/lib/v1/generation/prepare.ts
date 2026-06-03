@@ -88,6 +88,30 @@ function generatedGapBeatNames(composition: CompositionPlan): string[] {
     .map((beat) => beat.name);
 }
 
+function requireExplicitHybridGapFillChoice(
+  composition: CompositionPlan,
+  allowGeneratedGapFill: boolean | undefined
+): void {
+  const missingBeats = generatedGapBeatNames(composition);
+  if (composition.mode !== "hybrid" || missingBeats.length === 0) return;
+  if (allowGeneratedGapFill !== undefined) return;
+
+  throw new ApiError(
+    "validation_failed",
+    "Hybrid gap fill requires an explicit allowGeneratedGapFill choice.",
+    {
+      fields: [
+        {
+          path: "allowGeneratedGapFill",
+          message:
+            "Set true to include generated gap-fill assets, or false to proceed uploaded-only.",
+        },
+      ],
+      missingBeats,
+    }
+  );
+}
+
 export async function prepareGeneration(
   store: V1Store,
   projectId: string,
@@ -172,22 +196,7 @@ export async function prepareGeneration(
   let assetIds: string[];
   if (requestedAssetIds.length > 0) {
     if (composition?.mode === "hybrid" && generatedGapBeatNames(composition).length > 0) {
-      if (allowGeneratedGapFill === undefined) {
-        throw new ApiError(
-          "validation_failed",
-          "Hybrid gap fill requires an explicit allowGeneratedGapFill choice.",
-          {
-            fields: [
-              {
-                path: "allowGeneratedGapFill",
-                message:
-                  "Set true to include generated gap-fill assets, or false to proceed uploaded-only.",
-              },
-            ],
-            missingBeats: generatedGapBeatNames(composition),
-          }
-        );
-      }
+      requireExplicitHybridGapFillChoice(composition, allowGeneratedGapFill);
       if (allowGeneratedGapFill) {
         if (composition.status !== "ready_for_timeline") {
           throw new ApiError(
@@ -205,6 +214,22 @@ export async function prepareGeneration(
       assetIds = requestedAssetIds;
     }
   } else if (composition) {
+    requireExplicitHybridGapFillChoice(composition, allowGeneratedGapFill);
+    if (composition.mode === "hybrid" && allowGeneratedGapFill === false) {
+      throw new ApiError(
+        "validation_failed",
+        "assetIds is required to proceed uploaded-only with a hybrid composition.",
+        {
+          fields: [
+            {
+              path: "assetIds",
+              message:
+                "Provide uploaded assetIds, or set allowGeneratedGapFill true to use generated assets.",
+            },
+          ],
+        }
+      );
+    }
     // Prompt-only: assetIds may be empty only when the composition is done.
     if (composition.status !== "ready_for_timeline") {
       throw new ApiError(

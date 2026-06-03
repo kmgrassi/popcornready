@@ -470,6 +470,101 @@ test("hybrid uploaded-only choice leaves generated gap-fill assets out", async (
   });
 });
 
+test("empty hybrid gap-fill requests still require an explicit user choice", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    for (const assetIds of [undefined, [] as string[]]) {
+      await assert.rejects(
+        () =>
+          createGenerationJob({
+            store,
+            actor: resolveActor(),
+            projectId: project.id,
+            body: {
+              briefVersionId: brief.id,
+              ...(assetIds === undefined ? {} : { assetIds }),
+              compositionId: composition.id,
+              mode: "hybrid",
+            },
+          }),
+        (err) =>
+          err instanceof ApiError &&
+          err.code === "validation_failed" &&
+          /allowGeneratedGapFill/.test(err.message)
+      );
+    }
+  });
+});
+
+test("empty hybrid uploaded-only choice asks for uploaded assets", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    await assert.rejects(
+      () =>
+        createGenerationJob({
+          store,
+          actor: resolveActor(),
+          projectId: project.id,
+          body: {
+            briefVersionId: brief.id,
+            assetIds: [],
+            compositionId: composition.id,
+            mode: "hybrid",
+            allowGeneratedGapFill: false,
+          },
+        }),
+      (err) =>
+        err instanceof ApiError &&
+        err.code === "validation_failed" &&
+        /assetIds is required/.test(err.message)
+    );
+  });
+});
+
 test("assets must be ready before selection", async () => {
   await withStore(async (store) => {
     const project = await seedProject(store);
