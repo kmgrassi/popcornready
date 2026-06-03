@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request } from "express";
 import cors from "cors";
 import { requestContext } from "./middleware/request-context.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
@@ -18,10 +18,15 @@ export function createServer(): Express {
 
   app.disable("x-powered-by");
   app.use(cors(corsOptions()));
-  // Raw body is captured per-route where idempotency hashing needs it; default
-  // JSON parsing covers the rest.
-  app.use(express.json({ limit: "25mb" }));
   app.use(requestContext);
+  app.use(
+    express.json({
+      limit: "25mb",
+      verify(req, _res, buf) {
+        (req as Request).rawBody = buf.toString("utf8");
+      },
+    })
+  );
 
   mountV1(app);
 

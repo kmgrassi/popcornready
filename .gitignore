@@ -12,6 +12,7 @@ yarn.lock
 .env*.local
 /data
 /.local
+/apps/api/.local
 /public/uploads
 /public/exports
 /public/generated

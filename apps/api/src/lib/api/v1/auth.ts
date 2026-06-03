@@ -4,7 +4,7 @@
 // verifies a Supabase browser access token and maps the user to a stable
 // workspace in the local store until the project data model moves to Postgres.
 
-import { NextRequest } from "next/server";
+import type { ApiRequestView } from "./handler";
 import { ApiError } from "./errors";
 import { ensureWorkspace } from "./store";
 import { getSupabaseAuthUser, SupabaseServerConfigError } from "@/lib/supabase/server";
@@ -36,8 +36,8 @@ export function isLocalMode(): boolean {
   return authMode() === "local";
 }
 
-function bearerToken(req: NextRequest): string | null {
-  const value = req.headers.get("authorization")?.trim();
+export function bearerToken(req: ApiRequestView): string | null {
+  const value = req.header("authorization")?.trim();
   if (!value?.toLowerCase().startsWith("bearer ")) return null;
   return value.slice("bearer ".length).trim() || null;
 }
@@ -46,7 +46,7 @@ function workspaceIdForUser(userId: string) {
   return `ws_user_${userId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 }
 
-export async function resolveAuth(req?: NextRequest): Promise<AuthContext> {
+export async function resolveAuth(req?: ApiRequestView): Promise<AuthContext> {
   if (authMode() === "local") {
     await ensureWorkspace(LOCAL_WORKSPACE_ID, LOCAL_WORKSPACE_NAME);
     return {
