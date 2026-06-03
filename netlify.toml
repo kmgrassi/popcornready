@@ -4,12 +4,14 @@
 # Railway API origin (e.g. https://api.popcornready.app).
 
 [build]
-  command = "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @popcorn/web... build"
+  # Netlify auto-detects pnpm from pnpm-lock.yaml + the root packageManager
+  # field and runs `pnpm install` before this command, so the command only
+  # needs to build the web workspace (and its workspace deps via `...`).
+  command = "pnpm --filter @popcorn/web... build"
   publish = "apps/web/dist"
 
 [build.environment]
   NODE_VERSION = "20"
-  PNPM_VERSION = "9.12.2"
 
 # SPA fallback: every non-asset route resolves to index.html so client-side
 # routing (react-router) handles deep links.
