@@ -4,6 +4,12 @@ Tracks the work to move Popcorn Ready off the `.local/` JSON stores onto Supabas
 (Postgres + Storage + Auth), scoped into PRs that **parallelize**. Each PR lists
 its dependencies so independent ones can run concurrently.
 
+**Scope of this roadmap:** the database/Supabase cutover — Tracks **A** (schema),
+**C** (store→Postgres), **D** (bytes→Storage), **F** (invites). Track **E**
+(monorepo split) is a **separate, concurrent effort owned by another agent**; it
+appears here only because C/D land inside its new API package, i.e. as a
+dependency we don't own. Track **B** (auth) has its own foundation branch.
+
 > **This is a proposed breakdown — edit freely.** Status reflects the state as of
 > this doc's creation. See [`../supabase-identity-and-rls.md`](../supabase-identity-and-rls.md)
 > for the identity model that underpins most of this.
@@ -66,9 +72,11 @@ bucket. Also lands in the split.
 | D1 | Storage write path: uploads + generated assets → bucket; `storageKey` = object path | 🧊 todo | E1, A5, C3 |
 | D2 | Storage read path: render/export resolve bytes from the bucket (signed URLs / download) | 🧊 todo | D1 |
 
-### Track E — Monorepo split (infra)
+### Track E — Monorepo split (infra) — *owned by another agent*
 
-Parallel infra track. E1 (API package) gates C/D. In progress (`monorepo-split` worktree).
+**Not scoped by this roadmap** — listed only as a dependency, since C/D land
+inside the new API package. Owned by the separate monorepo-split effort
+(`monorepo-split` worktree). E1 (API package) gates C/D.
 
 | PR | Scope | Status | Depends on |
 |----|-------|--------|-----------|
