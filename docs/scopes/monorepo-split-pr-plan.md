@@ -109,13 +109,14 @@ files in `src/app/api/v1/**` call these handlers. `resolveAuth(req)` in
 5. Establish the mounting pattern in `routes/v1/index.ts`: each group exports a
    `Router` (or `register(v1)`), mounted with one line. Document it in a comment.
 6. **Port `GET /api/v1/me` and `projects` (`GET`/`POST /projects`,
-   `GET`/`PATCH /projects/:projectId`)** as the reference implementation, using
-   the new schemas/store from `@/lib/api/v1/*`. Keep paths/payloads identical.
+   `GET /projects/:projectId`)** as the reference implementation, using the new
+   schemas/store from `@/lib/api/v1/*`. Keep paths/payloads identical.
+   `projects/:projectId` is **GET-only** today — do not add a `PATCH`.
 
 **Acceptance:**
 - `pnpm exec turbo run typecheck` green; API boots.
 - `curl` parity for `/api/v1/health`, `/api/v1/me`, `GET/POST /api/v1/projects`,
-  `GET/PATCH /api/v1/projects/:id` (auth in `AUTH_MODE=local`): same status,
+  `GET /api/v1/projects/:id` (auth in `AUTH_MODE=local`): same status,
   body envelope, and `X-Request-Id` as the old Next handlers.
 - A short "how to add a route group" note in the PR description.
 
@@ -124,24 +125,29 @@ files in `src/app/api/v1/**` call these handlers. `resolveAuth(req)` in
 **Source:** `src/app/api/v1/projects/[projectId]/assets/route.ts`,
 `…/assets/[assetId]/route.ts`, `…/assets/inventory/route.ts`,
 `…/assets/[assetId]/context/route.ts`.
-**Scope:** port to an `assets` Express router (`GET/POST /assets`,
-`GET /assets/:assetId`, `GET /assets/inventory`,
-`GET/POST? /assets/:assetId/context`) using `@/lib/api/v1/assets.ts`. Mount in
-`routes/v1/index.ts`. **Acceptance:** typecheck green; curl parity for each.
+**Scope:** port to an `assets` Express router, preserving the **exact existing
+verbs**: `GET/POST /assets`, `GET /assets/:assetId`, `POST /assets/inventory`
+(inventory is POST, not GET), `PATCH /assets/:assetId/context` (context is PATCH)
+— using `@/lib/api/v1/assets.ts`. Mount in `routes/v1/index.ts`.
+**Acceptance:** typecheck green; curl parity for each (same verbs).
 
 ## A2 — Brief routes
 **Branch:** `feat/api-route-brief` · **Depends on:** A0
 **Source:** `…/brief/route.ts`, `…/brief-versions/route.ts`.
-**Scope:** `brief` router (`GET/PUT /brief`, `GET /brief-versions`). Mount.
-**Acceptance:** typecheck green; curl parity.
+**Scope:** `brief` router (`GET/PUT /brief`, `GET/POST /brief-versions` —
+brief-versions exports **both** GET and POST; the create endpoint mints the
+immutable brief version generation jobs reference, so it must be ported). Mount.
+**Acceptance:** typecheck green; curl parity for all four verbs.
 
 ## A3 — Generations & generated-assets
 **Branch:** `feat/api-route-generations` · **Depends on:** A0
 **Source:** `…/generations/route.ts`, `…/generations/[jobId]/route.ts`,
 `…/generated-assets/route.ts`, `…/generated-assets/[jobId]/route.ts`.
-**Scope:** routers for `generations` (`GET/POST`, `GET /:jobId`) and
-`generated-assets` (`GET/POST`, `GET /:jobId`) using
-`@/lib/api/v1/generated-assets.ts` + `@/lib/v1/generation/*`. Mount.
+**Scope:** routers for `generations` (`POST /generations`,
+`GET /generations/:jobId`) and `generated-assets` (`POST /generated-assets`,
+`GET /generated-assets/:jobId`) using `@/lib/api/v1/generated-assets.ts` +
+`@/lib/v1/generation/*`. The **collection routes are POST-only**; `GET` exists
+only on `/:jobId` — do not add collection `GET`s. Mount.
 **Acceptance:** typecheck green; curl parity incl. `Idempotency-Key` on POST.
 
 ## A4 — Generation runs
@@ -154,15 +160,19 @@ files in `src/app/api/v1/**` call these handlers. `resolveAuth(req)` in
 
 ## A5 — Timelines, revisions, exports, artifacts
 **Branch:** `feat/api-route-timelines` · **Depends on:** A0
-**Source:** `…/timelines/[timelineId]/route.ts`,
-`…/timelines/[timelineId]/revisions/route.ts`,
+**Source:** `…/timelines/[timelineId]/revisions/route.ts`,
 `…/timelines/[timelineId]/revisions/[jobId]/route.ts`,
 `…/timelines/[timelineId]/exports/route.ts`, `…/exports/[jobId]/route.ts`,
-`…/artifacts/[artifactId]/route.ts`.
-**Scope:** routers for `timelines` (+ nested `revisions`, `exports`), top-level
-`exports/:jobId`, and `artifacts/:artifactId`. Export/render uses
-`@popcorn/renderer` + `@remotion/renderer` (server). Mount.
-**Acceptance:** typecheck green; curl parity; a render/export smoke if feasible.
+`…/artifacts/[artifactId]/route.ts`. (There is **no** bare
+`timelines/[timelineId]/route.ts` — the timeline resource only has the nested
+sub-collections below.)
+**Scope:** nested `timelines/:timelineId` routes — `POST
+/timelines/:timelineId/revisions`, `GET /timelines/:timelineId/revisions/:jobId`,
+`POST /timelines/:timelineId/exports` — plus top-level `GET /exports/:jobId` and
+`GET /artifacts/:artifactId`. Export/render uses `@popcorn/renderer` +
+`@remotion/renderer` (server). Mount.
+**Acceptance:** typecheck green; curl parity (same verbs); a render/export smoke
+if feasible.
 
 ## A6 — Re-express generation entry points as v1 (NO legacy)
 **Branch:** `feat/api-v1-generation-entrypoints` · **Depends on:** A0
