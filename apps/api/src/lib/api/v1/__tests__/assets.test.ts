@@ -7,6 +7,14 @@ import { AuthContext } from "../auth";
 import { inventoryAssets, registerAsset, updateAssetContext } from "../assets";
 import { createProject, localDir, V1Project } from "../store";
 
+// These exercise the v1 store, which now persists to Supabase Postgres (needs a
+// live PostgREST gateway). Skipped unless Supabase env is configured; the store's
+// asset round-trips are proven by the dockerized pg harness in this PR.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const dbTest: typeof test = SUPABASE_CONFIGURED ? test : (test.skip as typeof test);
+
 let tmpDir: string;
 let sourceDir: string;
 let project: V1Project;
@@ -22,6 +30,7 @@ beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-store-"));
   sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-v1-src-"));
   process.env.POPCORN_READY_LOCAL_DIR = tmpDir;
+  if (!SUPABASE_CONFIGURED) return; // tests below are skipped; skip the DB setup too
   const created = await createProject({ workspaceId: "ws_local", name: "Host" });
   project = created.project;
 });
@@ -32,7 +41,7 @@ afterEach(async () => {
   await fs.rm(sourceDir, { recursive: true, force: true });
 });
 
-test("registerAsset records a remote_url asset as pending", async () => {
+dbTest("registerAsset records a remote_url asset as pending", async () => {
   const asset = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/clip.mp4" },
     durationSec: 8,
@@ -59,7 +68,7 @@ test("registerAsset records a remote_url asset as pending", async () => {
   ]);
 });
 
-test("registerAsset stores structured user context and projects it into semantic analysis", async () => {
+dbTest("registerAsset stores structured user context and projects it into semantic analysis", async () => {
   const asset = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/founder.mp4" },
     userContext: {
@@ -85,7 +94,7 @@ test("registerAsset stores structured user context and projects it into semantic
   );
 });
 
-test("updateAssetContext updates knowledge and transcript projection", async () => {
+dbTest("updateAssetContext updates knowledge and transcript projection", async () => {
   const asset = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/interview.mp4" },
   });
@@ -111,7 +120,7 @@ test("updateAssetContext updates knowledge and transcript projection", async () 
   ]);
 });
 
-test("inventoryAssets reports cheap knowns, gaps, and learning actions", async () => {
+dbTest("inventoryAssets reports cheap knowns, gaps, and learning actions", async () => {
   const video = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/raw.mp4" },
   });
@@ -143,7 +152,7 @@ test("inventoryAssets reports cheap knowns, gaps, and learning actions", async (
   );
 });
 
-test("inventoryAssets can exclude cached context-derived knowledge", async () => {
+dbTest("inventoryAssets can exclude cached context-derived knowledge", async () => {
   const asset = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/contextual.mp4" },
     userContext: {
@@ -172,7 +181,7 @@ test("inventoryAssets can exclude cached context-derived knowledge", async () =>
   );
 });
 
-test("registerAsset copies a local_path asset into managed storage as ready", async () => {
+dbTest("registerAsset copies a local_path asset into managed storage as ready", async () => {
   const src = path.join(sourceDir, "narration.mp3");
   await fs.writeFile(src, "fake-audio-bytes");
 
@@ -188,7 +197,7 @@ test("registerAsset copies a local_path asset into managed storage as ready", as
   assert.equal(bytes, "fake-audio-bytes");
 });
 
-test("registerAsset rejects local_path outside local mode", async () => {
+dbTest("registerAsset rejects local_path outside local mode", async () => {
   const src = path.join(sourceDir, "clip.mp4");
   await fs.writeFile(src, "x");
   await assert.rejects(
@@ -202,7 +211,7 @@ test("registerAsset rejects local_path outside local mode", async () => {
   );
 });
 
-test("registerAsset rejects a missing local file", async () => {
+dbTest("registerAsset rejects a missing local file", async () => {
   await assert.rejects(
     () =>
       registerAsset(localAuth, project.id, {
@@ -212,7 +221,7 @@ test("registerAsset rejects a missing local file", async () => {
   );
 });
 
-test("registerAsset rejects unsupported source types", async () => {
+dbTest("registerAsset rejects unsupported source types", async () => {
   await assert.rejects(
     () =>
       registerAsset(localAuth, project.id, {
@@ -222,7 +231,7 @@ test("registerAsset rejects unsupported source types", async () => {
   );
 });
 
-test("registerAsset requires kind when it cannot be inferred", async () => {
+dbTest("registerAsset requires kind when it cannot be inferred", async () => {
   await assert.rejects(
     () =>
       registerAsset(localAuth, project.id, {
@@ -232,7 +241,7 @@ test("registerAsset requires kind when it cannot be inferred", async () => {
   );
 });
 
-test("registerAsset fails for an unknown project", async () => {
+dbTest("registerAsset fails for an unknown project", async () => {
   await assert.rejects(
     () =>
       registerAsset(localAuth, "proj_missing", {
