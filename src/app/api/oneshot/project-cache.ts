@@ -4,11 +4,12 @@ import path from "path";
 import { getProject, saveProject } from "@/lib/store";
 import { sanitizeTimeline } from "@/lib/timeline";
 import { synthesizeEditGraph } from "@/lib/edit-graph";
-import { resolveActiveAsset } from "@/lib/assets/pool";
+import { addAsset, resolveActiveAsset, setSelection } from "@/lib/assets/pool";
 import type { Asset, AssetSelection } from "@/lib/assets/types";
-import { characterAnchorAsset } from "./media-generation";
+import { beatClipAsset, characterAnchorAsset } from "./media-generation";
 import {
   AspectRatio,
+  Beat,
   CharacterProfile,
   CharacterReference,
   Clip,
@@ -68,6 +69,43 @@ export function mergePool(
     }
   }
   return { assets, selections };
+}
+
+// Pool a generated beat clip as a first-class `beat_clip` asset (Clip/Asset
+// convergence): append the asset (same id as the clip, so `poolAssets` dedups the
+// twin and `clips[]` stays the render shape) and point a `beat_clip` selection at
+// it. Pooling it lets `saveProject`'s freezeFingerprints stamp a baseline, so the
+// clip joins the candidate-stale set and the keyframe→clip ripple fires. When the
+// clip is for image-to-video, run this AFTER recordFirstFrameEdge so the
+// firstFrameAssetId edge is carried. Idempotent: addAsset no-ops if the clip was
+// already pooled (e.g. seeded from a prior run), preserving its frozen baseline.
+export function poolBeatClip(
+  poolProject: Project,
+  clip: Clip,
+  beat: Beat,
+  anchorAssetId?: string
+): void {
+  addAsset(
+    poolProject,
+    beatClipAsset(clip, beat, { projectId: poolProject.id, anchorAssetId })
+  );
+  if (beat.id) setSelection(poolProject, "beat_clip", beat.id, clip.id);
+}
+
+// Pool clips carried in from a resumed run. The generation loop starts at
+// clips.length, so it never pools these; without this they'd reach the final save
+// with no `beat_clip` asset/baseline and stay invisible to `getStaleCandidates`.
+// Clips map to beats positionally (resume assumes the same goal → same arc).
+export function poolResumedBeatClips(
+  poolProject: Project,
+  resumedClips: Clip[],
+  plan: EditPlan,
+  anchorAssetId?: string
+): void {
+  resumedClips.forEach((clip, index) => {
+    const beat = plan.beats[index];
+    if (beat) poolBeatClip(poolProject, clip, beat, anchorAssetId);
+  });
 }
 
 export async function savePartialProject(input: {
