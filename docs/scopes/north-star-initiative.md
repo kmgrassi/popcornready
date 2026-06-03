@@ -120,18 +120,24 @@ underway; this log tracks merged + in-flight work (newest first).
   alignment) and most of Lane 2 #3 (per-asset input edges: `beatId`, `anchorIds`,
   `firstFrameAssetId` are populated on the one-shot path).
 
-**In flight:**
 - **Lane 2 #4–#7 — provenance fingerprints + graph + candidate-stale** (#107 pure
-  core; #108 freeze-at-persist + read API, stacked). The keystone for selective
-  regeneration: `recomputeFingerprints` / `buildProvenanceGraph` /
-  `computeCandidateStaleSet`, frozen onto assets at `saveProject` and exposed via
-  `getProvenanceGraph` / `getStaleCandidates`.
+  core; #108 freeze-at-persist + read API; #110 soundtrack request-fingerprint
+  consumer; #111 recovery onto `main`). The keystone for selective regeneration:
+  `recomputeFingerprints` / `buildProvenanceGraph` / `computeCandidateStaleSet`,
+  frozen onto assets at `saveProject` and exposed via `getProvenanceGraph` /
+  `getStaleCandidates`. **Lane 2 fully landed.**
+
+**In flight (scoping):**
+- **Clip/Asset convergence** — the narrow first slice of Lane 4, scoped in
+  [`north-star-clip-asset-convergence.md`](./north-star-clip-asset-convergence.md):
+  pool generated beat clips as `beat_clip` assets so they get fingerprints and the
+  keyframe→clip stale ripple fires (the gap #108/#110 deferred). Keeps `clips[]`
+  and all its readers unchanged; defers the six-store merge.
 
 **Next up (unstarted):**
-- Lane 2 #7 consumer — replace the brittle `resumableSoundtrackForGoal`
-  string-match with a request-fingerprint comparison (proves the model on audio).
-- Lane 4 (store-consolidation) + asset-pool "PR F" — collapse the ~4 stores to
-  one project-scoped store and converge `Clip`/`V1Asset` onto `Asset`.
+- Full Lane 4 (store-consolidation) — collapse the six drifted stores to one
+  project-scoped store; reconcile the two `V1Project`/`V1Asset` shapes; migrate
+  one-shot + studio off the legacy `Project` doc.
 - Lane 5 (unified-engine), then Lanes 3/6/7 on the foundation + engine.
 
 Update this log as PRs merge.
