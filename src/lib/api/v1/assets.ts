@@ -15,12 +15,33 @@ import { buildSemanticAnalysis } from "../../edit-graph/semantic-analysis";
 import { ApiError } from "./errors";
 import { newId } from "./ids";
 import {
+  AgentAssetContext,
+  AssetInventoryInput,
+  AssetInventoryReport,
+  AssetKnowledge,
+  AssetKnowledgeSummary,
+  AssetUse,
   AssetKind,
+  ClipUnderstanding,
+  KnowledgeGap,
+  LearningAction,
   RegisterAssetInput,
   SCHEMA_VERSIONS,
+  UpdateAssetContextInput,
+  UserAssetContext,
   inferKindFromName,
 } from "./schemas";
-import { addAsset, getProject, localDir, mediaUploadDir, V1Asset } from "./store";
+import {
+  addAsset,
+  getProject,
+  listAssets,
+  localDir,
+  mediaUploadDir,
+  updateAsset as updateStoredAsset,
+  V1Asset,
+} from "./store";
+
+const ASSET_KNOWLEDGE_ANALYSIS_VERSION = "assetKnowledge.v1";
 
 function basename(input: string): string {
   try {
@@ -44,6 +65,227 @@ function resolveKind(explicit: AssetKind | undefined, filename: string): AssetKi
     );
   }
   return kind;
+}
+
+function originFor(asset: Pick<V1Asset, "source" | "provenance">): AssetKnowledge["origin"] {
+  if (asset.source.type === "generated" || asset.provenance) return "generated";
+  if (asset.source.type === "remote_url") return "imported";
+  return "uploaded";
+}
+
+function usesForKind(kind: AssetKind, context?: UserAssetContext): AssetUse[] {
+  if (context?.intendedUse?.length) return context.intendedUse;
+  if (kind === "audio") return ["music", "voiceover", "dialogue"];
+  if (kind === "image") return ["primary_footage", "style_reference"];
+  return ["primary_footage", "b_roll"];
+}
+
+function factsFromAsset(asset: V1Asset): AssetKnowledge["knownFacts"] {
+  const facts: AssetKnowledge["knownFacts"] = [
+    { field: "filename", value: asset.filename, confidence: "high", source: "metadata" },
+    { field: "kind", value: asset.kind, confidence: "high", source: "metadata" },
+  ];
+  if (typeof asset.durationSec === "number") {
+    facts.push({
+      field: "durationSec",
+      value: String(asset.durationSec),
+      confidence: "high",
+      source: "metadata",
+    });
+  }
+  if (asset.context?.summary) {
+    facts.push({
+      field: "summary",
+      value: asset.context.summary,
+      confidence: "medium",
+      source: "user",
+    });
+  }
+  if (asset.userContext?.description) {
+    facts.push({
+      field: "userContext.description",
+      value: asset.userContext.description,
+      confidence: "high",
+      source: "user",
+    });
+  }
+  if (asset.agentContext?.summary) {
+    facts.push({
+      field: "agentContext.summary",
+      value: asset.agentContext.summary,
+      confidence: asset.agentContext.confidence,
+      source: "agent",
+    });
+  }
+  if (asset.context?.transcriptText || asset.userContext?.transcriptHint) {
+    facts.push({
+      field: "transcript",
+      value: asset.context?.transcriptText || asset.userContext?.transcriptHint || "",
+      confidence: asset.context?.transcriptText ? "medium" : "low",
+      source: asset.context?.transcriptText ? "transcript" : "user",
+    });
+  }
+  return facts;
+}
+
+function gapsForAsset(asset: V1Asset): KnowledgeGap[] {
+  const gaps: KnowledgeGap[] = [];
+  const hasSummary = Boolean(
+    asset.agentContext?.summary || asset.userContext?.description || asset.context?.summary
+  );
+  if (!hasSummary) {
+    gaps.push({
+      field: `${asset.id}.summary`,
+      question: `What does ${asset.filename} contain?`,
+      canInferAutomatically: true,
+      suggestedAction: asset.kind === "video" ? "sample_video" : asset.kind === "image" ? "analyze_image" : "transcribe_audio",
+    });
+  }
+  if (asset.kind === "audio" && !asset.context?.transcriptText && !asset.userContext?.audioNotes) {
+    gaps.push({
+      field: `${asset.id}.audio_content`,
+      question: `Is ${asset.filename} music, dialogue, narration, or another audio role?`,
+      canInferAutomatically: true,
+      suggestedAction: "transcribe_audio",
+    });
+  }
+  if (!asset.userContext?.intendedUse?.length && !asset.context?.recommendedRoles?.length) {
+    gaps.push({
+      field: `${asset.id}.intendedUse`,
+      question: `How should ${asset.filename} be used in the edit?`,
+      canInferAutomatically: false,
+      suggestedAction: "ask_user",
+    });
+  }
+  return gaps;
+}
+
+function scoreFor(asset: V1Asset): number {
+  if (asset.agentContext?.confidence === "high") return 0.8;
+  if (asset.agentContext?.confidence === "medium") return 0.6;
+  if (asset.agentContext?.confidence === "low") return 0.45;
+  if (asset.userContext?.description || asset.context?.summary) return 0.35;
+  if (asset.durationSec !== undefined || asset.storageKey || asset.remoteUrl) return 0.2;
+  return 0;
+}
+
+function summaryFor(asset: V1Asset): string {
+  const user = asset.userContext;
+  const parts = [
+    asset.agentContext?.summary,
+    user?.description,
+    asset.context?.summary,
+    user?.title ? `Title: ${user.title}` : undefined,
+    user?.event ? `Event: ${user.event}` : undefined,
+    user?.location ? `Location: ${user.location}` : undefined,
+    user?.people?.length ? `People: ${user.people.join(", ")}` : undefined,
+    user?.notableMoments?.length ? `Notable moments: ${user.notableMoments.join("; ")}` : undefined,
+    asset.context?.transcriptText
+      ? `Transcript: ${asset.context.transcriptText}`
+      : undefined,
+    user?.transcriptHint ? `Transcript hint: ${user.transcriptHint}` : undefined,
+    user?.audioNotes ? `Audio: ${user.audioNotes}` : undefined,
+    asset.context?.recommendedRoles?.length
+      ? `Roles: ${asset.context.recommendedRoles.join(", ")}`
+      : undefined,
+  ].filter((part): part is string => Boolean(part && part.trim()));
+  return parts.join(" | ") || "";
+}
+
+function buildClipUnderstanding(asset: V1Asset): ClipUnderstanding {
+  const moments = asset.context?.moments ?? [];
+  return {
+    assetId: asset.id,
+    source: originFor(asset) === "generated" ? "generated" : "upload",
+    userContext: asset.userContext,
+    agentContext: asset.agentContext,
+    combinedSummary: summaryFor(asset),
+    timelineHints: {
+      mustUse: Boolean(asset.userContext?.mustUse),
+      avoid: Boolean(asset.userContext?.avoid),
+      preferredBeats: [
+        ...(asset.userContext?.tags ?? []),
+        ...(asset.context?.recommendedRoles ?? []),
+      ],
+      bestStartSec: moments[0]?.startSec,
+      bestEndSec: moments[0]?.endSec,
+    },
+    provenance: {
+      userContextUpdatedAt: asset.userContext ? asset.updatedAt : undefined,
+      analyzedAt: asset.agentContext ? asset.updatedAt : undefined,
+      analysisVersion: ASSET_KNOWLEDGE_ANALYSIS_VERSION,
+      sampledFrameAssetIds:
+        asset.agentContext && "sampledFrames" in asset.agentContext
+          ? asset.agentContext.sampledFrames
+          : asset.agentContext?.sampledAssetIds ?? [],
+    },
+  };
+}
+
+function buildAssetKnowledge(asset: V1Asset, now = new Date().toISOString()): AssetKnowledge {
+  const unknowns = gapsForAsset(asset);
+  const likelyUses = [
+    ...new Set([
+      ...(asset.agentContext?.likelyUses ?? []),
+      ...(asset.userContext?.intendedUse ?? []),
+      ...usesForKind(asset.kind, asset.userContext),
+    ]),
+  ];
+  return {
+    assetId: asset.id,
+    mediaType: asset.kind,
+    origin: originFor(asset),
+    userContext: asset.userContext,
+    agentContext: asset.agentContext,
+    knowledgeScore: scoreFor(asset),
+    knowledgeSummary: summaryFor(asset),
+    knownFacts: factsFromAsset(asset),
+    unknowns,
+    likelyUses,
+    constraints: [
+      ...(asset.userContext?.mustUse ? [{ type: "must_use" as const }] : []),
+      ...(asset.userContext?.avoid ? [{ type: "avoid" as const }] : []),
+    ],
+    relationships: [],
+    provenance: {
+      createdAt: asset.assetKnowledge?.provenance.createdAt ?? now,
+      updatedAt: now,
+      analysisVersion: ASSET_KNOWLEDGE_ANALYSIS_VERSION,
+      model: asset.agentContext?.model,
+      sampledAssetIds: asset.agentContext?.sampledAssetIds ?? [],
+    },
+  };
+}
+
+function semanticContextFor(asset: V1Asset) {
+  const combinedSummary = summaryFor(asset);
+  return {
+    summary: combinedSummary || asset.context?.summary,
+    recommendedRoles: [
+      ...new Set([
+        ...(asset.context?.recommendedRoles ?? []),
+        ...(asset.userContext?.intendedUse ?? []),
+        ...(asset.userContext?.tags ?? []),
+      ]),
+    ],
+    transcriptText: asset.context?.transcriptText || asset.userContext?.transcriptHint,
+    moments: asset.context?.moments,
+  };
+}
+
+export function withDerivedAssetKnowledge(asset: V1Asset, now?: string): V1Asset {
+  const derived = { ...asset };
+  derived.assetKnowledge = buildAssetKnowledge(derived, now);
+  derived.clipUnderstanding = buildClipUnderstanding(derived);
+  derived.semanticAnalysis = buildSemanticAnalysis({
+    id: derived.id,
+    kind: derived.kind,
+    durationSec: derived.durationSec,
+    filename: derived.filename,
+    source: derived.source,
+    context: semanticContextFor(derived),
+  });
+  return derived;
 }
 
 export async function registerAsset(
@@ -72,18 +314,12 @@ export async function registerAsset(
       remoteUrl: input.source.url,
       durationSec: input.durationSec,
       context: input.context,
-      semanticAnalysis: buildSemanticAnalysis({
-        id,
-        kind,
-        durationSec: input.durationSec,
-        filename,
-        source: input.source,
-        context: input.context,
-      }),
+      userContext: input.userContext,
+      agentContext: input.agentContext,
       createdAt: now,
       updatedAt: now,
     };
-    return addAsset(asset);
+    return addAsset(withDerivedAssetKnowledge(asset, now));
   }
 
   if (input.source.type === "local_path") {
@@ -126,22 +362,135 @@ export async function registerAsset(
       storageKey,
       durationSec: input.durationSec,
       context: input.context,
-      semanticAnalysis: buildSemanticAnalysis({
-        id,
-        kind,
-        durationSec: input.durationSec,
-        filename,
-        source: { type: "local_path" },
-        context: input.context,
-      }),
+      userContext: input.userContext,
+      agentContext: input.agentContext,
       createdAt: now,
       updatedAt: now,
     };
-    return addAsset(asset);
+    return addAsset(withDerivedAssetKnowledge(asset, now));
   }
 
   throw new ApiError(
     "validation_failed",
     `Asset source "${input.source.type}" is not supported yet. Use remote_url or local_path.`
   );
+}
+
+export async function updateAssetContext(
+  auth: AuthContext,
+  projectId: string,
+  assetId: string,
+  input: UpdateAssetContextInput
+): Promise<V1Asset> {
+  await getProject(auth.workspaceId, projectId);
+  return updateStoredAsset(auth.workspaceId, projectId, assetId, (asset) => {
+    if (input.context !== undefined) asset.context = input.context;
+    if (input.userContext !== undefined) {
+      if (input.userContext === null) delete asset.userContext;
+      else asset.userContext = input.userContext;
+    }
+    if (input.agentContext !== undefined) {
+      if (input.agentContext === null) delete asset.agentContext;
+      else asset.agentContext = input.agentContext as AgentAssetContext;
+    }
+    const derived = withDerivedAssetKnowledge(asset);
+    asset.assetKnowledge = derived.assetKnowledge;
+    asset.clipUnderstanding = derived.clipUnderstanding;
+    asset.semanticAnalysis = derived.semanticAnalysis;
+  });
+}
+
+function confidenceFor(asset: V1Asset): AssetKnowledgeSummary["confidence"] {
+  const score = asset.assetKnowledge?.knowledgeScore ?? scoreFor(asset);
+  if (score >= 0.7) return "high";
+  if (score >= 0.35) return "medium";
+  return "low";
+}
+
+function summaryForInventory(asset: V1Asset): AssetKnowledgeSummary {
+  const knowledge = asset.assetKnowledge ?? buildAssetKnowledge(asset);
+  return {
+    assetId: asset.id,
+    mediaType: asset.kind,
+    known: knowledge.knownFacts.map((fact) => `${fact.field}: ${fact.value}`),
+    unknown: knowledge.unknowns,
+    likelyUses: knowledge.likelyUses,
+    confidence: confidenceFor(asset),
+  };
+}
+
+function learningActionsFor(asset: V1Asset): LearningAction[] {
+  const seen = new Set<string>();
+  return gapsForAsset(asset)
+    .filter((gap) => gap.canInferAutomatically || gap.suggestedAction === "ask_user")
+    .map((gap) => ({
+      assetId: asset.id,
+      action: gap.suggestedAction,
+      reason: gap.question,
+    }))
+    .filter((action) => {
+      const key = `${action.assetId}:${action.action}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function coverage(total: number, known: number): "none" | "partial" | "complete" {
+  if (total === 0 || known === 0) return "none";
+  return known >= total ? "complete" : "partial";
+}
+
+export async function inventoryAssets(
+  auth: AuthContext,
+  projectId: string,
+  input: AssetInventoryInput
+): Promise<AssetInventoryReport> {
+  await getProject(auth.workspaceId, projectId);
+  const { items } = await listAssets(auth.workspaceId, projectId, 100, null);
+  const requested = input.assetIds?.length
+    ? items.filter((asset) => input.assetIds?.includes(asset.id))
+    : items;
+  const assets = input.includeExistingContext
+    ? requested
+    : requested.map((asset) => ({
+        ...asset,
+        context: undefined,
+        userContext: undefined,
+        agentContext: undefined,
+        assetKnowledge: undefined,
+        clipUnderstanding: undefined,
+        semanticAnalysis: undefined,
+      }));
+  const summaries = assets.map(summaryForInventory);
+  const globalUnknowns = summaries.flatMap((summary) => summary.unknown);
+  const knownSummaryCount = assets.filter((asset) => summaryFor(asset)).length;
+  const videoAssets = assets.filter((asset) => asset.kind === "video");
+  const imageAssets = assets.filter((asset) => asset.kind === "image");
+  const audioAssets = assets.filter((asset) => asset.kind === "audio");
+
+  return {
+    projectId,
+    assets: summaries,
+    globalKnowns: summaries.flatMap((summary) => summary.known),
+    globalUnknowns,
+    recommendedLearningActions: assets.flatMap(learningActionsFor),
+    coverageEstimate: {
+      video: coverage(videoAssets.length, videoAssets.filter((asset) => summaryFor(asset)).length),
+      images: coverage(imageAssets.length, imageAssets.filter((asset) => summaryFor(asset)).length),
+      audio: coverage(audioAssets.length, audioAssets.filter((asset) => summaryFor(asset)).length),
+      characters: coverage(
+        assets.length,
+        assets.filter((asset) => asset.userContext?.characterNames?.length).length
+      ),
+      brandsOrLogos: coverage(
+        assets.length,
+        assets.filter((asset) =>
+          [...(asset.context?.recommendedRoles ?? []), ...(asset.userContext?.tags ?? [])].some(
+            (value) => /logo|brand/i.test(value)
+          )
+        ).length
+      ),
+    },
+  };
 }

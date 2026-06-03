@@ -108,6 +108,50 @@ test("parseRegisterAsset accepts local_path and a generated source", () => {
   assert.equal(generated.source.type, "generated");
 });
 
+test("parseRegisterAsset preserves video agentContext usable moments", () => {
+  const input = parseRegisterAsset({
+    source: { type: "remote_url", url: "https://cdn.example.com/analyzed.mp4" },
+    agentContext: {
+      summary: "Launch applause and product reveal.",
+      mediaType: "video",
+      subjects: ["founder", "audience"],
+      likelyUses: ["primary_footage"],
+      cautions: [],
+      confidence: "high",
+      sampledAssetIds: ["frame_1"],
+      model: { provider: "openai", model: "vision-test" },
+      visualSubjects: ["founder at podium"],
+      shotTypes: ["wide"],
+      sampledFrames: ["frame_1"],
+      usableMoments: [
+        {
+          startSec: 2,
+          endSec: 5,
+          label: "applause",
+          description: "Audience applauds after the launch reveal.",
+          suggestedUse: "proof",
+        },
+      ],
+    },
+  });
+
+  assert.equal(input.agentContext?.mediaType, "video");
+  assert.deepEqual(
+    input.agentContext && "usableMoments" in input.agentContext
+      ? input.agentContext.usableMoments
+      : [],
+    [
+      {
+        startSec: 2,
+        endSec: 5,
+        label: "applause",
+        description: "Audience applauds after the launch reveal.",
+        suggestedUse: "proof",
+      },
+    ]
+  );
+});
+
 test("parseRegisterAsset rejects an unknown source type", () => {
   expectApiError(
     () => parseRegisterAsset({ source: { type: "magic" } }),

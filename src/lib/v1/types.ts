@@ -77,6 +77,203 @@ export interface BriefVersion {
 
 export type AssetKind = "video" | "image" | "audio";
 export type AssetStatus = "pending" | "processing" | "ready" | "failed";
+export type AssetMediaType = AssetKind | "text" | "reference";
+export type AssetOrigin = "uploaded" | "generated" | "imported" | "derived";
+export type AssetUse =
+  | "primary_footage"
+  | "b_roll"
+  | "character_reference"
+  | "style_reference"
+  | "location_reference"
+  | "logo_or_brand"
+  | "music"
+  | "voiceover"
+  | "dialogue"
+  | "sound_effect"
+  | "title_or_graphic";
+export type KnowledgeConfidence = "low" | "medium" | "high";
+export type KnowledgeAction =
+  | "ask_user"
+  | "sample_video"
+  | "analyze_image"
+  | "transcribe_audio";
+
+export interface UserAssetContext {
+  title?: string;
+  description?: string;
+  people?: string[];
+  characterNames?: string[];
+  location?: string;
+  event?: string;
+  notableMoments?: string[];
+  tags?: string[];
+  transcriptHint?: string;
+  audioNotes?: string;
+  intendedUse?: AssetUse[];
+  mustUse?: boolean;
+  avoid?: boolean;
+}
+
+export type UserClipContext = UserAssetContext;
+
+export interface UsableMoment {
+  startSec: number;
+  endSec: number;
+  label: string;
+  description: string;
+  suggestedUse:
+    | "hook"
+    | "context"
+    | "proof"
+    | "emotion"
+    | "transition"
+    | "detail"
+    | "b_roll"
+    | "cta";
+}
+
+export interface AgentAssetContext {
+  summary: string;
+  mediaType: AssetMediaType;
+  subjects: string[];
+  actions?: string[];
+  setting?: string;
+  mood?: string;
+  likelyUses: AssetUse[];
+  cautions: string[];
+  transcriptSummary?: string;
+  confidence: KnowledgeConfidence;
+  sampledAssetIds: string[];
+  model: {
+    provider: string;
+    model?: string;
+  };
+}
+
+export interface AgentClipContext extends AgentAssetContext {
+  mediaType: "video";
+  visualSubjects: string[];
+  shotTypes: string[];
+  usableMoments: UsableMoment[];
+  sampledFrames: string[];
+}
+
+export interface KnowledgeGap {
+  field: string;
+  question: string;
+  canInferAutomatically: boolean;
+  suggestedAction: KnowledgeAction;
+}
+
+export interface KnownFact {
+  field: string;
+  value: string;
+  confidence: KnowledgeConfidence;
+  source: "user" | "agent" | "generation_prompt" | "metadata" | "transcript";
+}
+
+export interface AssetConstraint {
+  type:
+    | "must_use"
+    | "avoid"
+    | "likeness_reference"
+    | "style_reference"
+    | "brand_required"
+    | "audio_required"
+    | "no_audio"
+    | "do_not_crop"
+    | "do_not_modify";
+  reason?: string;
+}
+
+export interface AssetRelationship {
+  type:
+    | "derived_from"
+    | "sampled_from"
+    | "represents_character"
+    | "represents_location"
+    | "belongs_to_scene"
+    | "audio_for"
+    | "visual_for";
+  targetAssetId: string;
+  description?: string;
+}
+
+export interface AssetKnowledge {
+  assetId: string;
+  mediaType: AssetMediaType;
+  origin: AssetOrigin;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+  knowledgeScore: number;
+  knowledgeSummary: string;
+  knownFacts: KnownFact[];
+  unknowns: KnowledgeGap[];
+  likelyUses: AssetUse[];
+  constraints: AssetConstraint[];
+  relationships: AssetRelationship[];
+  provenance: {
+    createdAt: string;
+    updatedAt: string;
+    analysisVersion: string;
+    model?: {
+      provider: string;
+      model?: string;
+    };
+    sourcePrompt?: string;
+    sampledAssetIds: string[];
+    transcriptAssetId?: string;
+  };
+}
+
+export interface ClipUnderstanding {
+  assetId: string;
+  source: "upload" | "generated";
+  userContext?: UserClipContext;
+  agentContext?: AgentClipContext | AgentAssetContext;
+  combinedSummary: string;
+  timelineHints: {
+    mustUse: boolean;
+    avoid: boolean;
+    preferredBeats: string[];
+    bestStartSec?: number;
+    bestEndSec?: number;
+  };
+  provenance: {
+    userContextUpdatedAt?: string;
+    analyzedAt?: string;
+    analysisVersion: string;
+    sampledFrameAssetIds: string[];
+  };
+}
+
+export interface AssetKnowledgeSummary {
+  assetId: string;
+  mediaType: AssetMediaType;
+  known: string[];
+  unknown: KnowledgeGap[];
+  likelyUses: AssetUse[];
+  confidence: KnowledgeConfidence;
+}
+
+export interface AssetInventoryReport {
+  projectId: string;
+  assets: AssetKnowledgeSummary[];
+  globalKnowns: string[];
+  globalUnknowns: KnowledgeGap[];
+  recommendedLearningActions: {
+    assetId?: string;
+    action: KnowledgeAction;
+    reason: string;
+  }[];
+  coverageEstimate: {
+    video: "none" | "partial" | "complete";
+    images: "none" | "partial" | "complete";
+    audio: "none" | "partial" | "complete";
+    characters: "none" | "partial" | "complete";
+    brandsOrLogos: "none" | "partial" | "complete";
+  };
+}
 
 export interface V1Asset {
   id: string;
@@ -89,6 +286,10 @@ export interface V1Asset {
   url: string; // served/managed path the renderer can read
   durationSec: number;
   description?: string;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+  assetKnowledge?: AssetKnowledge;
+  clipUnderstanding?: ClipUnderstanding;
   source: "upload" | "remote_url" | "local_path" | "generated";
   // Set when this asset was produced by a PR2 generated-asset job.
   generatedAssetJobId?: string;

@@ -86,6 +86,104 @@ export interface VideoBrief {
 
 export type AssetKind = "video" | "image" | "audio";
 const ASSET_KINDS: AssetKind[] = ["video", "image", "audio"];
+export type AssetMediaType = AssetKind | "text" | "reference";
+const ASSET_MEDIA_TYPES: AssetMediaType[] = [
+  "video",
+  "image",
+  "audio",
+  "text",
+  "reference",
+];
+export type AssetOrigin = "uploaded" | "generated" | "imported" | "derived";
+export type AssetUse =
+  | "primary_footage"
+  | "b_roll"
+  | "character_reference"
+  | "style_reference"
+  | "location_reference"
+  | "logo_or_brand"
+  | "music"
+  | "voiceover"
+  | "dialogue"
+  | "sound_effect"
+  | "title_or_graphic";
+const ASSET_USES: AssetUse[] = [
+  "primary_footage",
+  "b_roll",
+  "character_reference",
+  "style_reference",
+  "location_reference",
+  "logo_or_brand",
+  "music",
+  "voiceover",
+  "dialogue",
+  "sound_effect",
+  "title_or_graphic",
+];
+export type KnowledgeConfidence = "low" | "medium" | "high";
+const KNOWLEDGE_CONFIDENCES: KnowledgeConfidence[] = ["low", "medium", "high"];
+export type KnownFactSource =
+  | "user"
+  | "agent"
+  | "generation_prompt"
+  | "metadata"
+  | "transcript";
+const KNOWN_FACT_SOURCES: KnownFactSource[] = [
+  "user",
+  "agent",
+  "generation_prompt",
+  "metadata",
+  "transcript",
+];
+export type KnowledgeAction =
+  | "ask_user"
+  | "sample_video"
+  | "analyze_image"
+  | "transcribe_audio";
+const KNOWLEDGE_ACTIONS: KnowledgeAction[] = [
+  "ask_user",
+  "sample_video",
+  "analyze_image",
+  "transcribe_audio",
+];
+export type AssetConstraintType =
+  | "must_use"
+  | "avoid"
+  | "likeness_reference"
+  | "style_reference"
+  | "brand_required"
+  | "audio_required"
+  | "no_audio"
+  | "do_not_crop"
+  | "do_not_modify";
+const ASSET_CONSTRAINT_TYPES: AssetConstraintType[] = [
+  "must_use",
+  "avoid",
+  "likeness_reference",
+  "style_reference",
+  "brand_required",
+  "audio_required",
+  "no_audio",
+  "do_not_crop",
+  "do_not_modify",
+];
+export type AssetRelationshipType =
+  | "derived_from"
+  | "sampled_from"
+  | "represents_character"
+  | "represents_location"
+  | "belongs_to_scene"
+  | "audio_for"
+  | "visual_for";
+const ASSET_RELATIONSHIP_TYPES: AssetRelationshipType[] = [
+  "derived_from",
+  "sampled_from",
+  "represents_character",
+  "represents_location",
+  "belongs_to_scene",
+  "audio_for",
+  "visual_for",
+];
 
 export type AgentAssetSource =
   | { type: "remote_url"; url: string }
@@ -100,12 +198,200 @@ export interface AssetContext {
   moments?: { startSec: number; endSec: number; label?: string }[];
 }
 
+export interface UserAssetContext {
+  title?: string;
+  description?: string;
+  people?: string[];
+  characterNames?: string[];
+  location?: string;
+  event?: string;
+  notableMoments?: string[];
+  tags?: string[];
+  transcriptHint?: string;
+  audioNotes?: string;
+  intendedUse?: AssetUse[];
+  mustUse?: boolean;
+  avoid?: boolean;
+}
+
+export type UserClipContext = UserAssetContext;
+
+export interface UsableMoment {
+  startSec: number;
+  endSec: number;
+  label: string;
+  description: string;
+  suggestedUse:
+    | "hook"
+    | "context"
+    | "proof"
+    | "emotion"
+    | "transition"
+    | "detail"
+    | "b_roll"
+    | "cta";
+}
+const USABLE_MOMENT_USES: UsableMoment["suggestedUse"][] = [
+  "hook",
+  "context",
+  "proof",
+  "emotion",
+  "transition",
+  "detail",
+  "b_roll",
+  "cta",
+];
+
+export interface AgentAssetContext {
+  summary: string;
+  mediaType: AssetMediaType;
+  subjects: string[];
+  actions?: string[];
+  setting?: string;
+  mood?: string;
+  likelyUses: AssetUse[];
+  cautions: string[];
+  transcriptSummary?: string;
+  confidence: KnowledgeConfidence;
+  sampledAssetIds: string[];
+  model: {
+    provider: string;
+    model?: string;
+  };
+}
+
+export interface AgentClipContext extends AgentAssetContext {
+  mediaType: "video";
+  visualSubjects: string[];
+  shotTypes: string[];
+  usableMoments: UsableMoment[];
+  sampledFrames: string[];
+}
+
+export interface KnownFact {
+  field: string;
+  value: string;
+  confidence: KnowledgeConfidence;
+  source: KnownFactSource;
+}
+
+export interface KnowledgeGap {
+  field: string;
+  question: string;
+  canInferAutomatically: boolean;
+  suggestedAction: KnowledgeAction;
+}
+
+export interface AssetConstraint {
+  type: AssetConstraintType;
+  reason?: string;
+}
+
+export interface AssetRelationship {
+  type: AssetRelationshipType;
+  targetAssetId: string;
+  description?: string;
+}
+
+export interface AssetKnowledgeProvenance {
+  createdAt: string;
+  updatedAt: string;
+  analysisVersion: string;
+  model?: {
+    provider: string;
+    model?: string;
+  };
+  sourcePrompt?: string;
+  sampledAssetIds: string[];
+  transcriptAssetId?: string;
+}
+
+export interface AssetKnowledge {
+  assetId: string;
+  mediaType: AssetMediaType;
+  origin: AssetOrigin;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+  knowledgeScore: number;
+  knowledgeSummary: string;
+  knownFacts: KnownFact[];
+  unknowns: KnowledgeGap[];
+  likelyUses: AssetUse[];
+  constraints: AssetConstraint[];
+  relationships: AssetRelationship[];
+  provenance: AssetKnowledgeProvenance;
+}
+
+export interface AssetKnowledgeSummary {
+  assetId: string;
+  mediaType: AssetMediaType;
+  known: string[];
+  unknown: KnowledgeGap[];
+  likelyUses: AssetUse[];
+  confidence: KnowledgeConfidence;
+}
+
+export interface LearningAction {
+  assetId?: string;
+  action: KnowledgeAction;
+  reason: string;
+}
+
+export interface AssetInventoryReport {
+  projectId: string;
+  assets: AssetKnowledgeSummary[];
+  globalKnowns: string[];
+  globalUnknowns: KnowledgeGap[];
+  recommendedLearningActions: LearningAction[];
+  coverageEstimate: {
+    video: "none" | "partial" | "complete";
+    images: "none" | "partial" | "complete";
+    audio: "none" | "partial" | "complete";
+    characters: "none" | "partial" | "complete";
+    brandsOrLogos: "none" | "partial" | "complete";
+  };
+}
+
+export interface ClipUnderstanding {
+  assetId: string;
+  source: "upload" | "generated";
+  userContext?: UserClipContext;
+  agentContext?: AgentClipContext | AgentAssetContext;
+  combinedSummary: string;
+  timelineHints: {
+    mustUse: boolean;
+    avoid: boolean;
+    preferredBeats: string[];
+    bestStartSec?: number;
+    bestEndSec?: number;
+  };
+  provenance: {
+    userContextUpdatedAt?: string;
+    analyzedAt?: string;
+    analysisVersion: string;
+    sampledFrameAssetIds: string[];
+  };
+}
+
 export interface RegisterAssetInput {
   source: AgentAssetSource;
   kind?: AssetKind;
   filename?: string;
   durationSec?: number;
   context?: AssetContext;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+}
+
+export interface UpdateAssetContextInput {
+  context?: AssetContext;
+  userContext?: UserAssetContext | null;
+  agentContext?: AgentAssetContext | AgentClipContext | null;
+}
+
+export interface AssetInventoryInput {
+  assetIds?: string[];
+  includeExistingContext: boolean;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -149,6 +435,44 @@ function optionalStringArray(
     return undefined;
   }
   return value as string[];
+}
+
+function optionalBoolean(
+  value: unknown,
+  path: string,
+  fields: FieldError[]
+): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") {
+    fields.push({ path, message: "Must be a boolean." });
+    return undefined;
+  }
+  return value;
+}
+
+function optionalEnumArray<T extends string>(
+  value: unknown,
+  allowed: T[],
+  path: string,
+  fields: FieldError[]
+): T[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    fields.push({ path, message: `Must be an array of: ${allowed.join(", ")}.` });
+    return undefined;
+  }
+  const parsed: T[] = [];
+  value.forEach((item, index) => {
+    if (typeof item !== "string" || !allowed.includes(item as T)) {
+      fields.push({
+        path: `${path}[${index}]`,
+        message: `Must be one of: ${allowed.join(", ")}.`,
+      });
+      return;
+    }
+    parsed.push(item as T);
+  });
+  return parsed;
 }
 
 function parseEnum<T extends string>(
@@ -450,6 +774,207 @@ function optionalMomentArray(
   return moments;
 }
 
+function optionalUsableMomentArray(
+  value: unknown,
+  path: string,
+  fields: FieldError[]
+): UsableMoment[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    fields.push({ path, message: "Must be an array of usable moments." });
+    return undefined;
+  }
+
+  const moments: UsableMoment[] = [];
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    if (!isPlainObject(item)) {
+      fields.push({ path: itemPath, message: "Must be an object." });
+      return;
+    }
+    if (
+      typeof item.startSec !== "number" ||
+      !Number.isFinite(item.startSec) ||
+      item.startSec < 0
+    ) {
+      fields.push({
+        path: `${itemPath}.startSec`,
+        message: "Must be a non-negative number.",
+      });
+      return;
+    }
+    if (
+      typeof item.endSec !== "number" ||
+      !Number.isFinite(item.endSec) ||
+      item.endSec < item.startSec
+    ) {
+      fields.push({
+        path: `${itemPath}.endSec`,
+        message: "Must be a number greater than or equal to startSec.",
+      });
+      return;
+    }
+    const label = requireString(item.label, `${itemPath}.label`, fields);
+    const description = requireString(
+      item.description,
+      `${itemPath}.description`,
+      fields
+    );
+    const suggestedUse = parseEnum(
+      item.suggestedUse,
+      USABLE_MOMENT_USES,
+      `${itemPath}.suggestedUse`,
+      fields
+    );
+    if (!label || !description || !suggestedUse) return;
+    moments.push({
+      startSec: item.startSec,
+      endSec: item.endSec,
+      label,
+      description,
+      suggestedUse,
+    });
+  });
+  return moments;
+}
+
+function parseUserAssetContext(
+  input: unknown,
+  path: string,
+  fields: FieldError[]
+): UserAssetContext | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (!isPlainObject(input)) {
+    fields.push({ path, message: "Must be an object." });
+    return undefined;
+  }
+  return {
+    title: optionalString(input.title, `${path}.title`, fields),
+    description: optionalString(input.description, `${path}.description`, fields),
+    people: optionalStringArray(input.people, `${path}.people`, fields),
+    characterNames: optionalStringArray(
+      input.characterNames,
+      `${path}.characterNames`,
+      fields
+    ),
+    location: optionalString(input.location, `${path}.location`, fields),
+    event: optionalString(input.event, `${path}.event`, fields),
+    notableMoments: optionalStringArray(
+      input.notableMoments,
+      `${path}.notableMoments`,
+      fields
+    ),
+    tags: optionalStringArray(input.tags, `${path}.tags`, fields),
+    transcriptHint: optionalString(input.transcriptHint, `${path}.transcriptHint`, fields),
+    audioNotes: optionalString(input.audioNotes, `${path}.audioNotes`, fields),
+    intendedUse: optionalEnumArray(
+      input.intendedUse,
+      ASSET_USES,
+      `${path}.intendedUse`,
+      fields
+    ),
+    mustUse: optionalBoolean(input.mustUse, `${path}.mustUse`, fields),
+    avoid: optionalBoolean(input.avoid, `${path}.avoid`, fields),
+  };
+}
+
+function parseAgentAssetContext(
+  input: unknown,
+  path: string,
+  fields: FieldError[]
+): AgentAssetContext | AgentClipContext | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (!isPlainObject(input)) {
+    fields.push({ path, message: "Must be an object." });
+    return undefined;
+  }
+
+  const summary = requireString(input.summary, `${path}.summary`, fields);
+  const mediaType = parseEnum(
+    input.mediaType,
+    ASSET_MEDIA_TYPES,
+    `${path}.mediaType`,
+    fields
+  );
+  const confidence = parseEnum(
+    input.confidence,
+    KNOWLEDGE_CONFIDENCES,
+    `${path}.confidence`,
+    fields
+  );
+  const subjects = optionalStringArray(input.subjects, `${path}.subjects`, fields) ?? [];
+  const likelyUses =
+    optionalEnumArray(input.likelyUses, ASSET_USES, `${path}.likelyUses`, fields) ?? [];
+  const cautions = optionalStringArray(input.cautions, `${path}.cautions`, fields) ?? [];
+  const sampledAssetIds =
+    optionalStringArray(input.sampledAssetIds, `${path}.sampledAssetIds`, fields) ?? [];
+
+  let model: AgentAssetContext["model"] | undefined;
+  if (!isPlainObject(input.model)) {
+    fields.push({ path: `${path}.model`, message: "Must be an object." });
+  } else {
+    const provider = requireString(input.model.provider, `${path}.model.provider`, fields);
+    model = {
+      provider: provider as string,
+      model: optionalString(input.model.model, `${path}.model.model`, fields),
+    };
+  }
+
+  const base: AgentAssetContext = {
+    summary: summary as string,
+    mediaType: mediaType as AssetMediaType,
+    subjects,
+    actions: optionalStringArray(input.actions, `${path}.actions`, fields),
+    setting: optionalString(input.setting, `${path}.setting`, fields),
+    mood: optionalString(input.mood, `${path}.mood`, fields),
+    likelyUses,
+    cautions,
+    transcriptSummary: optionalString(
+      input.transcriptSummary,
+      `${path}.transcriptSummary`,
+      fields
+    ),
+    confidence: confidence as KnowledgeConfidence,
+    sampledAssetIds,
+    model: model as AgentAssetContext["model"],
+  };
+
+  if (mediaType !== "video") return base;
+
+  return {
+    ...base,
+    mediaType: "video",
+    visualSubjects:
+      optionalStringArray(input.visualSubjects, `${path}.visualSubjects`, fields) ?? [],
+    shotTypes: optionalStringArray(input.shotTypes, `${path}.shotTypes`, fields) ?? [],
+    usableMoments:
+      optionalUsableMomentArray(input.usableMoments, `${path}.usableMoments`, fields) ?? [],
+    sampledFrames: optionalStringArray(input.sampledFrames, `${path}.sampledFrames`, fields) ?? [],
+  };
+}
+
+function parseAssetContext(
+  input: unknown,
+  path: string,
+  fields: FieldError[]
+): AssetContext | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (!isPlainObject(input)) {
+    fields.push({ path, message: "Must be an object." });
+    return undefined;
+  }
+  return {
+    summary: optionalString(input.summary, `${path}.summary`, fields),
+    recommendedRoles: optionalStringArray(
+      input.recommendedRoles,
+      `${path}.recommendedRoles`,
+      fields
+    ),
+    transcriptText: optionalString(input.transcriptText, `${path}.transcriptText`, fields),
+    moments: optionalMomentArray(input.moments, `${path}.moments`, fields),
+  };
+}
+
 export function parseRegisterAsset(input: unknown): RegisterAssetInput {
   if (!isPlainObject(input)) {
     throw validationError("The request body is invalid.", [
@@ -470,27 +995,9 @@ export function parseRegisterAsset(input: unknown): RegisterAssetInput {
     }
   }
 
-  let context: AssetContext | undefined;
-  if (input.context !== undefined && input.context !== null) {
-    if (!isPlainObject(input.context)) {
-      fields.push({ path: "context", message: "Must be an object." });
-    } else {
-      context = {
-        summary: optionalString(input.context.summary, "context.summary", fields),
-        recommendedRoles: optionalStringArray(
-          input.context.recommendedRoles,
-          "context.recommendedRoles",
-          fields
-        ),
-        transcriptText: optionalString(
-          input.context.transcriptText,
-          "context.transcriptText",
-          fields
-        ),
-        moments: optionalMomentArray(input.context.moments, "context.moments", fields),
-      };
-    }
-  }
+  const context = parseAssetContext(input.context, "context", fields);
+  const userContext = parseUserAssetContext(input.userContext, "userContext", fields);
+  const agentContext = parseAgentAssetContext(input.agentContext, "agentContext", fields);
 
   throwIfInvalid(fields);
 
@@ -500,7 +1007,50 @@ export function parseRegisterAsset(input: unknown): RegisterAssetInput {
     filename,
     durationSec,
     context,
+    userContext,
+    agentContext,
   };
+}
+
+export function parseUpdateAssetContext(input: unknown): UpdateAssetContextInput {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  const context = parseAssetContext(input.context, "context", fields);
+  const userContext =
+    input.userContext === null
+      ? null
+      : parseUserAssetContext(input.userContext, "userContext", fields);
+  const agentContext =
+    input.agentContext === null
+      ? null
+      : parseAgentAssetContext(input.agentContext, "agentContext", fields);
+
+  throwIfInvalid(fields);
+
+  return { context, userContext, agentContext };
+}
+
+export function parseAssetInventory(input: unknown): AssetInventoryInput {
+  if (input === undefined || input === null) {
+    return { includeExistingContext: true };
+  }
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  const assetIds = optionalStringArray(input.assetIds, "assetIds", fields);
+  const includeExistingContext =
+    input.includeExistingContext === undefined
+      ? true
+      : optionalBoolean(input.includeExistingContext, "includeExistingContext", fields);
+  throwIfInvalid(fields);
+  return { assetIds, includeExistingContext: includeExistingContext ?? true };
 }
 
 export function parsePagination(searchParams: URLSearchParams): {
