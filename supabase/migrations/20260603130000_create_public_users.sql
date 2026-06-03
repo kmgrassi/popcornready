@@ -123,9 +123,23 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Backfill: link any auth users that already exist but have no domain row.
-insert into public.users (auth_id, email)
-select au.id, au.email
+-- Backfill: create a domain row for any auth user that has no linked row yet.
+-- The profile extraction here MUST stay in sync with handle_new_user's insert
+-- branch above, otherwise migrated accounts get sparser profiles than new
+-- signups (name/avatar/metadata come from raw_user_meta_data either way).
+insert into public.users (auth_id, email, full_name, first_name, last_name, avatar_url, metadata)
+select
+  au.id,
+  coalesce(au.email, au.raw_user_meta_data ->> 'email'),
+  coalesce(
+    nullif(btrim(concat_ws(' ', au.raw_user_meta_data ->> 'first_name', au.raw_user_meta_data ->> 'last_name')), ''),
+    au.raw_user_meta_data ->> 'full_name',
+    au.raw_user_meta_data ->> 'name'
+  ),
+  au.raw_user_meta_data ->> 'first_name',
+  au.raw_user_meta_data ->> 'last_name',
+  coalesce(au.raw_user_meta_data ->> 'avatar_url', au.raw_user_meta_data ->> 'picture'),
+  coalesce(au.raw_user_meta_data, '{}'::jsonb)
 from auth.users au
 where not exists (select 1 from public.users u where u.auth_id = au.id)
 on conflict do nothing;
