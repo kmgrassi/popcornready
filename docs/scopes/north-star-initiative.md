@@ -127,12 +127,15 @@ underway; this log tracks merged + in-flight work (newest first).
   frozen onto assets at `saveProject` and exposed via `getProvenanceGraph` /
   `getStaleCandidates`. **Lane 2 fully landed.**
 
-**In flight (scoping):**
-- **Clip/Asset convergence** — the narrow first slice of Lane 4, scoped in
-  [`north-star-clip-asset-convergence.md`](./north-star-clip-asset-convergence.md):
-  pool generated beat clips as `beat_clip` assets so they get fingerprints and the
-  keyframe→clip stale ripple fires (the gap #108/#110 deferred). Keeps `clips[]`
-  and all its readers unchanged; defers the six-store merge.
+- **Clip/Asset convergence — first slice of Lane 4** ✅ (#112 scope; #113 PR-1
+  `poolAssets` dedup; #114 PR-2 pool beat clips as `beat_clip` assets + resume
+  backfill; PR-3 `poolResumedBeatClips` tested unit). Generated beat clips are now
+  first-class pooled assets, so they carry fingerprints and the keyframe→clip
+  stale ripple fires; resumed clips keep their baselines. `clips[]` and all its
+  readers (render/editor/resume/export) are unchanged. See
+  [`north-star-clip-asset-convergence.md`](./north-star-clip-asset-convergence.md).
+  Deferred to the full lane: removing `clips[]`, the six-store merge, the
+  `V1Project`/`V1Asset` reconciliation, and pooling the soundtrack/character clip.
 
 **Next up (unstarted):**
 - Full Lane 4 (store-consolidation) — collapse the six drifted stores to one

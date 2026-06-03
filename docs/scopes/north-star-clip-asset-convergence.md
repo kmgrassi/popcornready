@@ -101,16 +101,26 @@ Same-id twinning is deliberate: `segment.clipId` already equals the clip id, so
 the pooled asset is addressable by the same id the timeline and selections use —
 and `poolAssets` dedup (below) collapses the twin to the richer explicit asset.
 
+### Status: ✅ landed (#113 PR-1, #114 PR-2, PR-3 in flight)
+
+This slice is implemented. `poolAssets` dedups (#113); generated beat clips are
+pooled as `beat_clip` assets with their own `beatId` (#114, `beatClipAsset` /
+`poolBeatClip`); resumed clips are backfilled (#114 review fix) and that path is
+now a tested unit (`poolResumedBeatClips`, PR-3). The full six-store merge and the
+remaining "deferred" items below are unchanged and belong to the full lane.
+
 ### Work breakdown (PR-sized, sequenced)
 
-1. **PR-1 — `poolAssets` dedup (no behavior change today).** Make `poolAssets`
+1. **PR-1 — `poolAssets` dedup (no behavior change today).** ✅ #113. Make `poolAssets`
    dedup by id, with **explicit `assets[]` winning** over a `clipToAsset`
    projection of the same id (`src/lib/assets/pool.ts:17-24`). Today no id
    overlaps, so this is a pure correctness/no-regret fix that prevents the
    double-count PR-2 would otherwise introduce. *Effort: S.* Unit test: a clip
    whose id is also an explicit asset yields one (explicit) entry.
 
-2. **PR-2 — Pool generated beat clips as `beat_clip` assets.** In the one-shot
+2. **PR-2 — Pool generated beat clips as `beat_clip` assets.** ✅ #114
+   (`beatClipAsset` / `poolBeatClip`; selection slot `beat_clip` keyed by `beatId`).
+   In the one-shot
    beat loop, after a clip is generated (and after `recordFirstFrameEdge`), build
    a `beat_clip` `Asset` from it (same id) with `depicts.beatId` and
    `provenance.inputs { beatId, anchorIds?, firstFrameAssetId? }`, and `addAsset`
@@ -124,11 +134,15 @@ and `poolAssets` dedup (below) collapses the twin to the richer explicit asset.
    keyframe+clip, edit the beat, assert both are candidates; (c) edit a beat whose
    keyframe was skipped, assert the clip is still flagged via its own `beatId`.
 
-3. **PR-3 (optional, same slice) — Resume reads the clip pool.** Have
-   `resumablePoolForGoal` already carry the new `beat_clip` assets (it returns the
-   persisted `assets[]`), so an interrupted run's clip assets/fingerprints survive
-   resume just like keyframes do. Confirm no double-freeze (write-once) and that
-   `mergePool` dedup holds. *Effort: S.* Likely just tests + a small guard.
+3. **PR-3 — Resume pools the clip pool.** ✅ this PR. The #114 review fix already
+   backfills resumed clips; PR-3 extracts that into a tested unit
+   `poolResumedBeatClips` (in `project-cache.ts`) and locks the guarantees with
+   tests: resumed clips are pooled with positional `beat_clip` selections; a prior
+   run's frozen baseline is preserved (no double-freeze, no duplicate twin — via
+   `addAsset` idempotency); and a legacy resumed clip with no prior asset is pooled
+   and flagged by `getStaleCandidates` after a beat edit. `resumablePoolForGoal`
+   already carries the persisted `beat_clip` assets, so their fingerprints survive
+   resume just like keyframes.
 
 ### Explicitly deferred (full store-consolidation lane)
 
