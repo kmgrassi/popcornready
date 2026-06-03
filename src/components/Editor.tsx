@@ -7,6 +7,7 @@ import {
   Clip,
   Project,
   StoryContext,
+  UploadedFootageEditMode,
 } from "@/lib/types";
 import { DEFAULT_STORY_CONTEXT } from "@/lib/story-context";
 import {
@@ -92,7 +93,7 @@ export function Editor({
 
   const [message, setMessage] = useState("");
   const [selectedAudioClipId, setSelectedAudioClipId] = useState("");
-  const [editMode, setEditMode] = useState<"asset_driven" | "hybrid">(
+  const [editMode, setEditMode] = useState<UploadedFootageEditMode>(
     "asset_driven"
   );
   const [selectedEditAssetIds, setSelectedEditAssetIds] = useState<string[]>([]);
@@ -190,6 +191,16 @@ export function Editor({
   }, [audioClips]);
 
   useEffect(() => {
+    const savedEdit = project?.uploadedFootageEdit;
+    if (savedEdit) {
+      const availableIds = new Set(editableVisualClips.map((clip) => clip.id));
+      setEditMode(savedEdit.mode);
+      setSelectedEditAssetIds(
+        savedEdit.selectedAssetIds.filter((id) => availableIds.has(id))
+      );
+      return;
+    }
+
     setSelectedEditAssetIds((current) => {
       const availableIds = new Set(editableVisualClips.map((clip) => clip.id));
       const kept = current.filter((id) => availableIds.has(id));
@@ -198,7 +209,7 @@ export function Editor({
         .filter((clip) => clip.source !== "generated")
         .map((clip) => clip.id);
     });
-  }, [editableVisualClips]);
+  }, [editableVisualClips, project?.uploadedFootageEdit]);
 
   async function handleUpload() {
     const file = fileRef.current?.files?.[0];
