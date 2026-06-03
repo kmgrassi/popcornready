@@ -87,8 +87,9 @@ security definer
 set search_path = public
 as $$
 declare
-  v_user_id uuid := public.current_app_user_id();
-  v_invite  public.workspace_invites%rowtype;
+  v_user_id      uuid := public.current_app_user_id();
+  v_invite       public.workspace_invites%rowtype;
+  v_caller_email text;
 begin
   if v_user_id is null then
     raise exception 'not authenticated' using errcode = '28000';
@@ -121,6 +122,17 @@ begin
     -- an admin lists invites). A past-expiry pending invite is never acceptable
     -- regardless of its stored status, which this check enforces.
     raise exception 'invite has expired' using errcode = '22023';
+  end if;
+
+  -- The invite is addressed to a specific email. Only the account whose email
+  -- matches may consume it -- otherwise any authenticated user holding the token
+  -- could join the workspace at the invited role. Compare case-insensitively,
+  -- consistent with the rest of the email handling.
+  select email into v_caller_email from public.users where id = v_user_id;
+  if v_caller_email is null
+     or lower(btrim(v_caller_email)) is distinct from lower(btrim(v_invite.email)) then
+    raise exception 'invite is addressed to a different email'
+      using errcode = '42501';
   end if;
 
   -- Materialize membership. If the caller is somehow already a member (e.g. a
