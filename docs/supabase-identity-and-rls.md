@@ -131,10 +131,13 @@ membership (`= current_app_user_id()`). So every v1 policy that calls them
 (projects, assets, jobs, brief_versions, compositions, timelines, generation_*)
 automatically grants access to all workspace members and keys on the domain id.
 
-**Creating a workspace bootstraps server-side**: the `workspace_members` insert
+**Creating a workspace auto-bootstraps the owner**: the `workspace_members` insert
 policy requires `is_workspace_admin`, which a brand-new workspace has no one for
-yet — so the first owner row is written with the **service_role** (which bypasses
-RLS) when the workspace is created.
+yet. An `AFTER INSERT` trigger on `workspaces` (`on_workspace_created`,
+`SECURITY DEFINER`) writes the owner's `workspace_members` row automatically, so
+the creator can immediately see/use the workspace — whether it was inserted by a
+browser client (`workspaces_insert`, `owner_id = current_app_user_id()`) or by the
+service_role. No separate bootstrap path is needed.
 
 > Resolved: earlier revisions of this doc flagged that `workspaces.owner_id` and
 > `owns_*` keyed on `auth.uid()` (the #125 v1 schema). The workspace_members

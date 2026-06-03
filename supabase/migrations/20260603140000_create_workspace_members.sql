@@ -56,6 +56,32 @@ from public.workspaces w
 where w.owner_id is not null
 on conflict (workspace_id, user_id) do nothing;
 
+-- Auto-create the owner membership whenever a workspace is created, so any insert
+-- path bootstraps correctly: a browser client inserting under workspaces_insert
+-- (owner_id = current_app_user_id()) immediately becomes a member/admin and can
+-- see/use the workspace, and service-role creation behaves identically. Without
+-- this the creator would be locked out (read + members-insert both require
+-- membership). SECURITY DEFINER so it can write workspace_members under RLS.
+create or replace function public.handle_new_workspace()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.owner_id is not null then
+    insert into public.workspace_members (workspace_id, user_id, role)
+    values (new.id, new.owner_id, 'owner')
+    on conflict (workspace_id, user_id) do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger on_workspace_created
+  after insert on public.workspaces
+  for each row execute function public.handle_new_workspace();
+
 -- --- membership helpers (SECURITY DEFINER to avoid RLS recursion) -----------
 create or replace function public.is_workspace_member(p_workspace_id text)
 returns boolean
@@ -146,8 +172,9 @@ create policy workspaces_delete on public.workspaces
 
 -- --- workspace_members RLS -------------------------------------------------
 -- Members can see co-members; only owners/admins manage membership (= invites).
--- Bootstrapping the first owner row happens server-side via service_role (which
--- bypasses RLS), e.g. when a workspace is created.
+-- The creating owner's row is bootstrapped automatically by the on_workspace_created
+-- trigger above (works for browser and service_role inserts alike), so no special
+-- bootstrap path is needed.
 alter table public.workspace_members enable row level security;
 
 create policy workspace_members_select on public.workspace_members
