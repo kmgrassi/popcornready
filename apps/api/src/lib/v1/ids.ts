@@ -1,12 +1,6 @@
-// Stable, prefixed IDs for v1 resources. Mirrors the MVP convention
-// (prefix + short random suffix) used elsewhere in the codebase.
-function rand(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
+import { newId } from "@/core/ids";
 
-export function newId(prefix: string): string {
-  return `${prefix}_${rand()}`;
-}
+export { newId };
 
 export const projectId = () => newId("proj");
 export const briefVersionId = () => newId("briefv");

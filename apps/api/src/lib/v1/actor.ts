@@ -2,7 +2,7 @@
 // resolver remains for local tests; request-aware routes should use
 // resolveActorFromRequest so hosted mode goes through Supabase auth.
 
-import { NextRequest } from "next/server";
+import type { ApiRequestView } from "@/lib/api/v1/handler";
 import { resolveAuth } from "@/lib/api/v1/auth";
 import { ApiError as SharedApiError } from "@/lib/api/v1/errors";
 import { ApiError } from "./errors";
@@ -33,7 +33,7 @@ export function resolveActor(): Actor {
   return LOCAL_ACTOR;
 }
 
-export async function resolveActorFromRequest(req: NextRequest): Promise<Actor> {
+export async function resolveActorFromRequest(req: ApiRequestView): Promise<Actor> {
   if (isLocalMode()) return LOCAL_ACTOR;
   try {
     const auth = await resolveAuth(req);

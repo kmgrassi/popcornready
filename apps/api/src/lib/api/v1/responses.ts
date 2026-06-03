@@ -1,6 +1,5 @@
 // Response envelope helpers for the v1 agent API.
 
-import { NextResponse } from "next/server";
 import { ApiError } from "./errors";
 
 export interface Pagination {
@@ -8,27 +7,28 @@ export interface Pagination {
   nextCursor: string | null;
 }
 
+export interface JsonResponseView {
+  status: number;
+  body: unknown;
+  headers: Record<string, string>;
+}
+
 export function ok(
   body: Record<string, unknown>,
   requestId: string,
   status = 200
-): NextResponse {
-  return NextResponse.json(body, {
+): JsonResponseView {
+  return {
     status,
     headers: { "X-Request-Id": requestId },
-  });
+    body,
+  };
 }
 
-export function errorResponse(err: ApiError, requestId: string): NextResponse {
-  return NextResponse.json(
-    {
-      error: {
-        code: err.code,
-        message: err.message,
-        requestId,
-        ...(err.details ? { details: err.details } : {}),
-      },
-    },
-    { status: err.status, headers: { "X-Request-Id": requestId } }
-  );
+export function errorResponse(err: ApiError, requestId: string): JsonResponseView {
+  return {
+    status: err.status,
+    headers: { "X-Request-Id": requestId },
+    body: err.envelope(requestId),
+  };
 }

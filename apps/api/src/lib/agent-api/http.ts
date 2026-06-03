@@ -1,21 +1,19 @@
-// Next.js glue for the /api/v1 route handlers. Imports next/server, so it is
-// only used by route files — the smoke test imports runtime/jobs/workers
-// directly and stays framework-free.
+// Framework-free HTTP helpers for agent-facing v1 route adapters.
 
-import { NextRequest, NextResponse } from "next/server";
+import type { ApiRequestView } from "@/lib/api/v1/handler";
 import { getProject } from "@/lib/store";
 import { Project } from "@popcorn/shared/types";
 import { Actor, resolveActor, toErrorEnvelope } from "./runtime";
 
-function readApiKey(req: NextRequest): string | null {
-  const auth = req.headers.get("authorization");
+function readApiKey(req: ApiRequestView): string | null {
+  const auth = req.header("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
-  return req.headers.get("x-api-key");
+  return req.header("x-api-key");
 }
 
 // Resolve the calling agent from request headers + AUTH_MODE. Throws a typed
 // ApiError (converted by errorResponse) when auth is unavailable.
-export function requireActor(req: NextRequest): Actor {
+export function requireActor(req: ApiRequestView): Actor {
   return resolveActor({
     authMode: process.env.AUTH_MODE,
     apiKey: readApiKey(req),
@@ -30,11 +28,11 @@ export async function loadProject(projectId: string): Promise<Project> {
   return { ...project, id: projectId };
 }
 
-export function errorResponse(err: unknown, reqId: string): NextResponse {
+export function errorResponse(err: unknown, reqId: string) {
   const { status, body } = toErrorEnvelope(err, reqId);
-  return NextResponse.json(body, { status });
+  return { status, body };
 }
 
-export function getIdempotencyKey(req: NextRequest): string | null {
-  return req.headers.get("idempotency-key");
+export function getIdempotencyKey(req: ApiRequestView): string | null {
+  return req.header("idempotency-key");
 }
