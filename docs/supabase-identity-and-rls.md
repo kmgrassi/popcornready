@@ -4,6 +4,23 @@
 The single most common bug in this codebase's data layer is comparing the wrong
 id in an RLS policy. This doc exists to make the right choice obvious.
 
+## Golden rule: the auth user id never leaves RLS
+
+**Never use the auth user id (`auth.uid()` / `auth.users.id`) in application code,
+app tables, API payloads, or business logic.** App identity is always the domain
+id, `public.users.id`, obtained via `public.current_app_user_id()`.
+
+The auth id appears in exactly two places, both in the database:
+1. RLS — and even there, **only** the `public.users` own-row policy
+   (`auth_id = auth.uid()`); every other policy uses `current_app_user_id()` /
+   `is_workspace_member()` / `is_workspace_admin()`.
+2. Inside the mapping/trigger functions (`current_app_user_id()`,
+   `handle_new_user`) that bridge auth → domain.
+
+`current_app_user_id()` is the one helper that ties the two together, so the auth
+id is never exposed upward. If you find yourself storing, passing, or comparing an
+`auth.uid()` anywhere else, that's the bug.
+
 ## The three identifiers (do not conflate them)
 
 | Identifier | Lives in | What it is | Equals `auth.uid()`? |

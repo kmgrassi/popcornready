@@ -14,6 +14,13 @@ dependency we don't own. Track **B** (auth) has its own foundation branch.
 > this doc's creation. See [`../supabase-identity-and-rls.md`](../supabase-identity-and-rls.md)
 > for the identity model that underpins most of this.
 
+## Guiding invariant
+
+**The auth user id (`auth.uid()` / `auth.users.id`) is never used outside RLS.**
+All app code, tables, and APIs key on the domain id `public.users.id` via
+`public.current_app_user_id()`. Every PR below must uphold this — see the
+"Golden rule" in [`../supabase-identity-and-rls.md`](../supabase-identity-and-rls.md).
+
 ## Status legend
 
 `✅ merged` · `🔄 in review` · `⬜ todo` · `🧊 blocked (see deps)`
@@ -38,7 +45,7 @@ Pure SQL migrations. Parallelizable **except** where two touch the same objects
 | A3 | `workspace_members` + unify workspace authz on domain id (`#128`) | ✅ merged | A2 |
 | A4 | `workspace_invites` (email, role, token, expiry) — or confirm the `auth_id`-null + members-row approach is enough | ⬜ todo | A3 |
 | A5 | Push the Storage bucket migration (`20260603000100`) to remote (ops, not a PR) | ⬜ todo | A1 |
-| A6 | Audit remaining `auth.uid()` references; confirm everything keys on `current_app_user_id()` | ⬜ todo | A3 |
+| A6 | Audit remaining auth-id usage; confirm everything keys on `current_app_user_id()`. Known offender: `src/lib/api/v1/auth.ts` derives `ws_user_<auth_uid>` and `Actor.id = auth user id` — switch to `public.users.id` (part of Track C cutover) | ⬜ todo | A3, C1 |
 
 ### Track B — Auth (app)
 
