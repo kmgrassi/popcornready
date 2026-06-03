@@ -453,7 +453,15 @@ export async function inventoryAssets(
     : items;
   const assets = input.includeExistingContext
     ? requested
-    : requested.map((asset) => ({ ...asset, userContext: undefined, agentContext: undefined }));
+    : requested.map((asset) => ({
+        ...asset,
+        context: undefined,
+        userContext: undefined,
+        agentContext: undefined,
+        assetKnowledge: undefined,
+        clipUnderstanding: undefined,
+        semanticAnalysis: undefined,
+      }));
   const summaries = assets.map(summaryForInventory);
   const globalUnknowns = summaries.flatMap((summary) => summary.unknown);
   const knownSummaryCount = assets.filter((asset) => summaryFor(asset)).length;

@@ -143,6 +143,35 @@ test("inventoryAssets reports cheap knowns, gaps, and learning actions", async (
   );
 });
 
+test("inventoryAssets can exclude cached context-derived knowledge", async () => {
+  const asset = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/contextual.mp4" },
+    userContext: {
+      description: "Private customer launch footage.",
+      intendedUse: ["primary_footage"],
+      tags: ["confidential"],
+    },
+  });
+
+  const report = await inventoryAssets(localAuth, project.id, {
+    assetIds: [asset.id],
+    includeExistingContext: false,
+  });
+
+  const summary = report.assets[0];
+  assert.equal(summary.confidence, "low");
+  assert.equal(report.coverageEstimate.video, "none");
+  assert.deepEqual(summary.likelyUses, ["primary_footage", "b_roll"]);
+  assert.equal(
+    summary.known.some((known) => known.includes("Private customer launch")),
+    false
+  );
+  assert.equal(
+    report.globalKnowns.some((known) => known.includes("confidential")),
+    false
+  );
+});
+
 test("registerAsset copies a local_path asset into managed storage as ready", async () => {
   const src = path.join(sourceDir, "narration.mp3");
   await fs.writeFile(src, "fake-audio-bytes");

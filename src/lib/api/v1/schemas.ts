@@ -231,6 +231,16 @@ export interface UsableMoment {
     | "b_roll"
     | "cta";
 }
+const USABLE_MOMENT_USES: UsableMoment["suggestedUse"][] = [
+  "hook",
+  "context",
+  "proof",
+  "emotion",
+  "transition",
+  "detail",
+  "b_roll",
+  "cta",
+];
 
 export interface AgentAssetContext {
   summary: string;
@@ -764,6 +774,70 @@ function optionalMomentArray(
   return moments;
 }
 
+function optionalUsableMomentArray(
+  value: unknown,
+  path: string,
+  fields: FieldError[]
+): UsableMoment[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    fields.push({ path, message: "Must be an array of usable moments." });
+    return undefined;
+  }
+
+  const moments: UsableMoment[] = [];
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    if (!isPlainObject(item)) {
+      fields.push({ path: itemPath, message: "Must be an object." });
+      return;
+    }
+    if (
+      typeof item.startSec !== "number" ||
+      !Number.isFinite(item.startSec) ||
+      item.startSec < 0
+    ) {
+      fields.push({
+        path: `${itemPath}.startSec`,
+        message: "Must be a non-negative number.",
+      });
+      return;
+    }
+    if (
+      typeof item.endSec !== "number" ||
+      !Number.isFinite(item.endSec) ||
+      item.endSec < item.startSec
+    ) {
+      fields.push({
+        path: `${itemPath}.endSec`,
+        message: "Must be a number greater than or equal to startSec.",
+      });
+      return;
+    }
+    const label = requireString(item.label, `${itemPath}.label`, fields);
+    const description = requireString(
+      item.description,
+      `${itemPath}.description`,
+      fields
+    );
+    const suggestedUse = parseEnum(
+      item.suggestedUse,
+      USABLE_MOMENT_USES,
+      `${itemPath}.suggestedUse`,
+      fields
+    );
+    if (!label || !description || !suggestedUse) return;
+    moments.push({
+      startSec: item.startSec,
+      endSec: item.endSec,
+      label,
+      description,
+      suggestedUse,
+    });
+  });
+  return moments;
+}
+
 function parseUserAssetContext(
   input: unknown,
   path: string,
@@ -873,7 +947,8 @@ function parseAgentAssetContext(
     visualSubjects:
       optionalStringArray(input.visualSubjects, `${path}.visualSubjects`, fields) ?? [],
     shotTypes: optionalStringArray(input.shotTypes, `${path}.shotTypes`, fields) ?? [],
-    usableMoments: [],
+    usableMoments:
+      optionalUsableMomentArray(input.usableMoments, `${path}.usableMoments`, fields) ?? [],
     sampledFrames: optionalStringArray(input.sampledFrames, `${path}.sampledFrames`, fields) ?? [],
   };
 }
