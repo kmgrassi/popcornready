@@ -81,7 +81,10 @@ create table assets (
   url                      text,
   remote_url               text,
   storage_key              text,
-  source                   text        not null,
+  -- The api/v1 contract stores source as an AgentAssetSource object
+  -- ({ type: "remote_url", url } / { type: "local_path", path } / ...); the
+  -- lib/v1 contract stores a plain string. jsonb round-trips both.
+  source                   jsonb       not null,
   duration_sec             double precision,
   description              text,
   context                  jsonb,
@@ -225,15 +228,18 @@ create index generation_stage_items_stage_id_idx on generation_stage_items (stag
 -- ---------------------------------------------------------------------------
 -- Idempotency (superset of both stores' shapes)
 -- ---------------------------------------------------------------------------
+-- Composite (scope, key): the api/v1 store matches on both. The lib/v1 store
+-- keys by scope alone and stores key = '' (the column default).
 create table idempotency (
-  scope         text primary key,
-  key           text,
+  scope         text        not null,
+  key           text        not null default '',
   body_hash     text,
   request_hash  text,
   job_id        text,
   status        integer,
   response_body jsonb,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  primary key (scope, key)
 );
 
 -- ---------------------------------------------------------------------------
@@ -288,10 +294,15 @@ create policy workspaces_owner on workspaces
 -- Workspace-scoped tables.
 create policy projects_owner on projects
   for all using (owns_workspace(workspace_id)) with check (owns_workspace(workspace_id));
+-- assets/jobs carry both workspace_id and project_id. Requiring owns_project too
+-- prevents a user from attaching a row to a project in another workspace (a
+-- foreign key only checks existence, not tenancy).
 create policy assets_owner on assets
-  for all using (owns_workspace(workspace_id)) with check (owns_workspace(workspace_id));
+  for all using (owns_workspace(workspace_id) and owns_project(project_id))
+  with check (owns_workspace(workspace_id) and owns_project(project_id));
 create policy jobs_owner on jobs
-  for all using (owns_workspace(workspace_id)) with check (owns_workspace(workspace_id));
+  for all using (owns_workspace(workspace_id) and owns_project(project_id))
+  with check (owns_workspace(workspace_id) and owns_project(project_id));
 
 -- Project-scoped tables (walk project -> workspace).
 create policy brief_versions_owner on brief_versions

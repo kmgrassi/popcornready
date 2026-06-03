@@ -2,6 +2,9 @@ node_modules
 .next
 dist
 .turbo
+# pnpm is the package manager; npm/yarn lockfiles must not be tracked
+package-lock.json
+yarn.lock
 .env
 .env.local
 .env*.local
