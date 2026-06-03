@@ -5,11 +5,70 @@
 > assets + moving selections give versioning for free), and migrate the live
 > studio editor + one-shot route onto it via a compatibility/read-through phase.
 
+## Post-foundation re-grounding (2026-06)
+
+This scope was written **before** the asset-pool, provenance-graph, and
+Clip/Asset-convergence lanes landed. A fresh model survey of the current tree
+updates two things that change the plan. The repo has also moved through a package
+split, so current path examples in this re-grounding use the package paths
+(`apps/api/src/...`, `packages/shared/src/...`); older inventory sections below
+still name the same stores by their pre-split `src/...` paths unless explicitly
+updated. The six-store count and live/dead classification remain the relevant
+planning facts.
+
+**1. The unified `Asset` pool now lives on the LEGACY store (Store 1), not the
+v1 stores.** `Project` (`packages/shared/src/types.ts`) now carries
+`assets?: Asset[]` + `selections?: AssetSelection[]`; `saveProject` freezes
+provenance fingerprints (`apps/api/src/lib/store.ts`, `freezeFingerprints`); and
+the provenance read API (`getProvenanceGraph` / `getStaleCandidates`) + `addAsset`
+pool helper live on the legacy store/pool path. So the **real North Star asset
+model — the only shape with `role`/`depicts`/`provenance.inputs`/
+`provenance.fingerprint`/`characterInvariants`
+(`packages/shared/src/assets/types.ts`) — is on the live one-shot/studio path's
+store.** The two `V1Asset` shapes (Store 2 `apps/api/src/lib/api/v1/store.ts`,
+Store 3 `packages/shared/src/v1/types.ts`) remain incompatible with each other
+AND with the unified `Asset` (no `role`/`depicts`/`provenance.inputs`).
+
+**2. Trunk decision — REVISED.** The original plan made **Store 3 the trunk** and
+folded everything (incl. the legacy `Project`) into it. That predated the pool
+landing on Store 1. The trunk is now the **unified `Asset` model**: consolidation
+should grow a project-scoped store *backend* under the `Asset` pool the live path
+already uses, and migrate the v1 surfaces' `V1Asset` **onto `Asset`** — not fold
+the live pool into Store 3's poorer `V1Asset`. Keep Store 3's one-record-per-file
+`.local/dev-db/` *layout* (it scales to a never-deleted pool); adopt the unified
+`Asset` *shape*.
+
+**3. Correction to the old inventory:** Store 5
+(`apps/api/src/lib/api/v1/jobs.ts`) is **live**, not a placeholder — it backs
+`generated-assets.ts` →
+`/api/v1/projects/[projectId]/generated-assets/**`. It is a consolidation target,
+not a quick deletion.
+
+**Revised first steps** (supersede the [Work breakdown](#work-breakdown-ordered-pr-sized)
+ordering where they conflict):
+- **Step 1 — `ProjectStore` interface over the unified `Asset` model.** Extract the
+  read/write surface the live path already uses (`getProject`/`saveProject`/
+  `addAsset`/`getProvenanceGraph`/`getStaleCandidates`/selection helpers) into a
+  `ProjectStore` interface, with today's `apps/api/src/lib/store.ts` as its first
+  implementation for `projectId="default"`. No behavior change; gives later
+  backends (multi-project, per-record dev-db) something to implement, and gives
+  the v1 migration a single target. *Effort: M, low risk.*
+- **Step 2 — Reconcile the two v1 stores (old PR-B) toward `Asset`.** Collapse
+  Store 2 + Store 3 to one v1 store behind `/api/v1`, extending its `V1Asset`
+  toward the unified `Asset` (add `role`/`depicts`/`provenance.inputs`). Independent
+  of the live path. *Effort: M.*
+- **Step 3+** — fold the job/artifact stores (5 & 6) under the store, then the
+  read-through migration of one-shot + studio (old PR-D/E/F), coordinated with
+  unified-engine as the sole writer. Unchanged from below.
+
 ## Status & sibling cross-refs
 
-- **Status:** P0 design / scoping only. No code. This is one workstream of the
-  North Star initiative ([`docs/NORTH_STAR.md`](../NORTH_STAR.md), esp. §4 +
-  §8 "collapse to one project-scoped asset pool").
+- **Status:** re-grounded for implementation (see
+  [Post-foundation re-grounding](#post-foundation-re-grounding-2026-06)). The
+  asset-pool / provenance / convergence foundation has since landed on the legacy
+  store; PR-A (delete dead `runs/`) is done. One workstream of the North Star
+  initiative ([`docs/NORTH_STAR.md`](../NORTH_STAR.md), esp. §4 + §8 "collapse to
+  one project-scoped asset pool").
 - **My lane:** *store-consolidation* — the persistence layer and the migration of
   the live surfaces onto it.
 - **Sibling workstreams (cross-reference, do not redo):**
@@ -291,16 +350,19 @@ interface ProjectStore {
 
 **What to keep vs drop:**
 
-- **Keep from Store 3 (the trunk):** the per-record directory layout, the
-  `VersionedTimeline` + `TimelineProvenance` lineage shape (the richest in the
-  repo), `Job`, `VersionedEditGraph`, idempotency, the `generation-runs`
-  collection. Store 3 is the closest existing thing to the target and should be
-  the **base** the consolidated store grows from.
+- **Keep from Store 3 (storage/runtime pieces, not the asset trunk):** the
+  per-record directory layout, the `VersionedTimeline` + `TimelineProvenance`
+  lineage shape (the richest in the repo), `Job`, `VersionedEditGraph`,
+  idempotency, and the `generation-runs` collection. Store 3 is a useful
+  implementation substrate for the consolidated store backend, but it is **not**
+  the target asset model. The target grows under the unified `Asset` shape already
+  used by Store 1; Store 3's `V1Asset` must converge toward that shape.
 - **Keep from Store 2:** the `brief` / `currentBriefVersionId` project fields and
-  cursor `paginate`; fold them into Store 3's project record. Reconcile the two
-  `V1Project`/`V1Asset` definitions into one (`V1Asset` already has `projectId` —
-  extend with the self-describing `kind`/`role`/`depicts`/`provenance` fields the
-  asset-pool scope defines).
+  cursor `paginate`; fold them into the consolidated project record. Reconcile
+  the two `V1Project`/`V1Asset` definitions into one transitional v1 type, then
+  migrate that type toward `Asset` (`V1Asset` already has `projectId`; add the
+  self-describing `role`/`depicts`/`provenance.inputs` fields the asset-pool and
+  provenance scopes define).
 - **Fold in Stores 5 & 6 (the agent-API job stores):** reconcile the three job/run
   taxonomies (`generation-runs` `GenerationRun`, Store 5 `V1Job`, Store 6
   `Job`+`Artifact`) into one project-scoped `jobs`/`runs` collection plus an
@@ -335,13 +397,16 @@ engine writes through.
    (verified unreferenced), dropping one `GenerationRun` definition and one store.
    *Effort: S.* (Step retained for history; no further work.)
 2. **PR-B — Reconcile the two v1 stores' types.** Unify Store 2 and Store 3's
-   `V1Project` / `V1Asset` into the `src/lib/v1/types.ts` definitions (add
-   `brief`/`currentBriefVersionId`, keep `projectId`). Point the `/api/v1`
-   projects/brief/assets routes at Store 3 (`getStore()`); migrate any
-   `.local/agent-store.json` data with a one-shot backfill. Retire
-   `src/lib/api/v1/store.ts`. *Effort: M.* Collapses 2 stores → 1 behind `/api/v1`.
+   `V1Project` / `V1Asset` into one transitional v1 definition (add
+   `brief`/`currentBriefVersionId`, keep `projectId`, and start moving toward
+   `Asset` with `role`/`depicts`/`provenance.inputs`). Point the `/api/v1`
+   projects/brief/assets routes at the per-record v1 backend (`getStore()`);
+   migrate any `.local/agent-store.json` data with a one-shot backfill. Retire
+   `apps/api/src/lib/api/v1/store.ts`. *Effort: M.* Collapses 2 stores → 1 behind
+   `/api/v1` without making Store 3's `V1Asset` the North Star model.
 3. **PR-C — Define the consolidated `ProjectStore` interface + pool collection.**
-   Land the interface above over Store 3's layout: add an `assets` pool with the
+   Land the interface above over the unified `Asset` shape, using Store 3's
+   per-record layout as the first scalable backend: add an `assets` pool with the
    self-describing fields (coordinated with asset-pool scope), `addAsset`
    (append-only), `listAssets(filter)`, and selection-doc accessors. No callers
    migrated yet. *Effort: M.*
