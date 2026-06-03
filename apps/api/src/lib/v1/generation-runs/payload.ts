@@ -33,6 +33,7 @@ export interface CreateGenerationRunBody {
   briefVersionId?: string;
   prompt?: string;
   reviewGates?: unknown;
+  assetReview?: unknown;
 }
 
 export interface CreateRunArgs {
@@ -94,6 +95,52 @@ function parseReviewGates(body: CreateGenerationRunBody): GateableGenerationStag
   return gates;
 }
 
+function shouldGateTimelineForAssetReview(body: CreateGenerationRunBody): boolean {
+  if (body.assetReview === undefined || body.assetReview === null) return false;
+  if (typeof body.assetReview !== "object" || Array.isArray(body.assetReview)) {
+    throw new ApiError("validation_failed", "assetReview must be an object.", {
+      fields: [{ path: "assetReview", message: "Must be an object." }],
+    });
+  }
+
+  const review = body.assetReview as {
+    lowConfidenceAssetIds?: unknown;
+    requireTimelineReview?: unknown;
+  };
+  if (
+    review.lowConfidenceAssetIds !== undefined &&
+    (!Array.isArray(review.lowConfidenceAssetIds) ||
+      review.lowConfidenceAssetIds.some((id) => typeof id !== "string" || id.trim() === ""))
+  ) {
+    throw new ApiError("validation_failed", "assetReview.lowConfidenceAssetIds is invalid.", {
+      fields: [
+        {
+          path: "assetReview.lowConfidenceAssetIds",
+          message: "Must be an array of non-empty asset IDs.",
+        },
+      ],
+    });
+  }
+  if (
+    review.requireTimelineReview !== undefined &&
+    typeof review.requireTimelineReview !== "boolean"
+  ) {
+    throw new ApiError("validation_failed", "assetReview.requireTimelineReview is invalid.", {
+      fields: [
+        {
+          path: "assetReview.requireTimelineReview",
+          message: "Must be a boolean.",
+        },
+      ],
+    });
+  }
+
+  return (
+    review.requireTimelineReview === true ||
+    ((review.lowConfidenceAssetIds as string[] | undefined)?.length ?? 0) > 0
+  );
+}
+
 export async function createRunWithSeedStages(args: CreateRunArgs): Promise<GenerationRunPayload> {
   const { store, projectId, body } = args;
   const parsedBody = body && typeof body === "object" && !Array.isArray(body)
@@ -103,6 +150,9 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
     ? String(parsedBody.briefVersionId).trim() || undefined
     : undefined;
   const reviewGates = parseReviewGates(parsedBody);
+  if (shouldGateTimelineForAssetReview(parsedBody) && !reviewGates.includes("timeline_assembly")) {
+    reviewGates.push("timeline_assembly");
+  }
   const reviewGateSet = new Set<GenerationStageType>(reviewGates);
 
   const run = await store.createRun({
