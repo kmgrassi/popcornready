@@ -13,9 +13,13 @@ import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
   AgentAssetSource,
+  AgentAssetContext,
+  AgentClipContext,
   AssetContext,
+  AssetKnowledge,
   AssetKind,
   SCHEMA_VERSIONS,
+  UserAssetContext,
   VideoBrief,
 } from "./schemas";
 
@@ -60,6 +64,27 @@ export interface V1Asset {
   storageKey?: string;
   durationSec?: number;
   context?: AssetContext;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+  assetKnowledge?: AssetKnowledge;
+  clipUnderstanding?: {
+    assetId: string;
+    source: "upload" | "generated";
+    combinedSummary: string;
+    timelineHints: {
+      mustUse: boolean;
+      avoid: boolean;
+      preferredBeats: string[];
+      bestStartSec?: number;
+      bestEndSec?: number;
+    };
+    provenance: {
+      userContextUpdatedAt?: string;
+      analyzedAt?: string;
+      analysisVersion: string;
+      sampledFrameAssetIds: string[];
+    };
+  };
   semanticAnalysis?: AssetSemanticAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
@@ -326,6 +351,23 @@ export async function getAsset(
   );
   if (!asset) throw notFound(`Asset not found: ${assetId}`);
   return asset;
+}
+
+export async function updateAsset(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  updater: (asset: V1Asset) => void
+): Promise<V1Asset> {
+  return mutate((db) => {
+    const asset = db.assets.find(
+      (a) => a.id === assetId && a.projectId === projectId && a.workspaceId === workspaceId
+    );
+    if (!asset) throw notFound(`Asset not found: ${assetId}`);
+    updater(asset);
+    asset.updatedAt = new Date().toISOString();
+    return asset;
+  });
 }
 
 export async function listAssets(

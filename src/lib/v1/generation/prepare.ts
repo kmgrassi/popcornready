@@ -31,7 +31,11 @@ export function assetToClip(asset: V1Asset): Clip {
     url: asset.url,
     kind: asset.kind,
     durationSec: asset.durationSec,
-    description: asset.description || "",
+    description:
+      asset.clipUnderstanding?.combinedSummary ||
+      asset.assetKnowledge?.knowledgeSummary ||
+      asset.description ||
+      "",
     source: asset.source === "generated" ? "generated" : "upload",
   };
 }

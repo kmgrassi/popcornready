@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { AuthContext } from "../auth";
-import { registerAsset } from "../assets";
+import { inventoryAssets, registerAsset, updateAssetContext } from "../assets";
 import { createProject, localDir, V1Project } from "../store";
 
 let tmpDir: string;
@@ -47,12 +47,100 @@ test("registerAsset records a remote_url asset as pending", async () => {
   assert.equal(asset.remoteUrl, "https://cdn.example.com/clip.mp4");
   assert.equal(asset.storageKey, undefined);
   assert.equal(asset.semanticAnalysis?.schemaVersion, "semanticAnalysis.v1");
+  assert.equal(asset.assetKnowledge?.mediaType, "video");
+  assert.equal(asset.assetKnowledge?.origin, "imported");
+  assert.match(asset.assetKnowledge?.knowledgeSummary ?? "", /quick hook/);
+  assert.match(asset.clipUnderstanding?.combinedSummary ?? "", /quick hook/);
   assert.equal(asset.semanticAnalysis?.transcript[0].text, "A quick hook explains the product.");
   assert.deepEqual(asset.semanticAnalysis?.segments[0].semanticTags, [
     "video",
     "remote_url",
     "hook",
   ]);
+});
+
+test("registerAsset stores structured user context and projects it into semantic analysis", async () => {
+  const asset = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/founder.mp4" },
+    userContext: {
+      title: "Founder keynote",
+      description: "Founder announces the launch while customers applaud.",
+      people: ["Maya"],
+      event: "Customer summit",
+      intendedUse: ["primary_footage"],
+      mustUse: true,
+      tags: ["hook"],
+    },
+  });
+
+  assert.equal(asset.assetKnowledge?.knowledgeScore, 0.35);
+  assert.deepEqual(asset.assetKnowledge?.constraints, [{ type: "must_use" }]);
+  assert.match(asset.clipUnderstanding?.combinedSummary ?? "", /Founder announces/);
+  assert.deepEqual(asset.clipUnderstanding?.timelineHints.preferredBeats, [
+    "hook",
+  ]);
+  assert.equal(
+    asset.semanticAnalysis?.segments[0].visualDescription?.includes("Founder announces"),
+    true
+  );
+});
+
+test("updateAssetContext updates knowledge and transcript projection", async () => {
+  const asset = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/interview.mp4" },
+  });
+
+  const updated = await updateAssetContext(localAuth, project.id, asset.id, {
+    userContext: {
+      description: "Customer describes why the product saved time.",
+      intendedUse: ["primary_footage"],
+    },
+    context: {
+      transcriptText: "This saved our team hours every week.",
+      moments: [{ startSec: 0, endSec: 4, label: "testimonial" }],
+    },
+  });
+
+  assert.match(updated.assetKnowledge?.knowledgeSummary ?? "", /Customer describes/);
+  assert.equal(updated.semanticAnalysis?.transcript[0].text, "This saved our team hours every week.");
+  assert.deepEqual(updated.semanticAnalysis?.segments[0].semanticTags, [
+    "video",
+    "remote_url",
+    "primary_footage",
+    "testimonial",
+  ]);
+});
+
+test("inventoryAssets reports cheap knowns, gaps, and learning actions", async () => {
+  const video = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/raw.mp4" },
+  });
+  const audio = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/music.mp3" },
+    userContext: {
+      description: "Upbeat backing track.",
+      intendedUse: ["music"],
+    },
+  });
+
+  const report = await inventoryAssets(localAuth, project.id, {
+    includeExistingContext: true,
+  });
+
+  assert.equal(report.projectId, project.id);
+  assert.equal(report.assets.length, 2);
+  assert.equal(report.coverageEstimate.video, "none");
+  assert.equal(report.coverageEstimate.audio, "complete");
+  assert.ok(
+    report.recommendedLearningActions.some(
+      (action) => action.assetId === video.id && action.action === "sample_video"
+    )
+  );
+  assert.ok(
+    report.assets
+      .find((summary) => summary.assetId === audio.id)
+      ?.known.some((known) => known.includes("Upbeat backing track"))
+  );
 });
 
 test("registerAsset copies a local_path asset into managed storage as ready", async () => {
