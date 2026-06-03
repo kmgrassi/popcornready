@@ -29,6 +29,7 @@ import { addAsset, DEFAULT_PROJECT_ID, setSelection } from "@/lib/assets/pool";
 import { oneShotCharacterContext } from "@/lib/oneshot/character-reference";
 import {
   audioRequested,
+  beatClipAsset,
   beatPrompt,
   characterAnchorPool,
   clampSeconds,
@@ -125,6 +126,25 @@ function recordFirstFrameEdge(clip: Clip, firstFrameAssetId?: string): void {
     ...clip.generatedBy.inputs,
     firstFrameAssetId,
   };
+}
+
+// Pool a generated beat clip as a first-class `beat_clip` asset (Clip/Asset
+// convergence): append the asset (same id as the clip, so `poolAssets` dedups the
+// twin and `clips[]` stays the render shape) and point a `beat_clip` selection at
+// it. Pooling it lets `saveProject`'s freezeFingerprints stamp a baseline, so the
+// clip joins the candidate-stale set and the keyframe→clip ripple fires. Must run
+// AFTER recordFirstFrameEdge so the firstFrameAssetId edge is carried.
+function poolBeatClip(
+  poolProject: Project,
+  clip: Clip,
+  beat: Beat,
+  anchorAssetId?: string
+): void {
+  addAsset(
+    poolProject,
+    beatClipAsset(clip, beat, { projectId: poolProject.id, anchorAssetId })
+  );
+  if (beat.id) setSelection(poolProject, "beat_clip", beat.id, clip.id);
 }
 
 async function generateBeatClipWithReview(input: {
@@ -324,8 +344,20 @@ export async function POST(req: NextRequest) {
       chat: [],
       updatedAt: new Date().toISOString(),
     };
-    const keyframeAssets = (): Asset[] => poolProject.assets ?? [];
-    const keyframeSelections = (): AssetSelection[] => poolProject.selections ?? [];
+    // Snapshots of the whole in-memory pool (keyframes, character anchor, and now
+    // the per-beat clip assets) and its selections, for persistence.
+    const pooledAssets = (): Asset[] => poolProject.assets ?? [];
+    const pooledSelections = (): AssetSelection[] => poolProject.selections ?? [];
+    // Resume backfill: clips loaded by resumableClipsForGoal make the loop start
+    // at clips.length, so its poolBeatClip never runs for them. Pool them here so
+    // resumed clips also get a frozen baseline and are flagged by
+    // getStaleCandidates after a beat edit. Idempotent: addAsset no-ops when a
+    // prior run already pooled the clip (preserving its frozen fingerprint); only
+    // legacy clips with no beat_clip asset get a fresh one (frozen on save).
+    clips.forEach((clip, index) => {
+      const beat = plan.beats[index];
+      if (beat) poolBeatClip(poolProject, clip, beat, character?.clip.id);
+    });
     try {
       for (let index = clips.length; index < plan.beats.length; index += 1) {
         const beat = plan.beats[index];
@@ -400,6 +432,7 @@ export async function POST(req: NextRequest) {
             heroReferencePath: character?.path,
           });
           recordFirstFrameEdge(generatedClip, firstFrameAssetId);
+          poolBeatClip(poolProject, generatedClip, beat, character?.clip.id);
           clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -416,8 +449,8 @@ export async function POST(req: NextRequest) {
             characterReferences,
             characterAnchor,
             showCaptions,
-            assets: keyframeAssets(),
-            selections: keyframeSelections(),
+            assets: pooledAssets(),
+            selections: pooledSelections(),
           });
         } catch (err) {
           if (
@@ -444,6 +477,7 @@ export async function POST(req: NextRequest) {
             heroReferencePath: character?.path,
           });
           recordFirstFrameEdge(generatedClip, firstFrameAssetId);
+          poolBeatClip(poolProject, generatedClip, beat, character?.clip.id);
           clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -460,8 +494,8 @@ export async function POST(req: NextRequest) {
             characterReferences,
             characterAnchor,
             showCaptions,
-            assets: keyframeAssets(),
-            selections: keyframeSelections(),
+            assets: pooledAssets(),
+            selections: pooledSelections(),
           });
         }
       }
@@ -480,8 +514,8 @@ export async function POST(req: NextRequest) {
           characterReferences,
           characterAnchor,
           showCaptions,
-          assets: keyframeAssets(),
-          selections: keyframeSelections(),
+          assets: pooledAssets(),
+          selections: pooledSelections(),
         });
       }
       throw err;
@@ -553,7 +587,7 @@ export async function POST(req: NextRequest) {
       // legacy reference. Deduped so a resume-seeded anchor isn't double-counted.
       ...(() => {
         const { assets, selections } = mergePool(
-          { assets: keyframeAssets(), selections: keyframeSelections() },
+          { assets: pooledAssets(), selections: pooledSelections() },
           characterAnchorPool(characterAnchor)
         );
         return {
