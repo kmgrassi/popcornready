@@ -79,6 +79,32 @@ export const planCritiqueSchema = {
   ],
 };
 
+export const uploadedFootagePlanReviewSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    storyArc: { type: "string", enum: ["pass", "needs_review", "fail"] },
+    sourceCoverage: { type: "string", enum: ["pass", "needs_review", "fail"] },
+    timing: { type: "string", enum: ["pass", "needs_review", "fail"] },
+    missingBeats: { type: "array", items: str },
+    recommendedMode: {
+      type: "string",
+      enum: ["uploaded_only", "hybrid_generate_gaps", "needs_more_source"],
+    },
+    summary: str,
+    revisedPlan: planSchema,
+  },
+  required: [
+    "storyArc",
+    "sourceCoverage",
+    "timing",
+    "missingBeats",
+    "recommendedMode",
+    "summary",
+    "revisedPlan",
+  ],
+};
+
 export const compositionSchema = {
   type: "object",
   additionalProperties: false,
