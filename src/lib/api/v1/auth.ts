@@ -1,21 +1,24 @@
 // Actor and workspace resolution for the v1 agent API.
 //
-// PR1 implements local-mode resolution only. In AUTH_MODE=local, requests resolve
-// to a deterministic development workspace with no API key. Hosted mode (API keys
-// + Supabase) is deferred to later PRs; until then it returns `unauthorized`.
+// AUTH_MODE=local keeps the deterministic development workspace. AUTH_MODE=supabase
+// verifies a Supabase browser access token and maps the user to a stable
+// workspace in the local store until the project data model moves to Postgres.
 
+import { NextRequest } from "next/server";
 import { ApiError } from "./errors";
 import { ensureWorkspace } from "./store";
+import { getSupabaseAuthUser, SupabaseServerConfigError } from "@/lib/supabase/server";
 
 export const LOCAL_WORKSPACE_ID = "ws_local_dev";
 export const LOCAL_WORKSPACE_NAME = "dev_workspace";
 export const LOCAL_ACTOR_ID = "local_dev";
 
-export type AuthMode = "local" | "hosted";
+export type AuthMode = "local" | "supabase";
 
 export interface Actor {
   id: string;
   type: "local" | "user" | "agent";
+  email?: string | null;
 }
 
 export interface AuthContext {
@@ -26,14 +29,24 @@ export interface AuthContext {
 }
 
 export function authMode(): AuthMode {
-  return (process.env.AUTH_MODE || "local") === "local" ? "local" : "hosted";
+  return (process.env.AUTH_MODE || "local") === "local" ? "local" : "supabase";
 }
 
 export function isLocalMode(): boolean {
   return authMode() === "local";
 }
 
-export async function resolveAuth(): Promise<AuthContext> {
+function bearerToken(req: NextRequest): string | null {
+  const value = req.headers.get("authorization")?.trim();
+  if (!value?.toLowerCase().startsWith("bearer ")) return null;
+  return value.slice("bearer ".length).trim() || null;
+}
+
+function workspaceIdForUser(userId: string) {
+  return `ws_user_${userId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+export async function resolveAuth(req?: NextRequest): Promise<AuthContext> {
   if (authMode() === "local") {
     await ensureWorkspace(LOCAL_WORKSPACE_ID, LOCAL_WORKSPACE_NAME);
     return {
@@ -44,8 +57,28 @@ export async function resolveAuth(): Promise<AuthContext> {
     };
   }
 
-  throw new ApiError(
-    "unauthorized",
-    "Hosted authentication is not available yet. Set AUTH_MODE=local for local agent development."
-  );
+  const token = req ? bearerToken(req) : null;
+  if (!token) {
+    throw new ApiError("unauthorized", "Missing Supabase bearer token.");
+  }
+
+  try {
+    const user = await getSupabaseAuthUser(token);
+    const workspaceId = workspaceIdForUser(user.id);
+    await ensureWorkspace(workspaceId, user.email ?? "Supabase workspace");
+    return {
+      mode: "supabase",
+      actor: { id: user.id, type: "user", email: user.email ?? null },
+      workspaceId,
+      isLocal: false,
+    };
+  } catch (err) {
+    if (err instanceof SupabaseServerConfigError) {
+      throw new ApiError("unauthorized", err.message);
+    }
+    throw new ApiError(
+      "unauthorized",
+      err instanceof Error ? err.message : "Invalid Supabase access token."
+    );
+  }
 }

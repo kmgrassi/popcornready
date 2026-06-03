@@ -1,0 +1,21 @@
+# Netlify deploys the Vite React SPA (apps/web) from the monorepo root.
+# The build runs at the repo root so pnpm workspaces resolve, then publishes
+# the app's static output. VITE_API_URL must be set in the Netlify UI to the
+# Railway API origin (e.g. https://api.popcornready.app).
+
+[build]
+  # Netlify auto-detects pnpm from pnpm-lock.yaml + the root packageManager
+  # field and runs `pnpm install` before this command, so the command only
+  # needs to build the web workspace (and its workspace deps via `...`).
+  command = "pnpm --filter @popcorn/web... build"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback: every non-asset route resolves to index.html so client-side
+# routing (react-router) handles deep links.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

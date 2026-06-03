@@ -1,0 +1,146 @@
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import type { User } from "@supabase/supabase-js";
+import {
+  clearAllSupabaseAuthStorage,
+  clearOtherSupabaseAuthStorage,
+  getSupabaseClient,
+  resolveBrowserSupabaseConfig,
+} from "@/lib/supabase/browser";
+
+type AuthStatus = "loading" | "disabled" | "unauthenticated" | "authenticated";
+
+type AuthContextValue = {
+  status: AuthStatus;
+  user: User | null;
+  error: string | null;
+  configured: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [status, setStatus] = useState<AuthStatus>("loading");
+  const [user, setUser] = useState<User | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const configured = Boolean(resolveBrowserSupabaseConfig());
+
+  useEffect(() => {
+    if (!configured) {
+      setStatus("disabled");
+      return;
+    }
+
+    clearOtherSupabaseAuthStorage();
+    const supabase = getSupabaseClient();
+    let mounted = true;
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUser(session?.user ?? null);
+      setStatus(session?.user ? "authenticated" : "unauthenticated");
+      setError(null);
+    });
+
+    void supabase.auth
+      .getSession()
+      .then(({ data, error: sessionError }) => {
+        if (!mounted) return;
+        if (sessionError) throw sessionError;
+        setUser(data.session?.user ?? null);
+        setStatus(data.session?.user ? "authenticated" : "unauthenticated");
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        setUser(null);
+        setStatus("unauthenticated");
+        setError(err instanceof Error ? err.message : String(err));
+      });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [configured]);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    setError(null);
+    setStatus("loading");
+    try {
+      clearAllSupabaseAuthStorage();
+      const { data, error: signInError } =
+        await getSupabaseClient().auth.signInWithPassword({ email, password });
+      if (signInError || !data.session?.user) {
+        throw signInError || new Error("No Supabase session returned.");
+      }
+      setUser(data.session.user);
+      setStatus("authenticated");
+    } catch (err) {
+      setUser(null);
+      setStatus("unauthenticated");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const signUp = useCallback(async (email: string, password: string) => {
+    setError(null);
+    setStatus("loading");
+    try {
+      clearAllSupabaseAuthStorage();
+      const { data, error: signUpError } = await getSupabaseClient().auth.signUp({
+        email,
+        password,
+      });
+      if (signUpError) throw signUpError;
+
+      if (data.session?.user) {
+        setUser(data.session.user);
+        setStatus("authenticated");
+        return;
+      }
+
+      setUser(null);
+      setStatus("unauthenticated");
+      setError("Sign-up complete. Check your email for verification.");
+    } catch (err) {
+      setUser(null);
+      setStatus("unauthenticated");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    setError(null);
+    const supabase = getSupabaseClient();
+    await supabase.auth.signOut();
+    clearAllSupabaseAuthStorage();
+    setUser(null);
+    setStatus("unauthenticated");
+  }, []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ status, user, error, configured, signIn, signUp, signOut }),
+    [status, user, error, configured, signIn, signUp, signOut]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const value = useContext(AuthContext);
+  if (!value) throw new Error("useAuth must be used within AuthProvider.");
+  return value;
+}

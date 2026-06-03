@@ -1,6 +1,11 @@
-// Actor/workspace resolution. PR1 owns the full hosted (Supabase + API key)
-// implementation; PR4 only needs the local-mode resolution so generation jobs
-// and timelines can be scoped to a workspace.
+// Actor/workspace resolution for the older v1 generation stack. The synchronous
+// resolver remains for local tests; request-aware routes should use
+// resolveActorFromRequest so hosted mode goes through Supabase auth.
+
+import { NextRequest } from "next/server";
+import { resolveAuth } from "@/lib/api/v1/auth";
+import { ApiError as SharedApiError } from "@/lib/api/v1/errors";
+import { ApiError } from "./errors";
 
 export interface Actor {
   actorId: string;
@@ -26,4 +31,21 @@ export function resolveActor(): Actor {
   // Hosted auth is not implemented in this PR. Treat as local for now so the
   // contract stays stable; PR1 replaces this with real token/key resolution.
   return LOCAL_ACTOR;
+}
+
+export async function resolveActorFromRequest(req: NextRequest): Promise<Actor> {
+  if (isLocalMode()) return LOCAL_ACTOR;
+  try {
+    const auth = await resolveAuth(req);
+    return {
+      actorId: auth.actor.id,
+      workspaceId: auth.workspaceId,
+      isLocal: auth.isLocal,
+    };
+  } catch (err) {
+    if (err instanceof SharedApiError) {
+      throw new ApiError(err.code, err.message, err.details);
+    }
+    throw err;
+  }
 }

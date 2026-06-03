@@ -1,3 +1,4 @@
+import { promises as fs } from "fs";
 import path from "path";
 import {
   GenerateAssetRequest,
@@ -179,6 +180,49 @@ function openAIImageResult(
   };
 }
 
+// Sora rejects an input_reference whose pixel dimensions differ from the
+// requested video size ("Inpaint image must match the requested width and
+// height"). Read PNG/JPEG dimensions cheaply so we can skip a mismatched
+// reference instead of failing the whole generation — important for the
+// fallback path, where a character hero frame (e.g. 1024x1536) does not match
+// the 720x1280 video.
+async function readImagePixelSize(
+  filePath: string
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const buf = await fs.readFile(filePath);
+    if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+    }
+    if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+      let offset = 2;
+      while (offset + 9 < buf.length) {
+        if (buf[offset] !== 0xff) {
+          offset += 1;
+          continue;
+        }
+        const marker = buf[offset + 1];
+        if (
+          marker >= 0xc0 &&
+          marker <= 0xcf &&
+          marker !== 0xc4 &&
+          marker !== 0xc8 &&
+          marker !== 0xcc
+        ) {
+          return {
+            height: buf.readUInt16BE(offset + 5),
+            width: buf.readUInt16BE(offset + 7),
+          };
+        }
+        offset += 2 + buf.readUInt16BE(offset + 2);
+      }
+    }
+  } catch {
+    // fall through to "unknown"
+  }
+  return null;
+}
+
 async function generateOpenAIVideo(
   input: OpenAIVideoRequest
 ): Promise<GeneratedAssetResult> {
@@ -191,11 +235,21 @@ async function generateOpenAIVideo(
 
   const firstReference = input.referencePaths?.[0];
   if (firstReference) {
-    form.set(
-      "input_reference",
-      await readAsBlob(firstReference),
-      path.basename(firstReference)
-    );
+    const [reqW, reqH] = payload.size.split("x").map(Number);
+    const dims = await readImagePixelSize(firstReference);
+    if (dims && dims.width === reqW && dims.height === reqH) {
+      form.set(
+        "input_reference",
+        await readAsBlob(firstReference),
+        path.basename(firstReference)
+      );
+    } else {
+      console.warn(
+        `[openai] skipping input_reference ${path.basename(firstReference)} — ` +
+          `dimensions ${dims ? `${dims.width}x${dims.height}` : "unknown"} do not match ` +
+          `video size ${payload.size}; generating without a reference image.`
+      );
+    }
   }
 
   const createRes = await openaiFetch("/videos", {

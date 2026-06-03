@@ -47,7 +47,7 @@ export async function handleRead(
 ): Promise<NextResponse> {
   const requestId = newRequestId();
   try {
-    const auth = await resolveAuth();
+    const auth = await resolveAuth(req);
     const result = await fn({ requestId, auth, req, body: undefined });
     return toResponse(result, requestId);
   } catch (err) {
@@ -62,7 +62,7 @@ export async function handleMutation(
 ): Promise<NextResponse> {
   const requestId = newRequestId();
   try {
-    const auth = await resolveAuth();
+    const auth = await resolveAuth(req);
     const { body, rawBody } = await parseJsonBody(req);
     const ctx: HandlerCtx = { requestId, auth, req, body };
 
