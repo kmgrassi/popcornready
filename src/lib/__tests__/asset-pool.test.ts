@@ -62,6 +62,41 @@ test("poolAssets unifies explicit assets and clips-as-assets", () => {
   assert.equal(findAsset(p, "vid_1")?.role, "beat_clip");
 });
 
+test("poolAssets dedups by id; the explicit asset wins over a clip projection", () => {
+  // Clip/Asset convergence: a generated beat clip lives in BOTH clips[] (render
+  // shape) and assets[] (the richer pooled asset, same id). The unified pool must
+  // surface it once, as the explicit asset.
+  const p = emptyProject();
+  const clip: Clip = {
+    id: "vid_1",
+    filename: "vid_1.mp4",
+    url: "/generated/vid_1.mp4",
+    kind: "video",
+    durationSec: 4,
+    description: "a shot",
+    source: "generated",
+  };
+  p.clips.push(clip);
+  const clipAsset: Asset = {
+    id: "vid_1", // same id as the clip
+    projectId: "default",
+    kind: "video",
+    role: "beat_clip",
+    depicts: { beatId: "beat_1_hook" },
+    media: { url: clip.url, filename: clip.filename, durationSec: 4 },
+    source: "generated",
+    provenance: { provider: "gemini", prompt: "a shot", inputs: { beatId: "beat_1_hook" } },
+  };
+  addAsset(p, clipAsset);
+
+  const pool = poolAssets(p);
+  assert.deepEqual(pool.map((a) => a.id), ["vid_1"]); // one entry, not two
+  // The explicit asset (with role/depicts/provenance.inputs) wins.
+  const resolved = findAsset(p, "vid_1");
+  assert.equal(resolved?.depicts?.beatId, "beat_1_hook");
+  assert.equal(resolved?.provenance?.inputs?.beatId, "beat_1_hook");
+});
+
 test("setSelection upserts and flips the active pointer; prior asset stays pooled", () => {
   const p = emptyProject();
   addAsset(p, keyframe);

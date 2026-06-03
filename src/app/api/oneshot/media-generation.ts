@@ -4,6 +4,7 @@ import path from "path";
 import { providerFor } from "@/lib/generative/providers";
 import { Beat, CharacterProfile, CharacterReference, Clip } from "@/lib/types";
 import type { Asset } from "@/lib/assets/types";
+import { clipToAsset } from "@/lib/assets/types";
 import { OpenAIVideoSeconds } from "@/lib/generative/types";
 import type { CharacterGenerationContext } from "@/lib/generative/types";
 import {
@@ -167,6 +168,33 @@ export function characterAnchorAsset(input: {
       ...(profile.negativePrompt ? { negative: profile.negativePrompt } : {}),
     },
   };
+}
+
+// Represent a generated beat clip as a first-class `beat_clip` pooled Asset
+// (Clip/Asset convergence, docs/scopes/north-star-clip-asset-convergence.md).
+// Shares the clip's id (so `clips[]` stays the render shape and `poolAssets`
+// dedups the twin). Carries the structural input edges `Clip.generatedBy` can't
+// hold — its own `beatId` (so a beat edit flags the clip directly, even with no
+// keyframe) and `anchorIds` — on top of the `firstFrameAssetId` the clip already
+// records. Pure; the caller appends it to the pool and sets the active selection.
+export function beatClipAsset(
+  clip: Clip,
+  beat: Beat,
+  opts: { projectId: string; anchorAssetId?: string }
+): Asset {
+  const asset = clipToAsset(clip, {
+    projectId: opts.projectId,
+    role: "beat_clip",
+    ...(beat.id ? { depicts: { beatId: beat.id } } : {}),
+  });
+  if (asset.provenance) {
+    asset.provenance.inputs = {
+      ...asset.provenance.inputs, // firstFrameAssetId, when a keyframe seeded it
+      ...(beat.id ? { beatId: beat.id } : {}),
+      ...(opts.anchorAssetId ? { anchorIds: [opts.anchorAssetId] } : {}),
+    };
+  }
+  return asset;
 }
 
 export async function generateCharacterHeroFrame(input: {
