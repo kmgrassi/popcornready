@@ -348,6 +348,16 @@ export async function POST(req: NextRequest) {
     // the per-beat clip assets) and its selections, for persistence.
     const pooledAssets = (): Asset[] => poolProject.assets ?? [];
     const pooledSelections = (): AssetSelection[] => poolProject.selections ?? [];
+    // Resume backfill: clips loaded by resumableClipsForGoal make the loop start
+    // at clips.length, so its poolBeatClip never runs for them. Pool them here so
+    // resumed clips also get a frozen baseline and are flagged by
+    // getStaleCandidates after a beat edit. Idempotent: addAsset no-ops when a
+    // prior run already pooled the clip (preserving its frozen fingerprint); only
+    // legacy clips with no beat_clip asset get a fresh one (frozen on save).
+    clips.forEach((clip, index) => {
+      const beat = plan.beats[index];
+      if (beat) poolBeatClip(poolProject, clip, beat, character?.clip.id);
+    });
     try {
       for (let index = clips.length; index < plan.beats.length; index += 1) {
         const beat = plan.beats[index];

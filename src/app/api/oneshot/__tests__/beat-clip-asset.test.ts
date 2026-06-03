@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Asset } from "@/lib/assets/types";
-import type { Beat, Clip, EditPlan } from "@/lib/types";
+import type { Beat, Clip, EditPlan, Project } from "@/lib/types";
+import { addAsset } from "@/lib/assets/pool";
 import {
   computeCandidateStaleSet,
   freezeFingerprints,
@@ -104,6 +105,33 @@ test("a clip generated WITHOUT a keyframe is still flagged via its own beatId", 
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].assetId, "vid_2");
   assert.equal(candidates[0].reason, "input_changed");
+});
+
+test("re-pooling a resumed clip preserves its already-frozen baseline (idempotent)", () => {
+  // The resume backfill re-derives a beat_clip asset for every resumed clip and
+  // addAsset's it. For a clip a prior run already pooled + froze, this must NOT
+  // overwrite the frozen baseline (else staleness is lost), and must not double
+  // it. Only a legacy clip with no asset gets a fresh (to-be-frozen) one.
+  const clip = beatClip("vid_1", "kf_1");
+  const opts = { projectId: "default", anchorAssetId: "anchor_1" };
+  const [frozen] = freezeFingerprints([beatClipAsset(clip, beat, opts)], plan());
+  assert.ok(frozen.provenance?.fingerprint, "prior run froze the clip asset");
+
+  const project = {
+    id: "default",
+    clips: [clip],
+    assets: [frozen],
+    selections: [],
+  } as unknown as Project;
+
+  // Backfill re-derives an UNFROZEN twin (same id) and appends it.
+  addAsset(project, beatClipAsset(clip, beat, opts));
+
+  assert.equal(project.assets!.length, 1, "no duplicate");
+  assert.ok(
+    project.assets![0].provenance?.fingerprint,
+    "the frozen baseline survived (addAsset no-ops on existing id)"
+  );
 });
 
 test("editing an unrelated beat does not flag a clip whose prompt didn't change", () => {
