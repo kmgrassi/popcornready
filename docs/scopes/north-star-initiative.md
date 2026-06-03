@@ -50,16 +50,17 @@ These reframed the work and are encouraging — a lot is "connect / delete," not
 
 ## Recommended build order
 
-**Quick wins (no-regret, do first):**
-- **Delete dead `src/lib/runs/`** (verify zero references, then remove). Shrinks
-  the surface every other lane reasons about.
-- **Fix the `1:1` size bug + de-duplicate `generateBeatClip`** (Lane 5 PR1).
+**Quick wins (no-regret, do first):** ✅ done
+- ~~**Delete dead `src/lib/runs/`**~~ (removed).
+- ~~**De-duplicate `generateBeatClip`**~~ (one definition). The `1:1` size mapping
+  is a known non-square fallback, not yet changed (no square provider size).
 
 **Phase A — Foundation (interlocking; land roughly together):**
 - **Lane 2 (provenance-graph)** is the keystone: stable `Beat.id`,
   `TimelineSegment.beatId`, per-asset input edges + fingerprints, candidate-stale
-  computation. Lane 1 defers asset field-schema to it.
-- **Lane 1 (asset-pool)**: one immutable, self-describing `Asset`
+  computation. Lane 1 defers asset field-schema to it. *(#1 ✅ #101; #2 ✅ via
+  Lane 1; #3 mostly ✅; #4–#7 in flight #107/#108.)*
+- **Lane 1 (asset-pool)** ✅ #102–#105: one immutable, self-describing `Asset`
   (`kind`/`role`/`projectId`/`provenance`/`depicts`) + pool + `{slot → activeAssetId}`
   selections; persist anchors/keyframes (no throwaway); fold character into a
   `character_anchor` (retire single-hero).
@@ -98,5 +99,48 @@ store-consolidation(4)──────────────────┤
 
 ## Status
 
-All seven scope docs are doc-only PRs (#92–#98) against `main`. Implementation
-PRs start with the quick wins above. Update this table as PRs merge.
+All seven scope docs landed as doc-only PRs (#92–#98). Implementation is now
+underway; this log tracks merged + in-flight work (newest first).
+
+**Merged to `main`:**
+- **Quick wins** — dead `src/lib/runs/` deleted; `generateBeatClip` de-duplicated
+  to one definition (`oneshot/media-generation.ts`). *(The `1:1`→`1280x720`
+  mapping in `videoSizeForAspect` remains a known non-square fallback, since the
+  video providers expose no square size; revisit with provider integrations.)*
+- **Lane 2 #1 — stable beat IDs** (#101). `Beat.id` + `TimelineSegment.beatId`
+  minted on plan creation and threaded through graph synthesis.
+- **Lane 1 — asset pool (FULL lane)** (#102–#105): unified self-describing
+  `Asset` + `Clip<->Asset` adapters (lossless only `Clip -> Asset -> Clip`;
+  `assetToClip` drops Asset-only fields — `role`/`projectId`/`depicts`/`inputs`/
+  `characterInvariants` — so the convergence work must not round-trip pooled
+  assets through `Clip`); project-scoped pool +
+  `AssetSelection` active-pointers; `projectId` threaded into generation; per-beat
+  keyframes persisted as first-class pooled assets; character folded into a
+  `character_anchor` asset + selection. This also satisfied Lane 2 #2 (anchor-id
+  alignment) and most of Lane 2 #3 (per-asset input edges: `beatId`, `anchorIds`,
+  `firstFrameAssetId` are populated on the one-shot path).
+
+- **Lane 2 #4–#7 — provenance fingerprints + graph + candidate-stale** (#107 pure
+  core; #108 freeze-at-persist + read API; #110 soundtrack request-fingerprint
+  consumer; #111 recovery onto `main`). The keystone for selective regeneration:
+  `recomputeFingerprints` / `buildProvenanceGraph` / `computeCandidateStaleSet`,
+  frozen onto assets at `saveProject` and exposed via `getProvenanceGraph` /
+  `getStaleCandidates`. **Lane 2 fully landed.**
+
+- **Clip/Asset convergence — first slice of Lane 4** ✅ (#112 scope; #113 PR-1
+  `poolAssets` dedup; #114 PR-2 pool beat clips as `beat_clip` assets + resume
+  backfill; PR-3 `poolResumedBeatClips` tested unit). Generated beat clips are now
+  first-class pooled assets, so they carry fingerprints and the keyframe→clip
+  stale ripple fires; resumed clips keep their baselines. `clips[]` and all its
+  readers (render/editor/resume/export) are unchanged. See
+  [`north-star-clip-asset-convergence.md`](./north-star-clip-asset-convergence.md).
+  Deferred to the full lane: removing `clips[]`, the six-store merge, the
+  `V1Project`/`V1Asset` reconciliation, and pooling the soundtrack/character clip.
+
+**Next up (unstarted):**
+- Full Lane 4 (store-consolidation) — collapse the six drifted stores to one
+  project-scoped store; reconcile the two `V1Project`/`V1Asset` shapes; migrate
+  one-shot + studio off the legacy `Project` doc.
+- Lane 5 (unified-engine), then Lanes 3/6/7 on the foundation + engine.
+
+Update this log as PRs merge.

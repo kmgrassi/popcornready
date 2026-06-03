@@ -45,6 +45,24 @@ export interface AssetInputs {
   upstreamAssetIds?: string[];
 }
 
+// Content fingerprint over an asset's semantic inputs, with the nested hashes of
+// its upstream assets folded in. Frozen at generation time so a later change to
+// any input (a beat's intent, a regenerated anchor, …) yields a different
+// recomputed hash — the basis for the candidate-stale set. The provenance-graph
+// lane owns the computation (src/lib/provenance/); the shape lives here because
+// it is hosted on the pooled asset. See docs/scopes/north-star-provenance-graph.md.
+export interface AssetFingerprint {
+  // Bumped when the hashed shape changes, so old fingerprints don't silently
+  // mismatch on a code change (would otherwise flag the whole pool stale).
+  fingerprintVersion: string;
+  // sha256 of the canonicalised semantic inputs (beat content, prompt, model,
+  // and the sorted upstreamHashes below).
+  inputHash: string;
+  // upstreamAssetId -> that asset's inputHash, folded into inputHash so a change
+  // deep in the graph ripples upward.
+  upstreamHashes: Record<string, string>;
+}
+
 // Provenance block — the existing Clip.generatedBy fields plus input edges.
 export interface AssetProvenance {
   provider: string;
@@ -56,6 +74,12 @@ export interface AssetProvenance {
   costUsd?: number;
   characterBinding?: GeneratedAssetCharacterBinding;
   inputs?: AssetInputs;
+  // Frozen at generation time (provenance-graph lane). Absent on assets minted
+  // before fingerprints existed; treated as "no stored hash" by the stale walk.
+  fingerprint?: AssetFingerprint;
+  // Canonical hash of the stable request inputs this asset was generated for
+  // (mirrors Clip.generatedBy.requestFingerprint); drives reuse-vs-regenerate.
+  requestFingerprint?: string;
 }
 
 export interface CharacterInvariants {
@@ -180,6 +204,9 @@ export function assetToClip(asset: Asset): Clip {
                 firstFrameAssetId: asset.provenance.inputs.firstFrameAssetId,
               },
             }
+          : {}),
+        ...(asset.provenance.requestFingerprint !== undefined
+          ? { requestFingerprint: asset.provenance.requestFingerprint }
           : {}),
       }
     : undefined;

@@ -42,6 +42,8 @@ import {
   newId,
   optionalOneShotStep,
   parseShowCaptions,
+  poolBeatClip,
+  poolResumedBeatClips,
   resolveVideoProviders,
   resumableCharacterForGoal,
   resumableClipsForGoal,
@@ -339,8 +341,15 @@ export async function POST(req: NextRequest) {
       chat: [],
       updatedAt: new Date().toISOString(),
     };
-    const keyframeAssets = (): Asset[] => poolProject.assets ?? [];
-    const keyframeSelections = (): AssetSelection[] => poolProject.selections ?? [];
+    // Snapshots of the whole in-memory pool (keyframes, character anchor, and now
+    // the per-beat clip assets) and its selections, for persistence.
+    const pooledAssets = (): Asset[] => poolProject.assets ?? [];
+    const pooledSelections = (): AssetSelection[] => poolProject.selections ?? [];
+    // Resume backfill: clips loaded by resumableClipsForGoal make the loop start
+    // at clips.length, so it never pools them. Pool them here so resumed clips
+    // also get a frozen baseline and are flagged by getStaleCandidates after a
+    // beat edit (idempotent — a prior run's frozen asset is preserved).
+    poolResumedBeatClips(poolProject, clips, plan, character?.clip.id);
     try {
       for (let index = clips.length; index < plan.beats.length; index += 1) {
         const beat = plan.beats[index];
@@ -417,6 +426,7 @@ export async function POST(req: NextRequest) {
             heroReferencePath: character?.path,
           });
           recordFirstFrameEdge(generatedClip, firstFrameAssetId);
+          poolBeatClip(poolProject, generatedClip, beat, character?.clip.id);
           clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -433,8 +443,8 @@ export async function POST(req: NextRequest) {
             characterReferences,
             characterAnchor,
             showCaptions,
-            assets: keyframeAssets(),
-            selections: keyframeSelections(),
+            assets: pooledAssets(),
+            selections: pooledSelections(),
           });
         } catch (err) {
           if (
@@ -461,6 +471,7 @@ export async function POST(req: NextRequest) {
             heroReferencePath: character?.path,
           });
           recordFirstFrameEdge(generatedClip, firstFrameAssetId);
+          poolBeatClip(poolProject, generatedClip, beat, character?.clip.id);
           clips.push(generatedClip);
           console.info(
             `[oneshot] generated clip ${index + 1}/${plan.beats.length} with ${provider}`
@@ -477,8 +488,8 @@ export async function POST(req: NextRequest) {
             characterReferences,
             characterAnchor,
             showCaptions,
-            assets: keyframeAssets(),
-            selections: keyframeSelections(),
+            assets: pooledAssets(),
+            selections: pooledSelections(),
           });
         }
       }
@@ -497,8 +508,8 @@ export async function POST(req: NextRequest) {
           characterReferences,
           characterAnchor,
           showCaptions,
-          assets: keyframeAssets(),
-          selections: keyframeSelections(),
+          assets: pooledAssets(),
+          selections: pooledSelections(),
         });
       }
       throw err;
@@ -570,7 +581,7 @@ export async function POST(req: NextRequest) {
       // legacy reference. Deduped so a resume-seeded anchor isn't double-counted.
       ...(() => {
         const { assets, selections } = mergePool(
-          { assets: keyframeAssets(), selections: keyframeSelections() },
+          { assets: pooledAssets(), selections: pooledSelections() },
           characterAnchorPool(characterAnchor)
         );
         return {

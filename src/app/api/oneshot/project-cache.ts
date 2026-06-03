@@ -4,11 +4,12 @@ import path from "path";
 import { getProject, saveProject } from "@/lib/store";
 import { sanitizeTimeline } from "@/lib/timeline";
 import { synthesizeEditGraph } from "@/lib/edit-graph";
-import { resolveActiveAsset } from "@/lib/assets/pool";
+import { addAsset, resolveActiveAsset, setSelection } from "@/lib/assets/pool";
 import type { Asset, AssetSelection } from "@/lib/assets/types";
-import { characterAnchorAsset } from "./media-generation";
+import { beatClipAsset, characterAnchorAsset } from "./media-generation";
 import {
   AspectRatio,
+  Beat,
   CharacterProfile,
   CharacterReference,
   Clip,
@@ -19,6 +20,7 @@ import {
   TimelineSegment,
 } from "@/lib/types";
 import { newId } from "./config";
+import { soundtrackRequestFingerprint } from "./prompts";
 
 // Build the pool `assets`/`selections` contribution for the recurring character
 // (asset-pool PR E): the `character_anchor` asset plus the `character_anchor`
@@ -67,6 +69,43 @@ export function mergePool(
     }
   }
   return { assets, selections };
+}
+
+// Pool a generated beat clip as a first-class `beat_clip` asset (Clip/Asset
+// convergence): append the asset (same id as the clip, so `poolAssets` dedups the
+// twin and `clips[]` stays the render shape) and point a `beat_clip` selection at
+// it. Pooling it lets `saveProject`'s freezeFingerprints stamp a baseline, so the
+// clip joins the candidate-stale set and the keyframe→clip ripple fires. When the
+// clip is for image-to-video, run this AFTER recordFirstFrameEdge so the
+// firstFrameAssetId edge is carried. Idempotent: addAsset no-ops if the clip was
+// already pooled (e.g. seeded from a prior run), preserving its frozen baseline.
+export function poolBeatClip(
+  poolProject: Project,
+  clip: Clip,
+  beat: Beat,
+  anchorAssetId?: string
+): void {
+  addAsset(
+    poolProject,
+    beatClipAsset(clip, beat, { projectId: poolProject.id, anchorAssetId })
+  );
+  if (beat.id) setSelection(poolProject, "beat_clip", beat.id, clip.id);
+}
+
+// Pool clips carried in from a resumed run. The generation loop starts at
+// clips.length, so it never pools these; without this they'd reach the final save
+// with no `beat_clip` asset/baseline and stay invisible to `getStaleCandidates`.
+// Clips map to beats positionally (resume assumes the same goal → same arc).
+export function poolResumedBeatClips(
+  poolProject: Project,
+  resumedClips: Clip[],
+  plan: EditPlan,
+  anchorAssetId?: string
+): void {
+  resumedClips.forEach((clip, index) => {
+    const beat = plan.beats[index];
+    if (beat) poolBeatClip(poolProject, clip, beat, anchorAssetId);
+  });
 }
 
 export async function savePartialProject(input: {
@@ -184,32 +223,64 @@ export async function resumablePoolForGoal(goal: string): Promise<{
   };
 }
 
-// Tolerance (seconds) for treating a cached soundtrack's duration as matching
-// the current request. Audio durations decoded from media bytes rarely land
-// exactly on the requested length.
+type SoundtrackRequest = { goal: string; style: string; targetLengthSec: number };
+
+// Tolerance (seconds) for the LEGACY fallback only: a soundtrack from before
+// request fingerprints rarely lands exactly on the requested length.
 const SOUNDTRACK_DURATION_TOLERANCE_SEC = 1.5;
 
-export async function resumableSoundtrackForGoal(input: {
-  goal: string;
-  style: string;
-  targetLengthSec: number;
-}): Promise<Clip | null> {
+// Whether a freshly-generated cached soundtrack satisfies the current request:
+// its frozen request fingerprint must equal the current one. Pure + exported so
+// the match rule is unit-testable without the store. Returns false when the clip
+// predates request fingerprints — the caller then applies the legacy fallback.
+export function soundtrackMatchesRequest(
+  clip: Clip,
+  request: SoundtrackRequest
+): boolean {
+  const stored = clip.generatedBy?.requestFingerprint;
+  return stored !== undefined && stored === soundtrackRequestFingerprint(request);
+}
+
+// Legacy fallback for soundtracks generated before request fingerprints existed:
+// the prior heuristic (style + approximate length; goal checked by the caller).
+// Without this, an upgrade would drop an otherwise-usable track — and if
+// ELEVENLABS_API_KEY is unset, regeneration returns null and the project saves
+// with no audio at all. Style/length content match is pure + exported for tests.
+export function legacySoundtrackContentMatches(
+  clip: Clip,
+  request: Pick<SoundtrackRequest, "style" | "targetLengthSec">
+): boolean {
+  const duration = clip.measuredDurationSec ?? clip.durationSec;
+  const lengthMatches =
+    Math.abs(duration - request.targetLengthSec) <=
+    SOUNDTRACK_DURATION_TOLERANCE_SEC;
+  const styleMatches = clip.generatedBy?.prompt
+    ? clip.generatedBy.prompt.includes(`Visual style: ${request.style}`)
+    : true;
+  return lengthMatches && styleMatches;
+}
+
+export async function resumableSoundtrackForGoal(
+  input: SoundtrackRequest
+): Promise<Clip | null> {
   const existing = await getProject();
-  if (existing.goal !== input.goal) return null;
-  // Only reuse a cached soundtrack when it still matches the current request.
-  // The editor exposes target length and style independently of the brief, so
-  // rerunning the same goal at a different length/style must regenerate audio
-  // rather than auto-selecting a stale clip of the wrong duration.
   const candidate = existing.clips.find((clip) => clip.kind === "audio");
   if (!candidate) return null;
-  const duration = candidate.measuredDurationSec ?? candidate.durationSec;
-  const durationMatches =
-    Math.abs(duration - input.targetLengthSec) <=
-    SOUNDTRACK_DURATION_TOLERANCE_SEC;
-  const styleMatches = candidate.generatedBy?.prompt
-    ? candidate.generatedBy.prompt.includes(`Visual style: ${input.style}`)
-    : true;
-  return durationMatches && styleMatches ? candidate : null;
+
+  // Fresh path: an exact request-fingerprint match (goal included) — replaces
+  // the old goal-equality + duration-tolerance + style-substring heuristic.
+  if (candidate.generatedBy?.requestFingerprint !== undefined) {
+    return soundtrackMatchesRequest(candidate, input) ? candidate : null;
+  }
+
+  // Legacy path: a track generated before fingerprints. Reuse it when the goal
+  // still matches and style/length are close, rather than dropping a usable clip
+  // (especially when regeneration is unavailable). It will pick up a fingerprint
+  // the next time it is regenerated.
+  return existing.goal === input.goal &&
+    legacySoundtrackContentMatches(candidate, input)
+    ? candidate
+    : null;
 }
 
 type ResumableCharacter = {

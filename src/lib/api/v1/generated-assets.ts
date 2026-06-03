@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { parseConsistencyMode } from "@/lib/generative/character-context";
 import { measureAudioDurationSec } from "@/lib/generative/audio-duration";
+import { withDerivedAssetKnowledge } from "./assets";
 import { preflightGenerationContent } from "@/lib/generative/preflight";
 import { providerFor } from "@/lib/generative/providers";
 import {
@@ -522,7 +523,7 @@ async function runGeneration(
     updatedAt: now,
   };
 
-  return addAsset(asset);
+  return addAsset(withDerivedAssetKnowledge(asset, now));
 }
 
 export interface CreateGeneratedAssetArgs {

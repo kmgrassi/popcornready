@@ -155,3 +155,23 @@ test("clip -> asset -> clip preserves the firstFrameAssetId provenance input edg
   assert.equal(asset.provenance?.inputs?.firstFrameAssetId, "kf_1");
   assert.deepEqual(assetToClip(asset), withEdge);
 });
+
+test("clip -> asset -> clip preserves the requestFingerprint reuse key", () => {
+  const withRequest: Clip = {
+    id: "aud_1",
+    filename: "aud_1.mp3",
+    url: "/generated/aud_1.mp3",
+    kind: "audio",
+    durationSec: 30,
+    description: "soundtrack",
+    source: "generated",
+    generatedBy: {
+      provider: "elevenlabs",
+      prompt: "music",
+      requestFingerprint: "abc123",
+    },
+  };
+  const asset = clipToAsset(withRequest, { projectId: "default", role: "soundtrack" });
+  assert.equal(asset.provenance?.requestFingerprint, "abc123");
+  assert.deepEqual(assetToClip(asset), withRequest);
+});

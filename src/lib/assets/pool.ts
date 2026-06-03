@@ -13,13 +13,19 @@ import { Asset, clipToAsset } from "./types";
 export const DEFAULT_PROJECT_ID = "default";
 
 // Unified view of the project's pool: explicit self-describing assets first,
-// then existing clips projected as assets.
+// then existing clips projected as assets. Deduped by id with the EXPLICIT asset
+// winning: once a clip is also pooled as a first-class asset (Clip/Asset
+// convergence — generated beat clips become `beat_clip` assets), it lives in
+// both `assets[]` and `clips[]` with the same id, and the explicit asset is the
+// richer one (role/depicts/provenance.inputs/fingerprint), so the clip
+// projection of that id is dropped rather than double-counted.
 export function poolAssets(project: Project): Asset[] {
   const projectId = project.id || DEFAULT_PROJECT_ID;
   const explicit = project.assets ?? [];
-  const fromClips = (project.clips ?? []).map((clip) =>
-    clipToAsset(clip, { projectId })
-  );
+  const seen = new Set(explicit.map((asset) => asset.id));
+  const fromClips = (project.clips ?? [])
+    .filter((clip) => !seen.has(clip.id))
+    .map((clip) => clipToAsset(clip, { projectId }));
   return [...explicit, ...fromClips];
 }
 
