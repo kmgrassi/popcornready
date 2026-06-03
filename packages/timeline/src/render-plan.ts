@@ -4,7 +4,7 @@ import {
   DurationPolicy,
   ExportAlignmentResult,
   evaluateExportPolicy,
-} from "./audio-alignment";
+} from "@popcorn/shared/audio-alignment";
 import {
   Clip,
   RenderDurationPolicy,
@@ -12,7 +12,7 @@ import {
   Timeline,
   dims,
   timelineDurationSec,
-} from "./types";
+} from "@popcorn/shared/types";
 
 export interface CreateRenderPlanInput {
   timeline: Timeline;

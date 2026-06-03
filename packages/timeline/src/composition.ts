@@ -13,7 +13,7 @@ import {
   CompositionPlan,
   CompositionPlannedBeat,
   CompositionStatus,
-} from "./types";
+} from "@popcorn/shared/types";
 
 const COMPOSITION_MODES: CompositionMode[] = [
   "asset_driven",

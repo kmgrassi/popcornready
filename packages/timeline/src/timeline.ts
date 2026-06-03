@@ -1,11 +1,11 @@
-import { Clip, Patch, Timeline, TimelineSegment } from "./types";
+import { Clip, Patch, Timeline, TimelineSegment } from "@popcorn/shared/types";
 import {
   applyEditGraphRevisionOperations,
   compileEditGraph,
   createEditGraphFromTimeline,
   patchesToEditGraphOperations,
-} from "./edit-graph";
-import type { EditGraph, EditGraphRevisionOperation } from "./edit-graph";
+} from "@popcorn/shared/edit-graph";
+import type { EditGraph, EditGraphRevisionOperation } from "@popcorn/shared/edit-graph";
 
 function newId(): string {
   return "seg_" + Math.random().toString(36).slice(2, 10);
