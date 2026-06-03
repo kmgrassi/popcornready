@@ -5,6 +5,8 @@ dist
 # pnpm is the package manager; npm/yarn lockfiles must not be tracked
 package-lock.json
 yarn.lock
+# Netlify CLI local link/state
+.netlify
 .env
 .env.local
 .env*.local
