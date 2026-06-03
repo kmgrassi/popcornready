@@ -181,10 +181,11 @@ F1/F2 into a second code path, not an independent root cause.
 - **Fixable now or cutover-coupled?** **Track B/C-coupled** (downstream of
   F1/F2/F3).
 
-### F6 — Stale comments in the v1 schema migration still describe the auth-id model
+### F6 — Stale auth-id docs: v1 migration comments **and** the seed ownership instruction
 
 [`supabase/migrations/20260603000000_init_v1_model.sql:13-15`](../../supabase/migrations/20260603000000_init_v1_model.sql#L13),
-[`:43-44`](../../supabase/migrations/20260603000000_init_v1_model.sql#L43)
+[`:43-44`](../../supabase/migrations/20260603000000_init_v1_model.sql#L43),
+[`supabase/seed.sql:5-8`](../../supabase/seed.sql#L5)
 
 ```sql
 -- Ownership model: a workspace belongs to one Supabase auth user
@@ -203,14 +204,33 @@ already **repointed** `workspaces.owner_id` to `public.users(id)` and rerouted t
 the RLS doc). So the live DB state is **compliant**; only the descriptive
 comments and the `column comment` in the earlier migration are now misleading.
 
-- **Why it's a (soft) violation:** not an active data/identity violation — the
-  behavior is superseded — but the comments still teach the wrong (auth-id) model
-  and reference the `ws_user_<uid>` scheme this audit is removing.
-- **Recommended fix:** documentation only — update the comment block / column
-  comment to describe the domain-id ownership model (or note that it's superseded
-  by the workspace_members migration). Low priority; do not rewrite the historical
-  migration's executable SQL (migrations are immutable history).
-- **Fixable now or cutover-coupled?** **Quick win** (doc/comment edit), but cosmetic.
+**`supabase/seed.sql:5-8` is the same stale model but operationally dangerous, not
+cosmetic.** It still instructs operators to attach the seeded workspace by setting
+`owner_id` to an `auth.users.id`:
+
+```sql
+-- To attach this workspace to a real account, set
+-- owner_id to that user's auth.users.id.
+```
+
+After `20260603140000` repointed `workspaces.owner_id` to `public.users(id)`,
+following this guidance will **violate the FK** (an `auth.users.id` is not a
+`public.users.id`) or, if a colliding id happens to exist, **recreate the exact
+auth-id/domain-id mixup this audit is about**. So seed.sql must instruct setting
+`owner_id` to the owner's **`public.users.id`** (i.e. `public.users.id WHERE
+auth_id = <auth uid>`).
+
+- **Why it's a violation:** the migration comments are a soft (teaches-wrong-model)
+  issue; the seed instruction is a hard one — an operator who follows it breaks or
+  corrupts ownership.
+- **Recommended fix:** documentation only — update the migration comment block /
+  column comment to the domain-id model, and fix the `seed.sql` instruction to
+  reference `public.users.id`. Do not rewrite the historical migration's executable
+  SQL (migrations are immutable history); seed.sql is not a migration and can be
+  edited freely.
+- **Fixable now or cutover-coupled?** **Quick win** (doc edits). The migration
+  comments are cosmetic; the seed.sql fix is low-effort but should actually be done
+  since following it breaks the FK.
 
 ---
 
@@ -229,9 +249,10 @@ one gap-by-omission that unblocks the fix (F3), two downstream propagations
 | F3 missing auth→domain mapping helper | Gap / prerequisite | No — **Track B** (B2 middleware); the unblocker for F1/F2/F4/F5 |
 | F4 idempotency scope keyed on auth id | Downstream of F1/F2 | No — resolves with F1/F2 (**Track C**) |
 | F5 legacy generation-stack actor relay | Downstream of F1/F2 | No — resolves with F1/F2/F3 |
-| F6 stale schema comments | Docs only | **Yes** — comment edit (cosmetic) |
+| F6 stale auth-id docs (migration comments **+** `seed.sql:5-8`) | Docs only | **Yes** — migration comments cosmetic; **seed.sql fix should be done** (following it breaks the FK) |
 
-**Net:** the only standalone quick win is F6 (a comment fix). Everything that
+**Net:** the only standalone quick win is F6 (doc edits — including the `seed.sql`
+ownership instruction, which is actively wrong post-repoint). Everything that
 actually moves identity (F1–F5) is **coupled to the Track C store cutover and the
 Track B auth middleware** — exactly as A6 anticipates ("switch to
 `public.users.id` (part of Track C cutover)"). The real unit of work is: land the
