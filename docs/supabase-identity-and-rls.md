@@ -114,11 +114,32 @@ Querying as that user (RLS):
 - For hot tables, prefer `(select auth.uid())` / `(select public.current_app_user_id())`
   in policies so Postgres evaluates the function once per statement, not per row.
 
-## Known inconsistency to fix
+## Workspace membership
 
-The PR #125 schema (`workspaces.owner_id`) currently references **`auth.users`**
-and its `owns_workspace()` / `owns_project()` helpers compare to **`auth.uid()`**,
-predating `public.users`. Those should migrate to reference `public.users.id` and
-use `current_app_user_id()`. Until then, be aware two identity conventions coexist:
-the v1 model tables key on `auth.uid()`, while `public.users` and anything built
-on it key on the domain id.
+Workspaces have real membership, not just an owner. `public.workspace_members`
+maps `(workspace_id, user_id)` with a `role` of `owner` / `admin` / `member`,
+where `user_id` is a **`public.users.id`** (domain id). Two `SECURITY DEFINER`
+helpers gate access (use these in policies, never an inline `workspace_members`
+subquery — same recursion reason as `current_app_user_id()`):
+
+- `public.is_workspace_member(workspace_id)` — caller is any member.
+- `public.is_workspace_admin(workspace_id)` — caller is `owner` or `admin`.
+
+`workspaces.owner_id` references **`public.users.id`** (a domain id), and the v1
+ownership helpers `owns_workspace()` / `owns_project()` are now thin wrappers over
+membership (`= current_app_user_id()`). So every v1 policy that calls them
+(projects, assets, jobs, brief_versions, compositions, timelines, generation_*)
+automatically grants access to all workspace members and keys on the domain id.
+
+**Creating a workspace auto-bootstraps the owner**: the `workspace_members` insert
+policy requires `is_workspace_admin`, which a brand-new workspace has no one for
+yet. An `AFTER INSERT` trigger on `workspaces` (`on_workspace_created`,
+`SECURITY DEFINER`) writes the owner's `workspace_members` row automatically, so
+the creator can immediately see/use the workspace — whether it was inserted by a
+browser client (`workspaces_insert`, `owner_id = current_app_user_id()`) or by the
+service_role. No separate bootstrap path is needed.
+
+> Resolved: earlier revisions of this doc flagged that `workspaces.owner_id` and
+> `owns_*` keyed on `auth.uid()` (the #125 v1 schema). The workspace_members
+> migration repointed `owner_id` to `public.users.id` and rerouted the helpers
+> onto `current_app_user_id()`, so the data layer now has a single identity model.
