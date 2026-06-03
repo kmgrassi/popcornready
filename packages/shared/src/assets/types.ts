@@ -12,7 +12,7 @@ import type {
   GeneratedAssetCharacterBinding,
   GenerationPreflightResult,
   VideoSnapshotReview,
-} from "@/lib/types";
+} from "../types";
 
 export type AssetKind = "image" | "video" | "audio";
 

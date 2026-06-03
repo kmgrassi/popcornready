@@ -2,7 +2,7 @@ import type {
   CharacterConsistencyMode,
   CharacterProfile,
   CharacterReference,
-} from "@/lib/types";
+} from "../types";
 
 export type GenerativeProviderName =
   | "openai"
