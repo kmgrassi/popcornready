@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts",
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./Root": "./src/Root.tsx",
+    "./VideoComposition": "./src/VideoComposition.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
