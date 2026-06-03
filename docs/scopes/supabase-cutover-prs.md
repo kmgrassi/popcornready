@@ -1,4 +1,4 @@
-# Supabase cutover — PR roadmap
+# Supabase cutover & target architecture — PR roadmap
 
 Tracks the work to move Popcorn Ready off the `.local/` JSON stores onto Supabase
 (Postgres + Storage + Auth), scoped into PRs that **parallelize**. Each PR lists
@@ -13,6 +13,40 @@ dependency we don't own. Track **B** (auth) has its own foundation branch.
 > **This is a proposed breakdown — edit freely.** Status reflects the state as of
 > this doc's creation. See [`../supabase-identity-and-rls.md`](../supabase-identity-and-rls.md)
 > for the identity model that underpins most of this.
+
+## Target architecture & stack decisions
+
+The cutover happens *inside* a broader shift off the Next.js monolith. Decisions
+made so far (this is the record — update as they evolve):
+
+- **Off the Next.js monolith → a monorepo split.** Next was the fast-start
+  full-stack choice, but its SSR / React-Server-Component model is friction for a
+  logic-heavy *authenticated* studio app, and long-running generation jobs fit a
+  real server better than serverless route handlers. SSR only earns its keep on a
+  public/SEO landing page.
+- **Frontend: Vite + React Router v7 (data mode) SPA → Netlify.**
+  - Vite is the modern replacement for Create React App (CRA is deprecated — do
+    not use it).
+  - React Router v7 **loaders/actions** provide route-level *data routing* (the
+    route declares its data; loaders call the Express API). Used in **data mode**
+    (`createBrowserRouter`, pure SPA) — no SSR/framework layer, which is the point.
+  - Add **TanStack Query** later only if client server-state caching needs it; not
+    upfront. (TanStack Router is the type-safe alternative to React Router if it
+    ever comes up.)
+  - "SPA" here means client-rendered + client-routed — it is a *full* app with all
+    the dashboard logic, not a single screen.
+- **Backend: Express API → Railway.** Owns business logic, the generation/job
+  stack, Supabase access, and the auth middleware.
+- **Data & auth: Supabase** (Postgres + Storage + Auth). Identity keys on
+  `public.users.id` (domain id); `auth.uid()` is mapped to it only inside RLS via
+  `current_app_user_id()` (the golden rule below). Auth follows the **harper-server
+  middleware pattern** in the Express API: verify the Supabase JWT (`setSession`) →
+  a **user-scoped, RLS-enforced** client (via AsyncLocalStorage) → resolve to the
+  `public.users.id`. Data access runs through the user-scoped client so **RLS
+  enforces tenancy**; `service_role` is reserved for trusted ops (invites, system
+  jobs).
+- **Open — landing/SEO:** keep a thin SSR/static landing (Next or plain static)
+  only if the public page needs SEO; the app itself is the SPA.
 
 ## Guiding invariant
 
@@ -49,13 +83,16 @@ Pure SQL migrations. Parallelizable **except** where two touch the same objects
 
 ### Track B — Auth (app)
 
-Wires Supabase auth into the Next app. Largely independent of schema (needs only
-the anon key). A foundation branch already exists (`codex/supabase-auth-foundation`).
+Per the architecture decision above, auth lands in the **SPA** (login/signup +
+session) and the **Express API** (the harper-server middleware). The login/signup
+UI + Supabase clients currently exist *uncommitted* in the `feat/movie-dream`
+working tree — they need extracting to a clean branch and porting to the SPA.
 
 | PR | Scope | Status | Depends on |
 |----|-------|--------|-----------|
-| B1 | Auth foundation: login/signup UI, `AuthProvider`, browser/server clients, `AUTH_MODE=supabase` | 🔄 in review | — |
-| B2 | Send the Supabase bearer token on `/api/v1` requests (`authenticatedFetch`) end-to-end | ⬜ todo | B1 |
+| B1 | Auth UI + Supabase client in the SPA: login/signup, session, `AuthProvider` (extract from the uncommitted `feat/movie-dream` tree, port to Vite) | ⬜ todo | E2 |
+| B2 | Auth middleware in the Express API (harper-server pattern): verify JWT (`setSession`) → user-scoped RLS client (AsyncLocalStorage) → resolve `current_app_user_id()` → `public.users.id`. **Not** in the Next monolith. | ⬜ todo | E1, A2 |
+| B3 | SPA sends the session token on API calls; API rejects unauthenticated requests | ⬜ todo | B1, B2 |
 
 ### Track C — DB cutover (store → Postgres)
 
@@ -88,7 +125,7 @@ inside the new API package. Owned by the separate monorepo-split effort
 | PR | Scope | Status | Depends on |
 |----|-------|--------|-----------|
 | E1 | Express API package scaffold (Railway), pnpm + Turborepo | 🔄 in progress | — |
-| E2 | Vite SPA package (Netlify) | ⬜ todo | E1 |
+| E2 | Vite + React Router v7 (data mode) SPA package (Netlify) | ⬜ todo | E1 |
 | E3 | Shared packages / types extraction | ⬜ todo | E1 |
 
 ### Track F — Invite flow (app)
