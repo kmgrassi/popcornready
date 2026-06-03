@@ -372,8 +372,15 @@ export async function POST(req: NextRequest) {
                 providerPrompt: clipInput.prompt,
               })
             : undefined;
+        // The closing beat uses the bundled Popcorn Ready end screen as its
+        // first frame when present. In that case skip per-beat keyframe
+        // generation entirely: generating one would produce a pooled asset that
+        // is never used as the first frame and would mis-record the clip's
+        // provenance/selection against an unused keyframe.
+        const isClosingBeat = index === plan.beats.length - 1;
+        const usesPopcornScreen = isClosingBeat && Boolean(popcornScreenRef);
         const keyframe =
-          useBeatKeyframes && heroPath
+          useBeatKeyframes && heroPath && !usesPopcornScreen
             ? (await optionalOneShotStep(`beat ${index + 1} keyframe`, () =>
                 generateBeatKeyframe({
                   goal,
@@ -405,9 +412,7 @@ export async function POST(req: NextRequest) {
           }
           firstFrameAssetId = keyframe.asset.id;
         }
-        const isClosingBeat = index === plan.beats.length - 1;
-        const firstFramePath =
-          isClosingBeat && popcornScreenRef ? popcornScreenRef : keyframe?.path;
+        const firstFramePath = usesPopcornScreen ? popcornScreenRef : keyframe?.path;
         try {
           console.info(
             `[oneshot] generating clip ${index + 1}/${plan.beats.length} with ${provider}` +

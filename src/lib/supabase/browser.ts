@@ -10,36 +10,40 @@ type BrowserSupabaseConfig = {
 
 let client: SupabaseClient | null = null;
 
-function readPublicEnv(name: string) {
-  return process.env[name]?.trim() || "";
+// Public env vars must be referenced as static `process.env.NEXT_PUBLIC_*`
+// member expressions so the bundler inlines them into the client build. A
+// dynamic `process.env[name]` lookup is NOT statically replaced, so it reads as
+// undefined in the browser bundle and would make auth appear unconfigured.
+function clean(value: string | undefined): string {
+  return value?.trim() || "";
 }
 
 export function resolveBrowserSupabaseConfig(): BrowserSupabaseConfig | null {
   const selectedEnv =
-    readPublicEnv("NEXT_PUBLIC_SUPABASE_ENV").toLowerCase() || "default";
+    clean(process.env.NEXT_PUBLIC_SUPABASE_ENV).toLowerCase() || "default";
 
   if (selectedEnv === "dev") {
     const url =
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_DEV_URL") ||
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_URL");
+      clean(process.env.NEXT_PUBLIC_SUPABASE_DEV_URL) ||
+      clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
     const anonKey =
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_DEV_ANON_KEY") ||
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+      clean(process.env.NEXT_PUBLIC_SUPABASE_DEV_ANON_KEY) ||
+      clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
     return url && anonKey ? { envName: "dev", url, anonKey } : null;
   }
 
   if (selectedEnv === "prod") {
     const url =
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_PROD_URL") ||
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_URL");
+      clean(process.env.NEXT_PUBLIC_SUPABASE_PROD_URL) ||
+      clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
     const anonKey =
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_PROD_ANON_KEY") ||
-      readPublicEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+      clean(process.env.NEXT_PUBLIC_SUPABASE_PROD_ANON_KEY) ||
+      clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
     return url && anonKey ? { envName: "prod", url, anonKey } : null;
   }
 
-  const url = readPublicEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const anonKey = readPublicEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  const url = clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const anonKey = clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   return url && anonKey ? { envName: "default", url, anonKey } : null;
 }
 
