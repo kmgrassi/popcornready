@@ -1,7 +1,15 @@
 import { Router } from "express";
 import { mutation, route } from "@/core/adapter";
 import { ApiError } from "@/core/errors";
-import { parseCreateProject, parsePagination } from "@/lib/api/v1/schemas";
+import {
+  parseAnalyzeBatch,
+  parseCreateProject,
+  parsePagination,
+} from "@/lib/api/v1/schemas";
+import {
+  analyzeAssetBatch,
+  getAssetAnalysisJob,
+} from "@/lib/api/v1/asset-analysis";
 import { createProject, getProject, listProjects } from "@/lib/api/v1/store";
 
 export const projectsRouter = Router();
@@ -39,5 +47,36 @@ projectsRouter.get(
     }
     const project = await getProject(auth.workspaceId, params.projectId);
     return { status: 200, body: { project } };
+  })
+);
+
+projectsRouter.post(
+  "/projects/:projectId/assets/analyze-batch",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    return analyzeAssetBatch({
+      auth,
+      projectId: params.projectId,
+      input: parseAnalyzeBatch(body),
+    });
+  })
+);
+
+projectsRouter.get(
+  "/projects/:projectId/assets/analysis-jobs/:jobId",
+  route(async ({ auth }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    if (!params.jobId) {
+      throw new ApiError("validation_failed", "jobId is required.");
+    }
+    return getAssetAnalysisJob({
+      auth,
+      projectId: params.projectId,
+      jobId: params.jobId,
+    });
   })
 );

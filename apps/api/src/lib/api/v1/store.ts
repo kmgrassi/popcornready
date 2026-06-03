@@ -86,10 +86,37 @@ export interface V1Asset {
     };
   };
   semanticAnalysis?: AssetSemanticAnalysis;
+  analysis?: V1AssetAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface V1AssetAnalysis {
+  schemaVersion: "assetAnalysis.v1";
+  status: "succeeded" | "failed";
+  analyzedAt: string;
+  analysisVersion: string;
+  sampledFrames: string[];
+  observations?: {
+    summary: string;
+    subjects: string[];
+    actions: string[];
+    setting?: string;
+    mood?: string;
+    likelyUses: string[];
+    cautions: string[];
+    confidence: "low" | "medium" | "high";
+    model: {
+      provider: string;
+      model?: string;
+    };
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export interface IdempotencyRecord {
@@ -127,6 +154,14 @@ export function mediaUploadDir(workspaceId: string, projectId: string): string {
 
 export function mediaGeneratedDir(workspaceId: string, projectId: string): string {
   return path.join(localDir(), "media", "generated", workspaceId, projectId);
+}
+
+export function mediaAnalysisDir(
+  workspaceId: string,
+  projectId: string,
+  assetId: string
+): string {
+  return path.join(localDir(), "media", "analysis", workspaceId, projectId, assetId);
 }
 
 function emptyDb(): V1Db {
@@ -367,6 +402,23 @@ export async function updateAsset(
     updater(asset);
     asset.updatedAt = new Date().toISOString();
     return asset;
+  });
+}
+
+export async function updateAssetAnalysis(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  patch: {
+    context?: AssetContext;
+    semanticAnalysis?: AssetSemanticAnalysis;
+    analysis: V1AssetAnalysis;
+  }
+): Promise<V1Asset> {
+  return updateAsset(workspaceId, projectId, assetId, (asset) => {
+    asset.analysis = patch.analysis;
+    if (patch.context) asset.context = patch.context;
+    if (patch.semanticAnalysis) asset.semanticAnalysis = patch.semanticAnalysis;
   });
 }
 

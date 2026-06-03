@@ -15,6 +15,7 @@ export const JOB_SCHEMA_VERSION = "job.v1" as const;
 
 export type JobType =
   | "asset_ingest"
+  | "asset_analysis"
   | "asset_generation"
   | "composition"
   | "timeline_generation"

@@ -394,6 +394,20 @@ export interface AssetInventoryInput {
   includeExistingContext: boolean;
 }
 
+export interface AnalyzeBatchOptions {
+  sampleFrames: boolean;
+  transcribeAudio: boolean;
+  defaultVideoSamples: number;
+  maxVideoSamples: number;
+  storage: "local";
+}
+
+export interface AnalyzeBatchInput {
+  assetIds: string[];
+  userContext?: Record<string, unknown>;
+  analysisOptions: AnalyzeBatchOptions;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -446,6 +460,30 @@ function optionalBoolean(
   if (typeof value !== "boolean") {
     fields.push({ path, message: "Must be a boolean." });
     return undefined;
+  }
+  return value;
+}
+
+function optionalInteger(
+  value: unknown,
+  path: string,
+  fields: FieldError[],
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (value === undefined || value === null) return fallback;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    fields.push({
+      path,
+      message: `Must be an integer between ${min} and ${max}.`,
+    });
+    return fallback;
   }
   return value;
 }
@@ -1051,6 +1089,91 @@ export function parseAssetInventory(input: unknown): AssetInventoryInput {
       : optionalBoolean(input.includeExistingContext, "includeExistingContext", fields);
   throwIfInvalid(fields);
   return { assetIds, includeExistingContext: includeExistingContext ?? true };
+}
+
+export function parseAnalyzeBatch(input: unknown): AnalyzeBatchInput {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+
+  let assetIds: string[] = [];
+  if (!Array.isArray(input.assetIds) || input.assetIds.length === 0) {
+    fields.push({ path: "assetIds", message: "Must be a non-empty array of asset IDs." });
+  } else if (input.assetIds.some((id) => typeof id !== "string" || id.trim() === "")) {
+    fields.push({ path: "assetIds", message: "Must contain only non-empty strings." });
+  } else {
+    assetIds = [...new Set(input.assetIds.map((id) => id.trim()))];
+  }
+
+  let userContext: Record<string, unknown> | undefined;
+  if (input.userContext !== undefined && input.userContext !== null) {
+    if (!isPlainObject(input.userContext)) {
+      fields.push({ path: "userContext", message: "Must be an object." });
+    } else {
+      userContext = input.userContext;
+    }
+  }
+
+  const rawOptions = isPlainObject(input.analysisOptions)
+    ? input.analysisOptions
+    : {};
+  if (
+    input.analysisOptions !== undefined &&
+    input.analysisOptions !== null &&
+    !isPlainObject(input.analysisOptions)
+  ) {
+    fields.push({ path: "analysisOptions", message: "Must be an object." });
+  }
+
+  const defaultVideoSamples = optionalInteger(
+    rawOptions.defaultVideoSamples,
+    "analysisOptions.defaultVideoSamples",
+    fields,
+    5,
+    1,
+    10
+  );
+  const maxVideoSamples = optionalInteger(
+    rawOptions.maxVideoSamples,
+    "analysisOptions.maxVideoSamples",
+    fields,
+    10,
+    1,
+    10
+  );
+  const storage = parseEnum(
+    rawOptions.storage,
+    ["local"],
+    "analysisOptions.storage",
+    fields
+  );
+  const sampleFrames = optionalBoolean(
+    rawOptions.sampleFrames,
+    "analysisOptions.sampleFrames",
+    fields
+  );
+  const transcribeAudio = optionalBoolean(
+    rawOptions.transcribeAudio,
+    "analysisOptions.transcribeAudio",
+    fields
+  );
+
+  throwIfInvalid(fields);
+
+  return {
+    assetIds,
+    userContext,
+    analysisOptions: {
+      sampleFrames: sampleFrames ?? true,
+      transcribeAudio: transcribeAudio ?? false,
+      defaultVideoSamples,
+      maxVideoSamples: Math.max(defaultVideoSamples, maxVideoSamples),
+      storage: storage ?? "local",
+    },
+  };
 }
 
 export function parsePagination(searchParams: URLSearchParams): {
