@@ -1,5 +1,3 @@
-"use client";
-
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 type BrowserSupabaseConfig = {
@@ -10,40 +8,39 @@ type BrowserSupabaseConfig = {
 
 let client: SupabaseClient | null = null;
 
-// Public env vars must be referenced as static `process.env.NEXT_PUBLIC_*`
-// member expressions so the bundler inlines them into the client build. A
-// dynamic `process.env[name]` lookup is NOT statically replaced, so it reads as
-// undefined in the browser bundle and would make auth appear unconfigured.
+// Vite only exposes public variables through static `import.meta.env.VITE_*`
+// member expressions. Dynamic lookups are not reliably replaced in the browser
+// bundle, so keep these references explicit.
 function clean(value: string | undefined): string {
   return value?.trim() || "";
 }
 
 export function resolveBrowserSupabaseConfig(): BrowserSupabaseConfig | null {
   const selectedEnv =
-    clean(process.env.NEXT_PUBLIC_SUPABASE_ENV).toLowerCase() || "default";
+    clean(import.meta.env.VITE_SUPABASE_ENV).toLowerCase() || "default";
 
   if (selectedEnv === "dev") {
     const url =
-      clean(process.env.NEXT_PUBLIC_SUPABASE_DEV_URL) ||
-      clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+      clean(import.meta.env.VITE_SUPABASE_DEV_URL) ||
+      clean(import.meta.env.VITE_SUPABASE_URL);
     const anonKey =
-      clean(process.env.NEXT_PUBLIC_SUPABASE_DEV_ANON_KEY) ||
-      clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+      clean(import.meta.env.VITE_SUPABASE_DEV_ANON_KEY) ||
+      clean(import.meta.env.VITE_SUPABASE_ANON_KEY);
     return url && anonKey ? { envName: "dev", url, anonKey } : null;
   }
 
   if (selectedEnv === "prod") {
     const url =
-      clean(process.env.NEXT_PUBLIC_SUPABASE_PROD_URL) ||
-      clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+      clean(import.meta.env.VITE_SUPABASE_PROD_URL) ||
+      clean(import.meta.env.VITE_SUPABASE_URL);
     const anonKey =
-      clean(process.env.NEXT_PUBLIC_SUPABASE_PROD_ANON_KEY) ||
-      clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+      clean(import.meta.env.VITE_SUPABASE_PROD_ANON_KEY) ||
+      clean(import.meta.env.VITE_SUPABASE_ANON_KEY);
     return url && anonKey ? { envName: "prod", url, anonKey } : null;
   }
 
-  const url = clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const anonKey = clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const url = clean(import.meta.env.VITE_SUPABASE_URL);
+  const anonKey = clean(import.meta.env.VITE_SUPABASE_ANON_KEY);
   return url && anonKey ? { envName: "default", url, anonKey } : null;
 }
 
@@ -101,7 +98,7 @@ export function getSupabaseClient(): SupabaseClient {
   const config = resolveBrowserSupabaseConfig();
   if (!config) {
     throw new Error(
-      "Supabase browser auth is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+      "Supabase browser auth is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
     );
   }
 
