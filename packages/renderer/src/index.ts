@@ -1,2 +1,4 @@
-// @popcorn/renderer barrel — populated as code is migrated from the old src/lib tree.
-export {};
+import { registerRoot } from "remotion";
+import { RemotionRoot } from "./Root";
+
+registerRoot(RemotionRoot);
