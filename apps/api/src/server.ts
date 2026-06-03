@@ -3,7 +3,6 @@ import cors from "cors";
 import { requestContext } from "./middleware/request-context.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { mountV1 } from "./routes/v1/index.js";
-import { mountLegacy } from "./routes/legacy/index.js";
 
 // CORS allowlist comes from the web origin(s). Comma-separated WEB_ORIGIN env,
 // or allow all in local development.
@@ -25,7 +24,6 @@ export function createServer(): Express {
   app.use(requestContext);
 
   mountV1(app);
-  mountLegacy(app);
 
   app.use(notFound);
   app.use(errorHandler);

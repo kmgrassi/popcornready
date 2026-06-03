@@ -30,7 +30,9 @@ shared modules (types + timeline/render logic the web needs) move into
 - [ ] Make api-core framework-agnostic (drop NextRequest/NextResponse from
       `handler.ts`, `responses.ts`, `http.ts`, `auth.ts`).
 - [ ] Port all v1 routes to Express routers.
-- [ ] Port legacy routes (or migrate callers to v1).
+- [ ] Re-express the remaining non-v1 capabilities (oneshot, generate, export,
+      compositions, characters, upload, …) as clean v1 routes — NO legacy/compat
+      layer; the web app calls v1 only.
 - [ ] Port pages + components to the Vite SPA with react-router.
 - [ ] Web API client + Supabase browser auth + Remotion Player preview.
 - [ ] Delete old `src/` Next app, `next.config.mjs`, root Next tsconfig.
@@ -70,14 +72,17 @@ Next coupling removed:
 | GET/POST | /api/v1/projects/:projectId/exports/:jobId | …/exports | ⬜ |
 | * | …/timelines/:timelineId[/exports,/revisions] | …/timelines/* | ⬜ |
 
-## Legacy (non-v1) routes used by the current UI
+## Non-v1 capabilities → clean v1 (no legacy layer)
 
-`/api/project`, `/api/upload`, `/api/generate`, `/api/generate-assets`,
-`/api/revise`, `/api/export`, `/api/exports`, `/api/oneshot`,
-`/api/compositions[/:id]`, `/api/characters/*`, `/api/assets/*`,
-`/api/align-audio`, `/api/debug/*`. Each is either migrated to a v1 equivalent
-or served behind an explicit compatibility router until the web app stops
-calling it.
+The current UI also uses non-v1 endpoints: `/api/project`, `/api/upload`,
+`/api/generate`, `/api/generate-assets`, `/api/revise`, `/api/export`,
+`/api/exports`, `/api/oneshot`, `/api/compositions[/:id]`, `/api/characters/*`,
+`/api/assets/*`, `/api/align-audio`, `/api/debug/*`.
+
+There is **no legacy/compatibility layer**. Each of these is re-expressed as a
+clean v1 route (or dropped if not carried forward), and the SPA is written
+against the v1 contract directly. We do not keep dual code paths or back-compat
+shims alive.
 
 ## Web pages (former Next app router → react-router)
 
