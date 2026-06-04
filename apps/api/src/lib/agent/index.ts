@@ -8,6 +8,7 @@ import {
   StoryContext,
   Timeline,
   TimelineSegment,
+  UploadedFootagePlanReview,
 } from "@popcorn/shared/types";
 import { clipCatalog, timelineForPrompt } from "@popcorn/timeline/timeline";
 import {
@@ -28,6 +29,7 @@ import {
   planCritiqueSchema,
   planSchema,
   reviseSchema,
+  uploadedFootagePlanReviewSchema,
 } from "./schemas";
 
 // Shared, stable preamble. Goes in the cached system block so the four agent
@@ -167,6 +169,56 @@ Critique and revise this plan before media generation.`;
   report.revisedPlan.style = input.style;
   report.revisedPlan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
   // The revised plan is a fresh plan; ensure its beats are addressable.
+  ensureBeatIds(report.revisedPlan);
+  return report;
+}
+
+export async function critiqueUploadedFootagePlan(input: {
+  goal: string;
+  plan: EditPlan;
+  style: string;
+  aspectRatio: string;
+  storyContext?: StoryContext | null;
+  clips: Clip[];
+  allowGeneratedGapFill: boolean;
+}): Promise<UploadedFootagePlanReview> {
+  const sys = `${PREAMBLE}
+
+CLIP CATALOG:
+${clipCatalog(input.clips)}
+
+TASK: Review the edit plan before timeline assembly for an uploaded-footage
+edit. Judge whether the selected source footage can cover the requested story,
+which beats are missing or weak, and whether the plan should be revised to fit
+the source catalog. Do not invent new source assets. If generated gap fill is
+not allowed, prefer a revised uploaded-only plan that honestly uses available
+footage.`;
+
+  const user = `Creative goal:
+${input.goal}
+
+Target style: ${input.style}
+Aspect ratio: ${input.aspectRatio}
+Generated gap fill allowed: ${input.allowGeneratedGapFill ? "yes" : "no"}
+
+Story context:
+${storyContextForPrompt(input.storyContext)}
+
+Draft edit plan:
+${planText(input.plan)}
+
+Review source coverage and return a revised plan for the timeline selector.`;
+
+  const report = await structuredCall<UploadedFootagePlanReview>({
+    cachedSystem: sys,
+    user,
+    schema: uploadedFootagePlanReviewSchema,
+    maxTokens: 4000,
+  });
+
+  report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
+  report.revisedPlan.style = input.style;
+  report.revisedPlan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
   ensureBeatIds(report.revisedPlan);
   return report;
 }

@@ -120,6 +120,35 @@ dbTest("updateAssetContext updates knowledge and transcript projection", async (
   ]);
 });
 
+dbTest("updateAssetContext merges partial context without clearing existing metadata", async () => {
+  const asset = await registerAsset(localAuth, project.id, {
+    source: { type: "remote_url", url: "https://cdn.example.com/expo.mp4" },
+    userContext: {
+      description: "Original booth footage.",
+      tags: ["expo"],
+    },
+    context: {
+      transcriptText: "Welcome to booth A.",
+      moments: [{ startSec: 0, endSec: 2, label: "welcome" }],
+    },
+  });
+
+  const updated = await updateAssetContext(localAuth, project.id, asset.id, {
+    userContext: {
+      description: "Corrected booth B footage.",
+    },
+    context: {
+      summary: "Corrected wide shot.",
+    },
+  });
+
+  assert.equal(updated.context?.summary, "Corrected wide shot.");
+  assert.equal(updated.context?.transcriptText, "Welcome to booth A.");
+  assert.deepEqual(updated.context?.moments, [{ startSec: 0, endSec: 2, label: "welcome" }]);
+  assert.equal(updated.userContext?.description, "Corrected booth B footage.");
+  assert.deepEqual(updated.userContext?.tags, ["expo"]);
+});
+
 dbTest("inventoryAssets reports cheap knowns, gaps, and learning actions", async () => {
   const video = await registerAsset(localAuth, project.id, {
     source: { type: "remote_url", url: "https://cdn.example.com/raw.mp4" },

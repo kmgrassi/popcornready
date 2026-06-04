@@ -305,6 +305,266 @@ test("prompt-only composition generation produces a timeline", async () => {
   });
 });
 
+test("hybrid gap fill requires an explicit user choice", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_upload_1" });
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "hook",
+          intent: "use the supplied footage",
+          durationSec: 3,
+          assetStrategy: "use_existing",
+          requiredAssetIds: ["asset_upload_1"],
+        },
+        {
+          name: "proof",
+          intent: "show a missing product detail",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    await assert.rejects(
+      () =>
+        createGenerationJob({
+          store,
+          actor: resolveActor(),
+          projectId: project.id,
+          body: {
+            briefVersionId: brief.id,
+            assetIds: ["asset_upload_1"],
+            compositionId: composition.id,
+            mode: "hybrid",
+          },
+        }),
+      (err) =>
+        err instanceof ApiError &&
+        err.code === "validation_failed" &&
+        /allowGeneratedGapFill/.test(err.message)
+    );
+  });
+});
+
+test("hybrid gap fill merges ready generated assets into timeline input", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_upload_1" });
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "hook",
+          intent: "use the supplied footage",
+          durationSec: 3,
+          assetStrategy: "use_existing",
+          requiredAssetIds: ["asset_upload_1"],
+        },
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: {
+        briefVersionId: brief.id,
+        assetIds: ["asset_upload_1"],
+        compositionId: composition.id,
+        mode: "hybrid",
+        allowGeneratedGapFill: true,
+      },
+    });
+
+    assert.deepEqual(job.input?.assetIds, ["asset_upload_1", "asset_gen_1"]);
+    assert.equal(job.input?.allowGeneratedGapFill, true);
+
+    const done = await runGenerationJob(store, job.id, fakeDeps);
+    assert.equal(done.status, "succeeded");
+
+    const timeline = await store.getTimeline(done.result!.timelineIds[0]);
+    assert.ok(timeline);
+    assert.equal(timeline!.segments.length, 2);
+    assert.deepEqual(timeline!.provenance.generatedAssetJobIds, ["job_img_1"]);
+  });
+});
+
+test("hybrid uploaded-only choice leaves generated gap-fill assets out", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_upload_1" });
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: {
+        briefVersionId: brief.id,
+        assetIds: ["asset_upload_1"],
+        compositionId: composition.id,
+        mode: "hybrid",
+        allowGeneratedGapFill: false,
+      },
+    });
+
+    assert.deepEqual(job.input?.assetIds, ["asset_upload_1"]);
+    assert.equal(job.input?.allowGeneratedGapFill, false);
+
+    const done = await runGenerationJob(store, job.id, fakeDeps);
+    const timeline = await store.getTimeline(done.result!.timelineIds[0]);
+    assert.ok(timeline);
+    assert.deepEqual(
+      timeline!.segments.map((segment) => segment.clipId),
+      ["asset_upload_1"]
+    );
+  });
+});
+
+test("empty hybrid gap-fill requests still require an explicit user choice", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    for (const assetIds of [undefined, [] as string[]]) {
+      await assert.rejects(
+        () =>
+          createGenerationJob({
+            store,
+            actor: resolveActor(),
+            projectId: project.id,
+            body: {
+              briefVersionId: brief.id,
+              ...(assetIds === undefined ? {} : { assetIds }),
+              compositionId: composition.id,
+              mode: "hybrid",
+            },
+          }),
+        (err) =>
+          err instanceof ApiError &&
+          err.code === "validation_failed" &&
+          /allowGeneratedGapFill/.test(err.message)
+      );
+    }
+  });
+});
+
+test("empty hybrid uploaded-only choice asks for uploaded assets", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, {
+      id: "asset_gen_1",
+      kind: "image",
+      source: "generated",
+      generatedAssetJobId: "job_img_1",
+    });
+    const composition = await seedComposition(store, project.id, brief.id, {
+      mode: "hybrid",
+      plannedBeats: [
+        {
+          name: "proof",
+          intent: "show a generated cutaway",
+          durationSec: 3,
+          assetStrategy: "generate_image",
+          generatedAssetJobIds: ["job_img_1"],
+        },
+      ],
+      readyAssetIds: ["asset_gen_1"],
+      generatedAssetJobIds: ["job_img_1"],
+    });
+
+    await assert.rejects(
+      () =>
+        createGenerationJob({
+          store,
+          actor: resolveActor(),
+          projectId: project.id,
+          body: {
+            briefVersionId: brief.id,
+            assetIds: [],
+            compositionId: composition.id,
+            mode: "hybrid",
+            allowGeneratedGapFill: false,
+          },
+        }),
+      (err) =>
+        err instanceof ApiError &&
+        err.code === "validation_failed" &&
+        /assetIds is required/.test(err.message)
+    );
+  });
+});
+
 test("assets must be ready before selection", async () => {
   await withStore(async (store) => {
     const project = await seedProject(store);

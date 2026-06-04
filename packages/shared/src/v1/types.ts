@@ -425,6 +425,8 @@ export interface GenerationRequest {
   briefVersionId?: string;
   assetIds?: string[];
   compositionId?: string;
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
   variantCount?: number;
   audioAlignment?: {
     mode: string;
@@ -438,6 +440,8 @@ export interface GenerationRequest {
 export interface GenerationJobInput {
   briefVersionId: string;
   compositionId?: string;
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
   assetIds: string[];
   generatedAssetJobIds: string[];
   variantCount: number;

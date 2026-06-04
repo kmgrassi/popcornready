@@ -384,10 +384,20 @@ export async function updateAssetContext(
 ): Promise<V1Asset> {
   await getProject(auth.workspaceId, projectId);
   return updateStoredAsset(auth.workspaceId, projectId, assetId, (asset) => {
-    if (input.context !== undefined) asset.context = input.context;
+    if (input.context !== undefined) {
+      asset.context = {
+        ...(asset.context ?? {}),
+        ...input.context,
+      };
+    }
     if (input.userContext !== undefined) {
       if (input.userContext === null) delete asset.userContext;
-      else asset.userContext = input.userContext;
+      else {
+        asset.userContext = {
+          ...(asset.userContext ?? {}),
+          ...input.userContext,
+        };
+      }
     }
     if (input.agentContext !== undefined) {
       if (input.agentContext === null) delete asset.agentContext;

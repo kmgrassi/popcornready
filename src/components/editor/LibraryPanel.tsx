@@ -14,6 +14,7 @@ interface LibraryPanelProps {
   busy: boolean;
   clips: Clip[];
   defaultReferenceRole: CharacterReferenceRole;
+  selectedEditAssetIds: string[];
   onAddReferenceForAsset: (
     characterId: string,
     assetId: string,
@@ -22,6 +23,7 @@ interface LibraryPanelProps {
   ) => void;
   onHandleRegenerateAsset: (clip: Clip, newShotDelta: boolean) => void;
   onSaveReview: (clip: Clip, review: CharacterConsistencyReview) => void;
+  onToggleEditAsset: (assetId: string) => void;
 }
 
 export function LibraryPanel({
@@ -29,9 +31,11 @@ export function LibraryPanel({
   busy,
   clips,
   defaultReferenceRole,
+  selectedEditAssetIds,
   onAddReferenceForAsset,
   onHandleRegenerateAsset,
   onSaveReview,
+  onToggleEditAsset,
 }: LibraryPanelProps) {
   return (
     <>
@@ -53,6 +57,17 @@ export function LibraryPanel({
               {clip.durationSec.toFixed(1)}s
             </div>
             <div className="muted">{clip.description || "no description"}</div>
+            {(clip.kind || "video") !== "audio" && (
+              <label className="inline-check" style={{ marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedEditAssetIds.includes(clip.id)}
+                  onChange={() => onToggleEditAsset(clip.id)}
+                  disabled={busy}
+                />
+                Use in uploaded-footage edit
+              </label>
+            )}
             {clip.generatedBy && (
               <>
                 <div className="muted">

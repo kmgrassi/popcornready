@@ -21,6 +21,7 @@
 //     as a structured envelope (see assetContextEnvelope / unpackAssetContext).
 //     `assets` stores METADATA only — the bytes live in storage (separate PR).
 
+import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "./errors";
@@ -102,10 +103,37 @@ export interface V1Asset {
     };
   };
   semanticAnalysis?: AssetSemanticAnalysis;
+  analysis?: V1AssetAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface V1AssetAnalysis {
+  schemaVersion: "assetAnalysis.v1";
+  status: "succeeded" | "failed";
+  analyzedAt: string;
+  analysisVersion: string;
+  sampledFrames: string[];
+  observations?: {
+    summary: string;
+    subjects: string[];
+    actions: string[];
+    setting?: string;
+    mood?: string;
+    likelyUses: string[];
+    cautions: string[];
+    confidence: "low" | "medium" | "high";
+    model: {
+      provider: string;
+      model?: string;
+    };
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export interface IdempotencyRecord {
@@ -125,10 +153,17 @@ export interface IdempotencyRecord {
 // asset byte/storage code (assets.ts / generated-assets.ts / jobs.ts), which a
 // separate storage PR owns. Kept here so this module's exported surface stays a
 // superset and nothing upstream needs to change.
+const localDirContext = new AsyncLocalStorage<string>();
 
 // Resolved per call so tests can point POPCORN_READY_LOCAL_DIR at a temp directory.
 export function localDir(): string {
+  const contextualDir = localDirContext.getStore();
+  if (contextualDir) return contextualDir;
   return process.env.POPCORN_READY_LOCAL_DIR || path.join(process.cwd(), ".local");
+}
+
+export function withLocalDir<T>(dir: string, fn: () => T): T {
+  return localDirContext.run(dir, fn);
 }
 
 export function mediaUploadDir(workspaceId: string, projectId: string): string {
@@ -137,6 +172,14 @@ export function mediaUploadDir(workspaceId: string, projectId: string): string {
 
 export function mediaGeneratedDir(workspaceId: string, projectId: string): string {
   return path.join(localDir(), "media", "generated", workspaceId, projectId);
+}
+
+export function mediaAnalysisDir(
+  workspaceId: string,
+  projectId: string,
+  assetId: string
+): string {
+  return path.join(localDir(), "media", "analysis", workspaceId, projectId, assetId);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +252,7 @@ function throwOnError(error: { message?: string } | null, context: string): void
 interface WorkspaceRow {
   id: string;
   schema_version: string;
+  owner_id: string | null;
   name: string;
   created_at: string;
   updated_at: string;
@@ -281,6 +325,7 @@ interface AssetContextEnvelope {
   agentContext?: AgentAssetContext | AgentClipContext;
   assetKnowledge?: AssetKnowledge;
   clipUnderstanding?: V1Asset["clipUnderstanding"];
+  analysis?: V1AssetAnalysis;
 }
 
 interface AssetRow {
@@ -311,6 +356,7 @@ function assetContextEnvelope(asset: V1Asset): AssetContextEnvelope | null {
   if (asset.clipUnderstanding !== undefined) {
     envelope.clipUnderstanding = asset.clipUnderstanding;
   }
+  if (asset.analysis !== undefined) envelope.analysis = asset.analysis;
   return Object.keys(envelope).length > 0 ? envelope : null;
 }
 
@@ -359,6 +405,7 @@ function mapAsset(row: AssetRow): V1Asset {
   if (envelope.clipUnderstanding !== undefined) {
     asset.clipUnderstanding = envelope.clipUnderstanding;
   }
+  if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
   if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
   if (row.provenance != null) asset.provenance = row.provenance;
   return asset;
@@ -403,7 +450,11 @@ function paginate<T extends { id: string; createdAt: string }>(
 // ---------------------------------------------------------------------------
 // Workspaces
 // ---------------------------------------------------------------------------
-export async function ensureWorkspace(id: string, name: string): Promise<V1Workspace> {
+export async function ensureWorkspace(
+  id: string,
+  name: string,
+  ownerId?: string | null
+): Promise<V1Workspace> {
   const db = getServiceSupabase();
   const existing = await db
     .from("workspaces")
@@ -412,6 +463,18 @@ export async function ensureWorkspace(id: string, name: string): Promise<V1Works
     .maybeSingle();
   throwOnError(existing.error, "ensureWorkspace select");
   if (existing.data) {
+    const row = existing.data as WorkspaceRow;
+    if (ownerId && !row.owner_id) {
+      const updated = await db
+        .from("workspaces")
+        .update({ owner_id: ownerId, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .is("owner_id", null)
+        .select("*")
+        .maybeSingle();
+      throwOnError(updated.error, "ensureWorkspace owner update");
+      if (updated.data) return mapWorkspace(updated.data as WorkspaceRow);
+    }
     return mapWorkspace(existing.data as WorkspaceRow);
   }
 
@@ -421,6 +484,7 @@ export async function ensureWorkspace(id: string, name: string): Promise<V1Works
     .insert({
       id,
       schema_version: SCHEMA_VERSIONS.workspace,
+      owner_id: ownerId ?? null,
       name,
       created_at: now,
       updated_at: now,
@@ -679,6 +743,23 @@ export async function updateAsset(
   throwOnError(error, "updateAsset");
   if (!data) throw notFound(`Asset not found: ${assetId}`);
   return mapAsset(data as AssetRow);
+}
+
+export async function updateAssetAnalysis(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  patch: {
+    context?: AssetContext;
+    semanticAnalysis?: AssetSemanticAnalysis;
+    analysis: V1AssetAnalysis;
+  }
+): Promise<V1Asset> {
+  return updateAsset(workspaceId, projectId, assetId, (asset) => {
+    asset.analysis = patch.analysis;
+    if (patch.context) asset.context = patch.context;
+    if (patch.semanticAnalysis) asset.semanticAnalysis = patch.semanticAnalysis;
+  });
 }
 
 export async function listAssets(

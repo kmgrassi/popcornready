@@ -3,10 +3,12 @@ import test from "node:test";
 import { ApiError } from "../errors";
 import {
   inferKindFromName,
+  parseAnalyzeAsset,
   parseBrief,
   parseCreateProject,
   parsePagination,
   parseRegisterAsset,
+  parseUpdateAssetContext,
 } from "../schemas";
 
 function expectApiError(fn: () => unknown, code: string): ApiError {
@@ -157,6 +159,27 @@ test("parseRegisterAsset rejects an unknown source type", () => {
     () => parseRegisterAsset({ source: { type: "magic" } }),
     "validation_failed"
   );
+});
+
+test("parseUpdateAssetContext returns only provided context fields", () => {
+  const input = parseUpdateAssetContext({
+    context: {
+      summary: "Corrected clip summary.",
+    },
+  });
+  assert.equal(input.context?.summary, "Corrected clip summary.");
+  assert.equal("transcriptText" in (input.context ?? {}), false);
+  assert.equal("moments" in (input.context ?? {}), false);
+});
+
+test("parseAnalyzeAsset accepts regenerate options", () => {
+  const input = parseAnalyzeAsset({
+    regenerate: true,
+    analysisOptions: { sampleFrames: true, transcribeAudio: false },
+  });
+  assert.equal(input.regenerate, true);
+  assert.equal(input.analysisOptions?.sampleFrames, true);
+  assert.equal(input.analysisOptions?.transcribeAudio, false);
 });
 
 test("inferKindFromName maps extensions to kinds", () => {

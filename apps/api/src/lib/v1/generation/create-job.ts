@@ -29,6 +29,8 @@ function requestBodyHash(body: GenerationRequest): string {
     JSON.stringify({
       briefVersionId: body.briefVersionId ?? null,
       compositionId: body.compositionId ?? null,
+      mode: body.mode ?? null,
+      allowGeneratedGapFill: body.allowGeneratedGapFill ?? null,
       assetIds: Array.isArray(body.assetIds) ? body.assetIds.map((id) => String(id)) : [],
       variantCount: body.variantCount ?? 1,
       audioAlignment: body.audioAlignment ?? null,
