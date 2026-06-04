@@ -2,7 +2,7 @@ import express, { type Express, type Request } from "express";
 import cors from "cors";
 import { requestContext } from "./middleware/request-context.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
-import { mountV1 } from "./routes/v1/index.js";
+import { mountV1 } from "./routes/v1/mount.js";
 
 // CORS allowlist comes from the web origin(s). Comma-separated WEB_ORIGIN env,
 // or allow all in local development.
