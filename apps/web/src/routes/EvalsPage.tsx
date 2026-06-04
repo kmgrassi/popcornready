@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { canAccessAdminSurface } from "../components/auth/AdminRoute";
+import { useAuth } from "../components/auth/AuthProvider";
 import { JudgmentBadge, verdictLabel, VerdictDot } from "../components/evals/JudgmentBadge";
 import { evalRunDetail, evalSuites } from "../lib/evals/fixtures";
 
@@ -7,6 +9,9 @@ function formatPercent(value: number) {
 }
 
 export function EvalsPage() {
+  const auth = useAuth();
+  const showWorkbenchLink = canAccessAdminSurface(auth);
+
   return (
     <main className="eval-page">
       <header className="eval-header">
@@ -17,9 +22,11 @@ export function EvalsPage() {
             Batch regression view for stage judgments, verdict flips, and judge calibration.
           </p>
         </div>
-        <Link className="eval-header-action" to="/admin/evals">
-          Open workbench
-        </Link>
+        {showWorkbenchLink ? (
+          <Link className="eval-header-action" to="/admin/evals">
+            Open workbench
+          </Link>
+        ) : null}
       </header>
 
       <section className="eval-suite-grid" aria-label="Eval suites">

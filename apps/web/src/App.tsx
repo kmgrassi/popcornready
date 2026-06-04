@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
+import { AdminRoute } from "./components/auth/AdminRoute";
 import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
@@ -21,7 +22,14 @@ export function App() {
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
-        <Route path="/admin/evals" element={<AdminEvalsPage />} />
+        <Route
+          path="/admin/evals"
+          element={
+            <AdminRoute>
+              <AdminEvalsPage />
+            </AdminRoute>
+          }
+        />
         <Route path="/projects/:projectId/runs/:runId" element={<RunProgressPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
