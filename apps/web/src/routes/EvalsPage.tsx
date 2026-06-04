@@ -6,12 +6,18 @@ import { JudgmentBadge, verdictLabel, VerdictDot } from "../components/evals/Jud
 import { ApiClientError } from "../lib/api-client";
 import {
   evalApi,
+  stageLabel,
   toRunDetail,
   toSuiteSummary,
   type EvalRunDetailView,
   type EvalSuiteSummaryView,
   type VerdictFlip,
 } from "../lib/evals/api";
+import {
+  fallbackEvalSuites,
+  fallbackRunDetails,
+  fallbackVerdictFlips,
+} from "../lib/evals/fallback";
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -23,6 +29,14 @@ function errorMessage(err: unknown): string {
   return "Something went wrong loading the eval data.";
 }
 
+function isEvalApiUnavailable(err: unknown): boolean {
+  return (
+    err instanceof ApiClientError &&
+    err.status === 404 &&
+    (err.message.includes("/api/v1/eval") || err.code === "internal_error")
+  );
+}
+
 export function EvalsPage() {
   const auth = useAuth();
   const showWorkbenchLink = canAccessAdminSurface(auth);
@@ -30,6 +44,7 @@ export function EvalsPage() {
   const [suites, setSuites] = useState<EvalSuiteSummaryView[]>([]);
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [suitesError, setSuitesError] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<EvalRunDetailView | null>(null);
@@ -47,11 +62,27 @@ export function EvalsPage() {
       .then((res) => {
         if (signal?.aborted) return;
         const views = res.suites.map(toSuiteSummary);
+        setUsingFallback(false);
         setSuites(views);
-        setActiveRunId((current) => current ?? views.find((s) => s.latestRunId)?.latestRunId ?? null);
+        setActiveRunId((current) =>
+          current && views.some((suite) => suite.latestRunId === current)
+            ? current
+            : views.find((suite) => suite.latestRunId)?.latestRunId ?? null,
+        );
       })
       .catch((err) => {
         if (signal?.aborted) return;
+        if (isEvalApiUnavailable(err)) {
+          setUsingFallback(true);
+          setSuites(fallbackEvalSuites);
+          setActiveRunId((current) =>
+            current && fallbackEvalSuites.some((suite) => suite.latestRunId === current)
+              ? current
+              : fallbackEvalSuites.find((suite) => suite.latestRunId)?.latestRunId ?? null,
+          );
+          return;
+        }
+        setUsingFallback(false);
         setSuitesError(errorMessage(err));
       })
       .finally(() => {
@@ -69,6 +100,12 @@ export function EvalsPage() {
   useEffect(() => {
     if (!activeRunId) {
       setRunDetail(null);
+      return;
+    }
+    if (usingFallback) {
+      setRunLoading(false);
+      setRunError(null);
+      setRunDetail(fallbackRunDetails[activeRunId] ?? null);
       return;
     }
     const controller = new AbortController();
@@ -90,7 +127,7 @@ export function EvalsPage() {
         setRunLoading(false);
       });
     return () => controller.abort();
-  }, [activeRunId]);
+  }, [activeRunId, usingFallback]);
 
   // Diff the active run against the prior run of the same suite — that is the
   // "money view" (did my change regress?). The server carries the lineage on the
@@ -98,6 +135,11 @@ export function EvalsPage() {
   useEffect(() => {
     if (!runDetail || !runDetail.previousRunId) {
       setFlips(null);
+      setFlipsError(null);
+      return;
+    }
+    if (usingFallback) {
+      setFlips(fallbackVerdictFlips[runDetail.runId] ?? []);
       setFlipsError(null);
       return;
     }
@@ -114,7 +156,7 @@ export function EvalsPage() {
         setFlips(null);
       });
     return () => controller.abort();
-  }, [runDetail]);
+  }, [runDetail, usingFallback]);
 
   return (
     <main className="eval-page">
@@ -281,7 +323,7 @@ export function EvalsPage() {
               <div className="eval-flip-row" key={`${flip.caseId}-${flip.stageType}`}>
                 <div>
                   <strong>{flip.caseLabel}</strong>
-                  <span>{flip.stageType}</span>
+                  <span>{stageLabel(flip.stageType)}</span>
                 </div>
                 <span>
                   {verdictLabel(flip.before)} {"->"} {verdictLabel(flip.after)}
