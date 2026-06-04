@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
+import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
@@ -10,6 +11,7 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<Placeholder name="Home" />} />
         <Route path="/studio" element={<Placeholder name="Studio" />} />
+        <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/login" element={<Placeholder name="Login" />} />
         <Route path="/signup" element={<Placeholder name="Signup" />} />
