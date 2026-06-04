@@ -6,6 +6,7 @@
 // the function signatures below.
 
 import { promises as fs } from "fs";
+import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { notFound } from "./errors";
 import { newId } from "./ids";
@@ -86,10 +87,37 @@ export interface V1Asset {
     };
   };
   semanticAnalysis?: AssetSemanticAnalysis;
+  analysis?: V1AssetAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface V1AssetAnalysis {
+  schemaVersion: "assetAnalysis.v1";
+  status: "succeeded" | "failed";
+  analyzedAt: string;
+  analysisVersion: string;
+  sampledFrames: string[];
+  observations?: {
+    summary: string;
+    subjects: string[];
+    actions: string[];
+    setting?: string;
+    mood?: string;
+    likelyUses: string[];
+    cautions: string[];
+    confidence: "low" | "medium" | "high";
+    model: {
+      provider: string;
+      model?: string;
+    };
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export interface IdempotencyRecord {
@@ -111,10 +139,17 @@ interface V1Db {
 }
 
 const DB_SCHEMA_VERSION = "agentDb.v1";
+const localDirContext = new AsyncLocalStorage<string>();
 
 // Resolved per call so tests can point POPCORN_READY_LOCAL_DIR at a temp directory.
 export function localDir(): string {
+  const contextualDir = localDirContext.getStore();
+  if (contextualDir) return contextualDir;
   return process.env.POPCORN_READY_LOCAL_DIR || path.join(process.cwd(), ".local");
+}
+
+export function withLocalDir<T>(dir: string, fn: () => T): T {
+  return localDirContext.run(dir, fn);
 }
 
 function dbFile(): string {
@@ -127,6 +162,14 @@ export function mediaUploadDir(workspaceId: string, projectId: string): string {
 
 export function mediaGeneratedDir(workspaceId: string, projectId: string): string {
   return path.join(localDir(), "media", "generated", workspaceId, projectId);
+}
+
+export function mediaAnalysisDir(
+  workspaceId: string,
+  projectId: string,
+  assetId: string
+): string {
+  return path.join(localDir(), "media", "analysis", workspaceId, projectId, assetId);
 }
 
 function emptyDb(): V1Db {
@@ -367,6 +410,23 @@ export async function updateAsset(
     updater(asset);
     asset.updatedAt = new Date().toISOString();
     return asset;
+  });
+}
+
+export async function updateAssetAnalysis(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  patch: {
+    context?: AssetContext;
+    semanticAnalysis?: AssetSemanticAnalysis;
+    analysis: V1AssetAnalysis;
+  }
+): Promise<V1Asset> {
+  return updateAsset(workspaceId, projectId, assetId, (asset) => {
+    asset.analysis = patch.analysis;
+    if (patch.context) asset.context = patch.context;
+    if (patch.semanticAnalysis) asset.semanticAnalysis = patch.semanticAnalysis;
   });
 }
 
