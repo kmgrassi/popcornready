@@ -1,8 +1,10 @@
 import type {
   BriefVersion,
+  AssetKind,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
+import type { Project } from "@popcorn/shared/types";
 import {
   authenticatedFetch,
   getAuthenticatedHeaders,
@@ -137,6 +139,30 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
+export interface StudioProjectResponse {
+  project: Project | null;
+}
+
+function studioProjectFromV1(project: V1Project): Project {
+  return {
+    id: project.id,
+    goal: project.name,
+    plan: null,
+    timeline: null,
+    clips: [],
+    critic: null,
+    chat: [],
+    updatedAt: project.updatedAt,
+  };
+}
+
+function unavailable(feature: string): never {
+  throw new ApiClientError(501, {
+    code: "not_implemented",
+    message: `${feature} is not available in the v1 API yet.`,
+  });
+}
+
 export const v1Api = {
   me: () => apiRequest<MeResponse>("/api/v1/me"),
   listProjects: (params?: { limit?: number; cursor?: string | null }) =>
@@ -152,4 +178,51 @@ export const v1Api = {
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
     ),
+  getStudioProject: async (): Promise<StudioProjectResponse> => {
+    const { projects } = await v1Api.listProjects({ limit: 1 });
+    return {
+      project: projects[0] ? studioProjectFromV1(projects[0]) : null,
+    };
+  },
+  createStudioProject: async (input: {
+    goal: string;
+    targetLengthSec: number;
+    aspectRatio: VideoBriefInput["aspectRatio"];
+    style?: string;
+    storyContext?: Partial<VideoBriefInput>;
+  }): Promise<StudioProjectResponse> => {
+    const { project } = await v1Api.createProject({
+      name: input.goal,
+      brief: {
+        goal: input.goal,
+        targetLengthSec: input.targetLengthSec,
+        aspectRatio: input.aspectRatio,
+        style: input.style,
+        platform: input.storyContext?.platform,
+        audience: input.storyContext?.audience,
+        format: input.storyContext?.format,
+      },
+    });
+    return { project: studioProjectFromV1(project) };
+  },
+  listCreatedVideos: async () => ({ videos: [] }),
+  uploadAsset: async (_input: {
+    file: File;
+    durationSec: number;
+    description: string;
+  }): Promise<StudioProjectResponse> => unavailable("Asset upload"),
+  generateCut: async (_input: unknown): Promise<StudioProjectResponse> =>
+    unavailable("Timeline generation"),
+  generateAsset: async (_input: {
+    provider: string;
+    kind: AssetKind;
+    prompt?: string | null;
+    description?: string | null;
+    [key: string]: unknown;
+  }): Promise<StudioProjectResponse> => unavailable("Asset generation"),
+  reviseCut: async (_input: { message: string }): Promise<StudioProjectResponse> =>
+    unavailable("Timeline revision"),
+  exportTimeline: async (_input: unknown) => unavailable("Timeline export"),
+  alignAudio: async (_input: unknown): Promise<StudioProjectResponse> =>
+    unavailable("Audio alignment"),
 };
