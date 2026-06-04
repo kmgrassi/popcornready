@@ -141,6 +141,19 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/eval:
+    dependencies:
+      '@popcorn/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.22.3
+        version: 4.22.4
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   packages/renderer:
     dependencies:
       '@popcorn/shared':
