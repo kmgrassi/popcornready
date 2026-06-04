@@ -3,6 +3,7 @@ import type {
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
+import type { Project } from "@popcorn/shared/types";
 import {
   authenticatedFetch,
   getAuthenticatedHeaders,
@@ -137,6 +138,23 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
+export interface StudioProjectResponse {
+  project: Project | null;
+}
+
+function studioProjectFromV1(project: V1Project): Project {
+  return {
+    id: project.id,
+    goal: project.name,
+    plan: null,
+    timeline: null,
+    clips: [],
+    critic: null,
+    chat: [],
+    updatedAt: project.updatedAt,
+  };
+}
+
 export const v1Api = {
   me: () => apiRequest<MeResponse>("/api/v1/me"),
   listProjects: (params?: { limit?: number; cursor?: string | null }) =>
@@ -152,4 +170,11 @@ export const v1Api = {
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
     ),
+  getStudioProject: async (): Promise<StudioProjectResponse> => {
+    const { projects } = await v1Api.listProjects({ limit: 1 });
+    return {
+      project: projects[0] ? studioProjectFromV1(projects[0]) : null,
+    };
+  },
+  listCreatedVideos: async () => ({ videos: [] }),
 };

@@ -1,7 +1,9 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
+import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
+import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
 
@@ -11,8 +13,8 @@ export function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<Placeholder name="Home" />} />
-        <Route path="/studio" element={<Placeholder name="Studio" />} />
+        <Route index element={<HomePage />} />
+        <Route path="/studio" element={<StudioPage />} />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/login" element={<LoginPage />} />

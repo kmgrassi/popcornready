@@ -16,7 +16,8 @@ import { findIdempotencyRecord, saveIdempotencyRecord } from "./store";
 
 export interface ApiResult {
   status: number;
-  body: Record<string, unknown>;
+  body: unknown;
+  headers?: Record<string, string>;
 }
 
 const keyLocks = new Map<string, Promise<unknown>>();
@@ -54,7 +55,7 @@ export async function runIdempotent(
       }
       return {
         status: existing.status,
-        body: existing.responseBody as Record<string, unknown>,
+        body: existing.responseBody,
       };
     }
 

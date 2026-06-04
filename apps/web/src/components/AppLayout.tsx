@@ -32,6 +32,8 @@ export function AppLayout() {
           </Link>
           <nav className="web-shell-nav" aria-label="Primary">
             <Link to="/">Home</Link>
+            <a href="/#how">How it works</a>
+            <a href="/#pricing">Pricing</a>
             <Link to="/studio">Studio</Link>
             <AuthNavButton />
           </nav>
