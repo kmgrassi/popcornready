@@ -9,6 +9,7 @@ import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
 import { miscCapabilitiesRouter } from "./misc-capabilities.js";
 import { projectsRouter } from "./projects.js";
+import { generationsRouter } from "./generations.js";
 import { timelinesRouter } from "./timelines.js";
 
 // Mounts the versioned agent API under /api/v1. Route groups are added here as
@@ -35,6 +36,7 @@ export function mountV1(app: Express) {
   v1.use(generationEntrypointsRouter);
   v1.use(generationRunsRouter);
   v1.use(timelinesRouter);
+  v1.use(generationsRouter);
 
   app.use("/api/v1", v1);
 }
