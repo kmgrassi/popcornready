@@ -7,6 +7,7 @@ import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
 import { projectsRouter } from "./projects.js";
 import { generationEntrypointsRouter } from "./generation-entrypoints.js";
+import { timelinesRouter } from "./timelines.js";
 
 // Mounts the versioned agent API under /api/v1. Route groups are added here as
 // each is ported from the former Next.js handlers (see MIGRATION.md for the
@@ -29,6 +30,7 @@ export function mountV1(app: Express) {
   v1.use(assetsRouter);
   v1.use(briefRouter);
   v1.use(generationEntrypointsRouter);
+  v1.use(timelinesRouter);
 
   app.use("/api/v1", v1);
 }
