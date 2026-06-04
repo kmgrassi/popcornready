@@ -13,6 +13,11 @@ import { registerAsset } from "../assets";
 import { parseAnalyzeBatch } from "../schemas";
 import { createProject, getAsset, localDir, V1Project } from "../store";
 
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const dbTest: typeof test = SUPABASE_CONFIGURED ? test : (test.skip as typeof test);
+
 let tmpDir: string;
 let sourceDir: string;
 let project: V1Project;
@@ -33,6 +38,7 @@ beforeEach(async () => {
   originalFfmpegPath = process.env.FFMPEG_PATH;
   originalOpenAiKey = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
+  if (!SUPABASE_CONFIGURED) return;
   const created = await createProject({
     workspaceId: LOCAL_WORKSPACE_ID,
     name: "Analysis",
@@ -128,7 +134,7 @@ test("parseAnalyzeBatch applies PR2 defaults and validates sample counts", () =>
   );
 });
 
-test("analyzeAssetBatch samples frames and persists structured low-confidence observations", async () => {
+dbTest("analyzeAssetBatch samples frames and persists structured low-confidence observations", async () => {
   process.env.FFMPEG_PATH = await fakeFfmpeg();
   const src = path.join(sourceDir, "clip.mp4");
   await fs.writeFile(src, "fake-video");
@@ -167,7 +173,7 @@ test("analyzeAssetBatch samples frames and persists structured low-confidence ob
   assert.equal((polled.body.job as { status: string }).status, "succeeded");
 });
 
-test("analyzeAssetBatch records a failed analysis when ffmpeg is unavailable", async () => {
+dbTest("analyzeAssetBatch records a failed analysis when ffmpeg is unavailable", async () => {
   process.env.FFMPEG_PATH = path.join(sourceDir, "missing-ffmpeg");
   const src = path.join(sourceDir, "clip.mp4");
   await fs.writeFile(src, "fake-video");
