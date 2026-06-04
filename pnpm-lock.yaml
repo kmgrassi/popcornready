@@ -143,6 +143,9 @@ importers:
 
   packages/eval:
     dependencies:
+      '@popcorn/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@popcorn/shared':
         specifier: workspace:*
         version: link:../shared
