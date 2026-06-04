@@ -6,6 +6,14 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../errors";
 import { runIdempotent } from "../idempotency";
 
+// These exercise the v1 store, which now persists to Supabase Postgres (needs a
+// live PostgREST gateway). Skipped unless Supabase env is configured; the store's
+// idempotency round-trip is proven by the dockerized pg harness in this PR.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const dbTest: typeof test = SUPABASE_CONFIGURED ? test : (test.skip as typeof test);
+
 let tmpDir: string;
 
 beforeEach(async () => {
@@ -20,7 +28,7 @@ afterEach(async () => {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("concurrent same-key requests run the producer exactly once", async () => {
+dbTest("concurrent same-key requests run the producer exactly once", async () => {
   let runs = 0;
   const produce = async () => {
     runs += 1;
@@ -38,7 +46,7 @@ test("concurrent same-key requests run the producer exactly once", async () => {
   assert.deepEqual(a, { status: 201, body: { runs: 1 } });
 });
 
-test("a replay with the same key+body returns the stored response", async () => {
+dbTest("a replay with the same key+body returns the stored response", async () => {
   let runs = 0;
   const produce = async () => {
     runs += 1;
@@ -51,7 +59,7 @@ test("a replay with the same key+body returns the stored response", async () => 
   assert.deepEqual(first, second);
 });
 
-test("a same key with a different body hash is a conflict", async () => {
+dbTest("a same key with a different body hash is a conflict", async () => {
   await runIdempotent("scope", "key", "hash-a", async () => ({
     status: 201,
     body: { ok: true },
@@ -68,7 +76,7 @@ test("a same key with a different body hash is a conflict", async () => {
   );
 });
 
-test("non-success results are not persisted and can be retried", async () => {
+dbTest("non-success results are not persisted and can be retried", async () => {
   let runs = 0;
   const produce = async () => {
     runs += 1;
@@ -80,7 +88,7 @@ test("non-success results are not persisted and can be retried", async () => {
   assert.equal(runs, 2, "failed attempts should not be cached");
 });
 
-test("different keys do not block each other", async () => {
+dbTest("different keys do not block each other", async () => {
   let runs = 0;
   const produce = async () => {
     runs += 1;

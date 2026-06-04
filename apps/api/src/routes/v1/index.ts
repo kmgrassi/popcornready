@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { Router } from "express";
 import { authMiddleware } from "../../middleware/auth.js";
+import { briefRouter } from "./brief.js";
 import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
 import { projectsRouter } from "./projects.js";
@@ -25,6 +26,7 @@ export function mountV1(app: Express) {
   v1.use(meRouter);
   v1.use(projectsRouter);
   v1.use(generationsRouter);
+  v1.use(briefRouter);
 
   app.use("/api/v1", v1);
 }
