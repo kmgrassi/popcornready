@@ -907,6 +907,38 @@ button:disabled {
   color: var(--accent);
 }
 
+button.eval-card-link {
+  cursor: pointer;
+  width: 100%;
+}
+
+button.eval-card-link[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.eval-state {
+  padding: 14px;
+  font-size: 13px;
+}
+
+.eval-state.error {
+  color: var(--danger, #d9534f);
+}
+
+.eval-state.error button {
+  margin-top: 8px;
+}
+
+.workbench-note {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.workbench-note code {
+  font-size: 12px;
+}
+
 .eval-suite-grid,
 .eval-bottom-grid,
 .workbench-topology {
