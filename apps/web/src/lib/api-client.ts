@@ -1,5 +1,9 @@
 import type {
   BriefVersion,
+  GateableGenerationStageType,
+  GenerationRun,
+  GenerationStage,
+  GenerationStageItem,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
@@ -137,6 +141,17 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
+export interface GenerationRunDetail {
+  run: GenerationRun;
+  stages: GenerationStage[];
+  stageItems: GenerationStageItem[];
+}
+
+export interface RejectGenerationRunInput {
+  stageType?: GateableGenerationStageType;
+  note?: string;
+}
+
 export const v1Api = {
   me: () => apiRequest<MeResponse>("/api/v1/me"),
   listProjects: (params?: { limit?: number; cursor?: string | null }) =>
@@ -151,5 +166,27 @@ export const v1Api = {
   getProject: (projectId: string) =>
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
+    ),
+  getGenerationRun: (
+    projectId: string,
+    runId: string,
+    signal?: AbortSignal
+  ) =>
+    apiRequest<GenerationRunDetail>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}`,
+      { signal }
+    ),
+  updateGenerationRun: (
+    projectId: string,
+    runId: string,
+    action: "approve" | "reject" | "cancel",
+    body?: RejectGenerationRunInput
+  ) =>
+    apiRequest<GenerationRunDetail>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}/${action}`,
+      {
+        method: "POST",
+        body: body ?? {},
+      }
     ),
 };
