@@ -1,5 +1,6 @@
 import type {
   CaseExpectation,
+  ExpectationCheck,
   JudgmentGrade,
   JudgmentVerdict,
 } from "./types";
@@ -42,7 +43,8 @@ export function computeVerdict(
 export function evaluateExpectations(
   stageType: string,
   grades: Record<string, JudgmentGrade>,
-  expectations: CaseExpectation[] = []
+  expectations: CaseExpectation[] = [],
+  checks: readonly ExpectationCheck[] = []
 ): { matched: boolean; detail?: string } | null {
   const relevant = expectations.filter((expectation) => expectation.stageType === stageType);
   if (relevant.length === 0) {
@@ -53,10 +55,27 @@ export function evaluateExpectations(
 
   for (const expectation of relevant) {
     if (expectation.goldenArtifactId) {
-      misses.push("goldenArtifactId expectations are not supported yet");
+      const goldenCheck = checks.find(
+        (check) =>
+          check.kind === "golden_artifact" &&
+          check.goldenArtifactId === expectation.goldenArtifactId
+      );
+      if (!goldenCheck) {
+        misses.push(`missing goldenArtifactId check ${expectation.goldenArtifactId}`);
+      } else if (!goldenCheck.matched) {
+        misses.push(goldenCheck.detail ?? `${expectation.goldenArtifactId} did not match`);
+      }
     }
-    if ((expectation.assertions?.length ?? 0) > 0) {
-      misses.push("assertion expectations are not supported yet");
+
+    for (const assertion of expectation.assertions ?? []) {
+      const assertionCheck = checks.find(
+        (check) => check.kind === "assertion" && check.assertion === assertion
+      );
+      if (!assertionCheck) {
+        misses.push(`missing assertion check "${assertion}"`);
+      } else if (!assertionCheck.matched) {
+        misses.push(assertionCheck.detail ?? `assertion failed "${assertion}"`);
+      }
     }
 
     for (const [dimension, floor] of Object.entries(expectation.gradeFloors ?? {})) {
