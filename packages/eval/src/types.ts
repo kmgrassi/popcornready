@@ -141,7 +141,6 @@ export interface ExpectationResult {
   matched: boolean;
   detail?: string;
 }
-
 export interface EvalFixtureArtifact {
   stageType: GenerationStageType;
   tool?: string;

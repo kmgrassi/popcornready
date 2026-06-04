@@ -23,10 +23,21 @@ test("evaluateExpectations reports grade floor misses for matching stages", () =
   assert.deepEqual(
     evaluateExpectations(
       "creative_plan",
-      { storyArc: 5 },
+      { storyArc: 6 },
       [{ stageType: "creative_plan", gradeFloors: { storyArc: 7 } }]
     ),
-    { matched: false, detail: "storyArc 5 < 7" }
+    { matched: false, detail: "storyArc 6 < 7" }
+  );
+});
+
+test("evaluateExpectations does not count needs_review as a floor match", () => {
+  assert.deepEqual(
+    evaluateExpectations(
+      "creative_plan",
+      { storyArc: "needs_review" },
+      [{ stageType: "creative_plan", gradeFloors: { storyArc: 7 } }]
+    ),
+    { matched: false, detail: "storyArc was not numeric" }
   );
 });
 
