@@ -1,18 +1,23 @@
 import { promises as fs } from "fs";
 import path from "path";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { defaultDbDir } from "../store";
+import { getServiceSupabase } from "../supabase-client";
 import {
   GenerationRun,
   GenerationStage,
   GenerationStageItem,
 } from "@popcorn/shared/v1/types";
 
-// Local persistence for generation runs, stages, and stage items.
+// Persistence for generation runs, stages, and stage items.
 //
-// Records live under `.local/dev-db/` following the JSON-per-record convention
-// used by `store.ts`. The shapes here intentionally match the endpoint wire
-// response.
+// The production store (createSupabaseGenerationRunsStore, used by
+// getGenerationRunsStore) reads/writes the generation_runs / generation_stages /
+// generation_stage_items tables in Supabase Postgres
+// (supabase/migrations/20260603000000_init_v1_model.sql). Snake_case columns map
+// to/from the camelCase wire shapes below; jsonb columns carry the loosely-shaped
+// fields (error summaries, jobIds/artifactIds arrays). A file-based store
+// (createGenerationRunsStore(rootDir)) is retained for offline unit tests.
 
 // --- Input/patch types -----------------------------------------------------
 
@@ -87,6 +92,384 @@ function rand(): string {
 function newId(prefix: string): string {
   return `${prefix}_${rand()}`;
 }
+
+// ---------------------------------------------------------------------------
+// Supabase (Postgres) implementation
+// ---------------------------------------------------------------------------
+
+const PGRST_NO_ROWS = "PGRST116";
+
+function isMissing(error: { code?: string } | null): boolean {
+  return !!error && error.code === PGRST_NO_ROWS;
+}
+
+function fail(op: string, error: { message?: string } | null): never {
+  throw new Error(
+    `generation-runs store: ${op} failed: ${error?.message ?? "unknown error"}`
+  );
+}
+
+// --- runs ------------------------------------------------------------------
+
+interface RunRow {
+  run_id: string;
+  project_id: string;
+  brief_version_id: string | null;
+  status: GenerationRun["status"];
+  review_gates: GenerationRun["reviewGates"] | null;
+  review_gate: GenerationRun["reviewGate"] | null;
+  current_stage_type: GenerationRun["currentStageType"] | null;
+  progress_percent: number | null;
+  message: string | null;
+  error: GenerationRun["error"] | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+function rowToRun(r: RunRow): GenerationRun {
+  const run: GenerationRun = {
+    runId: r.run_id,
+    projectId: r.project_id,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+  if (r.brief_version_id != null) run.briefVersionId = r.brief_version_id;
+  if (r.review_gates != null) run.reviewGates = r.review_gates;
+  if (r.review_gate != null) run.reviewGate = r.review_gate;
+  if (r.current_stage_type != null) run.currentStageType = r.current_stage_type;
+  if (r.progress_percent != null) run.progressPercent = r.progress_percent;
+  if (r.message != null) run.message = r.message;
+  if (r.started_at != null) run.startedAt = r.started_at;
+  if (r.completed_at != null) run.completedAt = r.completed_at;
+  if (r.error != null) run.error = r.error;
+  return run;
+}
+
+function runToRow(run: GenerationRun): RunRow {
+  return {
+    run_id: run.runId,
+    project_id: run.projectId,
+    brief_version_id: run.briefVersionId ?? null,
+    status: run.status,
+    review_gates: run.reviewGates ?? null,
+    review_gate: run.reviewGate ?? null,
+    current_stage_type: run.currentStageType ?? null,
+    progress_percent: run.progressPercent ?? null,
+    message: run.message ?? null,
+    error: run.error ?? null,
+    created_at: run.createdAt,
+    updated_at: run.updatedAt,
+    started_at: run.startedAt ?? null,
+    completed_at: run.completedAt ?? null,
+  };
+}
+
+// --- stages ----------------------------------------------------------------
+
+interface StageRow {
+  stage_id: string;
+  run_id: string;
+  type: GenerationStage["type"];
+  label: string;
+  order: number;
+  status: GenerationStage["status"];
+  is_review_gate: boolean | null;
+  reviewed_at: string | null;
+  progress_percent: number | null;
+  message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  job_ids: string[];
+  artifact_ids: string[];
+  error: GenerationStage["error"] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToStage(r: StageRow): GenerationStage {
+  const stage: GenerationStage = {
+    stageId: r.stage_id,
+    runId: r.run_id,
+    type: r.type,
+    label: r.label,
+    order: r.order,
+    status: r.status,
+    jobIds: r.job_ids ?? [],
+    artifactIds: r.artifact_ids ?? [],
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+  if (r.is_review_gate != null) stage.isReviewGate = r.is_review_gate;
+  if (r.reviewed_at != null) stage.reviewedAt = r.reviewed_at;
+  if (r.progress_percent != null) stage.progressPercent = r.progress_percent;
+  if (r.message != null) stage.message = r.message;
+  if (r.started_at != null) stage.startedAt = r.started_at;
+  if (r.completed_at != null) stage.completedAt = r.completed_at;
+  if (r.error != null) stage.error = r.error;
+  return stage;
+}
+
+function stageToRow(s: GenerationStage): StageRow {
+  return {
+    stage_id: s.stageId,
+    run_id: s.runId,
+    type: s.type,
+    label: s.label,
+    order: s.order,
+    status: s.status,
+    is_review_gate: s.isReviewGate ?? null,
+    reviewed_at: s.reviewedAt ?? null,
+    progress_percent: s.progressPercent ?? null,
+    message: s.message ?? null,
+    started_at: s.startedAt ?? null,
+    completed_at: s.completedAt ?? null,
+    job_ids: s.jobIds ?? [],
+    artifact_ids: s.artifactIds ?? [],
+    error: s.error ?? null,
+    created_at: s.createdAt,
+    updated_at: s.updatedAt,
+  };
+}
+
+// --- stage items -----------------------------------------------------------
+
+interface StageItemRow {
+  item_id: string;
+  stage_id: string;
+  kind: GenerationStageItem["kind"];
+  label: string;
+  status: GenerationStageItem["status"];
+  progress_percent: number | null;
+  provider: string | null;
+  prompt_preview: string | null;
+  asset_id: string | null;
+  artifact_id: string | null;
+  retryable: boolean | null;
+  error: GenerationStageItem["error"] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToStageItem(r: StageItemRow): GenerationStageItem {
+  const item: GenerationStageItem = {
+    itemId: r.item_id,
+    stageId: r.stage_id,
+    kind: r.kind,
+    label: r.label,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+  if (r.progress_percent != null) item.progressPercent = r.progress_percent;
+  if (r.provider != null) item.provider = r.provider;
+  if (r.prompt_preview != null) item.promptPreview = r.prompt_preview;
+  if (r.asset_id != null) item.assetId = r.asset_id;
+  if (r.artifact_id != null) item.artifactId = r.artifact_id;
+  if (r.retryable != null) item.retryable = r.retryable;
+  if (r.error != null) item.error = r.error;
+  return item;
+}
+
+function stageItemToRow(i: GenerationStageItem): StageItemRow {
+  return {
+    item_id: i.itemId,
+    stage_id: i.stageId,
+    kind: i.kind,
+    label: i.label,
+    status: i.status,
+    progress_percent: i.progressPercent ?? null,
+    provider: i.provider ?? null,
+    prompt_preview: i.promptPreview ?? null,
+    asset_id: i.assetId ?? null,
+    artifact_id: i.artifactId ?? null,
+    retryable: i.retryable ?? null,
+    error: i.error ?? null,
+    created_at: i.createdAt,
+    updated_at: i.updatedAt,
+  };
+}
+
+export function createSupabaseGenerationRunsStore(
+  db: SupabaseClient = getServiceSupabase()
+): GenerationRunsStore {
+  return {
+    async createRun(input) {
+      const now = new Date().toISOString();
+      const run: GenerationRun = {
+        ...input,
+        runId: input.runId ?? newId("genrun"),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { error } = await db.from("generation_runs").insert(runToRow(run));
+      if (error) fail("create run", error);
+      return run;
+    },
+
+    async getRun(runId) {
+      const { data, error } = await db
+        .from("generation_runs")
+        .select("*")
+        .eq("run_id", runId)
+        .single();
+      if (error) {
+        if (isMissing(error)) return null;
+        fail("get run", error);
+      }
+      return data ? rowToRun(data as RunRow) : null;
+    },
+
+    async updateRun(runId, patch) {
+      const current = await this.getRun(runId);
+      if (!current) throw new Error(`generation run not found: ${runId}`);
+      const next: GenerationRun = {
+        ...current,
+        ...patch,
+        runId: current.runId,
+        projectId: current.projectId,
+        createdAt: current.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+      const { error } = await db
+        .from("generation_runs")
+        .update(runToRow(next))
+        .eq("run_id", runId);
+      if (error) fail("update run", error);
+      return next;
+    },
+
+    async listRunsForProject(projectId) {
+      const { data, error } = await db
+        .from("generation_runs")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (error) fail("list runs", error);
+      return ((data as RunRow[]) ?? []).map(rowToRun);
+    },
+
+    async saveStage(input) {
+      const now = new Date().toISOString();
+      const stage: GenerationStage = {
+        ...input,
+        stageId: input.stageId ?? newId("genstage"),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { error } = await db
+        .from("generation_stages")
+        .upsert(stageToRow(stage), { onConflict: "stage_id" });
+      if (error) fail("save stage", error);
+      return stage;
+    },
+
+    async getStage(stageId) {
+      const { data, error } = await db
+        .from("generation_stages")
+        .select("*")
+        .eq("stage_id", stageId)
+        .single();
+      if (error) {
+        if (isMissing(error)) return null;
+        fail("get stage", error);
+      }
+      return data ? rowToStage(data as StageRow) : null;
+    },
+
+    async updateStage(stageId, patch) {
+      const current = await this.getStage(stageId);
+      if (!current) throw new Error(`generation stage not found: ${stageId}`);
+      const next: GenerationStage = {
+        ...current,
+        ...patch,
+        stageId: current.stageId,
+        runId: current.runId,
+        createdAt: current.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+      const { error } = await db
+        .from("generation_stages")
+        .update(stageToRow(next))
+        .eq("stage_id", stageId);
+      if (error) fail("update stage", error);
+      return next;
+    },
+
+    async listStagesForRun(runId) {
+      const { data, error } = await db
+        .from("generation_stages")
+        .select("*")
+        .eq("run_id", runId)
+        .order("order", { ascending: true });
+      if (error) fail("list stages", error);
+      return ((data as StageRow[]) ?? []).map(rowToStage);
+    },
+
+    async saveStageItem(input) {
+      const now = new Date().toISOString();
+      const item: GenerationStageItem = {
+        ...input,
+        itemId: input.itemId ?? newId("genitem"),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { error } = await db
+        .from("generation_stage_items")
+        .upsert(stageItemToRow(item), { onConflict: "item_id" });
+      if (error) fail("save stage item", error);
+      return item;
+    },
+
+    async getStageItem(itemId) {
+      const { data, error } = await db
+        .from("generation_stage_items")
+        .select("*")
+        .eq("item_id", itemId)
+        .single();
+      if (error) {
+        if (isMissing(error)) return null;
+        fail("get stage item", error);
+      }
+      return data ? rowToStageItem(data as StageItemRow) : null;
+    },
+
+    async updateStageItem(itemId, patch) {
+      const current = await this.getStageItem(itemId);
+      if (!current) throw new Error(`generation stage item not found: ${itemId}`);
+      const next: GenerationStageItem = {
+        ...current,
+        ...patch,
+        itemId: current.itemId,
+        stageId: current.stageId,
+        createdAt: current.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+      const { error } = await db
+        .from("generation_stage_items")
+        .update(stageItemToRow(next))
+        .eq("item_id", itemId);
+      if (error) fail("update stage item", error);
+      return next;
+    },
+
+    async listStageItemsForStage(stageId) {
+      const { data, error } = await db
+        .from("generation_stage_items")
+        .select("*")
+        .eq("stage_id", stageId)
+        .order("created_at", { ascending: true });
+      if (error) fail("list stage items", error);
+      return ((data as StageItemRow[]) ?? []).map(rowToStageItem);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// File-based implementation (offline unit tests)
+// ---------------------------------------------------------------------------
 
 export function createGenerationRunsStore(rootDir: string): GenerationRunsStore {
   function dir(collection: string): string {
@@ -263,7 +646,8 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
 
 let _store: GenerationRunsStore | null = null;
 export function getGenerationRunsStore(): GenerationRunsStore {
-  if (!_store) _store = createGenerationRunsStore(defaultDbDir());
+  // Production singleton: Postgres-backed via the service-role client.
+  if (!_store) _store = createSupabaseGenerationRunsStore();
   return _store;
 }
 

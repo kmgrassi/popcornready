@@ -1,91 +1,54 @@
-"use client";
-
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   GATEABLE_GENERATION_STAGE_TYPES,
   GENERATION_STAGE_LABELS,
-  GateableGenerationStageType,
+  type GateableGenerationStageType,
 } from "@popcorn/shared/v1/types";
 
-const FEATURED_TEMPLATE: { icon: string; label: string; text: string; prompt: string } = {
-  icon: "🏆",
+const FEATURED_TEMPLATE = {
+  icon: "PR",
   label: "Movie dream montage",
   text: "The movie-loving boy who trades clunky editing tools for Popcorn Ready and wins Best Picture",
   prompt:
-    "Create a 30-second cinematic story. Open on a 10-year-old movie-loving boy in his bedroom late at night, hunched over a computer running traditional video editing software — the screen is a cluttered, complex timeline crammed with dozens of video clips he is struggling to splice together. He looks frustrated and overwhelmed as the edit fights him. Then he discovers the website “Popcorn Ready,” and everything changes. Build a montage with gradually rising orchestral music as he creates a movie, goes from idea to production, and sees it released to adoring fans. Show him as a famous filmmaker at a packed premiere, then at an awards show selected for Best Picture as he walks up to the microphone and begins, “I would like to thank...”. End where it began: he is slumped asleep over his desk, then stirs, lifts his head, and looks up to see the Popcorn Ready screen glowing on his computer — the movie of his dreams can now be made.",
+    'Create a 30-second cinematic story. Open on a 10-year-old movie-loving boy in his bedroom late at night, hunched over a computer running traditional video editing software - the screen is a cluttered, complex timeline crammed with dozens of video clips he is struggling to splice together. He looks frustrated and overwhelmed as the edit fights him. Then he discovers the website "Popcorn Ready," and everything changes. Build a montage with gradually rising orchestral music as he creates a movie, goes from idea to production, and sees it released to adoring fans. Show him as a famous filmmaker at a packed premiere, then at an awards show selected for Best Picture as he walks up to the microphone and begins, "I would like to thank...". End where it began: he is slumped asleep over his desk, then stirs, lifts his head, and looks up to see the Popcorn Ready screen glowing on his computer - the movie of his dreams can now be made.',
 };
 
-const TEMPLATES: { icon: string; label: string; text: string; prompt: string }[] = [
+const TEMPLATES = [
   {
-    icon: "🍂",
+    icon: "01",
     label: "Leaf blower cleanup",
     text: "Generate a video of a homeowner clearing a leaf-covered driveway into a clean outdoor space.",
     prompt:
       "A homeowner uses a leaf blower to turn a messy driveway covered in leaves into a clean, satisfying outdoor space. Start with the frustrating mess, show the tool in action, and end with a crisp before-and-after reveal.",
   },
   {
-    icon: "🥐",
+    icon: "02",
     label: "Bakery morning rush",
     text: "Generate a video of a small bakery preparing for the morning rush.",
     prompt:
       "A small bakery prepares for the morning rush. Show the quiet early morning, the baking process, customers arriving, and end with a warm moment of someone enjoying a fresh pastry.",
   },
   {
-    icon: "🎧",
+    icon: "03",
     label: "Headphones focus",
     text: "Generate a video of a student finding focus in a chaotic coffee shop with noise-canceling headphones.",
     prompt:
       "A student uses noise-canceling headphones to get focused in a chaotic coffee shop. Start with distraction, show the moment the headphones go on, and end with the student finishing their work confidently.",
   },
   {
-    icon: "🎾",
+    icon: "04",
     label: "Park fetch launcher",
     text: "Generate a video of a dog owner making fetch easier with an automatic ball launcher.",
     prompt:
       "A dog owner uses an automatic ball launcher at the park. Begin with an energetic dog begging to play, show the launcher making fetch easier, and end with both the dog and owner happy and tired.",
   },
   {
-    icon: "🌿",
+    icon: "05",
     label: "Backyard trimmer",
     text: "Generate a video of an overgrown backyard becoming guest-ready with a cordless trimmer.",
     prompt:
       "A gardener uses a cordless trimmer to clean up an overgrown backyard. Start with tangled weeds and messy edges, show quick progress, and end with a polished backyard ready for guests.",
-  },
-  {
-    icon: "🥗",
-    label: "Lunch prep system",
-    text: "Generate a video of a busy parent turning a chaotic kitchen into organized weekly lunches.",
-    prompt:
-      "A busy parent uses a meal-prep container system to organize lunches for the week. Start with a chaotic kitchen, show the simple system coming together, and end with a calm Monday morning.",
-  },
-  {
-    icon: "🚲",
-    label: "Cyclist flat fix",
-    text: "Generate a video of a cyclist fixing a roadside flat with a compact tire repair kit.",
-    prompt:
-      "A cyclist discovers a compact tire repair kit during a roadside flat. Start with the problem, show the quick fix, and end with the cyclist back on the road at sunset.",
-  },
-  {
-    icon: "💡",
-    label: "Desk setup upgrade",
-    text: "Generate a video of a remote worker transforming a cluttered desk into a calm productive setup.",
-    prompt:
-      "A remote worker upgrades their desk setup with a monitor light, laptop stand, and clean cable organization. Start with a cluttered, uncomfortable workspace, show the transformation, and end with a calm productive setup.",
-  },
-  {
-    icon: "🎬",
-    label: "Backyard movie night",
-    text: "Generate a video of a family setting up a backyard movie night under string lights.",
-    prompt:
-      "A family uses a portable projector for a backyard movie night. Start with an ordinary backyard, show the setup coming together, and end with everyone watching the movie under string lights.",
-  },
-  {
-    icon: "🏋️",
-    label: "Smart jump rope habit",
-    text: "Generate a video of a fitness beginner building confidence with a smart jump rope workout.",
-    prompt:
-      "A fitness beginner uses a smart jump rope to build a simple daily workout habit. Start with hesitation, show small progress and encouraging feedback, and end with the person feeling proud after completing the session.",
   },
 ];
 
@@ -95,24 +58,8 @@ const GENERATION_STAGES = [
     detail: "Turning the prompt into cinematic beats.",
   },
   {
-    label: "Generating clips",
-    detail: "Creating visual shots for each beat.",
-  },
-  {
-    label: "Scoring",
-    detail: "Creating an instrumental soundtrack when audio is available.",
-  },
-  {
-    label: "Assembling",
-    detail: "Building the timeline from generated media.",
-  },
-  {
-    label: "Reviewing",
-    detail: "Checking the cut and applying polish.",
-  },
-  {
     label: "Opening studio",
-    detail: "Loading the editable timeline.",
+    detail: "Loading the editable workflow.",
   },
 ];
 
@@ -130,38 +77,13 @@ export function PromptComposer() {
   const navigate = useNavigate();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [templateIndex, setTemplateIndex] = useState(0);
   const activeTemplate = TEMPLATES[templateIndex];
   const [activeStage, setActiveStage] = useState(0);
   const [reviewGates, setReviewGates] = useState<GateableGenerationStageType[]>([]);
-  // Generation length in seconds — the first real run "config" surfaced in the
-  // settings panel that extends the prompt box.
   const [lengthSec, setLengthSec] = useState(30);
-  // Settings panel that extends the prompt box (opened from the cog on the
-  // Create button); collapsed by default. More config moves in over time.
   const [configOpen, setConfigOpen] = useState(false);
-  // Scaffold only: captures a chosen reference image filename for display. It is
-  // not yet uploaded or forwarded to the one-shot route — wiring it into the
-  // request body + per-beat referencePaths is a follow-up.
   const [referenceImageName, setReferenceImageName] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!submitting) {
-      setActiveStage(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      const elapsedSec = (Date.now() - startedAt) / 1000;
-      if (elapsedSec > 120) setActiveStage(4);
-      else if (elapsedSec > 75) setActiveStage(3);
-      else if (elapsedSec > 35) setActiveStage(2);
-      else if (elapsedSec > 8) setActiveStage(1);
-      else setActiveStage(0);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [submitting]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -169,6 +91,22 @@ export function PromptComposer() {
     }, 5000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!submitting) return;
+    const timer = window.setTimeout(() => {
+      setActiveStage(1);
+      const params = new URLSearchParams({
+        goal: value.trim(),
+        length: String(lengthSec),
+      });
+      if (reviewGates.length > 0) {
+        params.set("reviewGates", reviewGates.join(","));
+      }
+      navigate(`/studio?${params.toString()}`);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [lengthSec, navigate, reviewGates, submitting, value]);
 
   function toggleReviewGate(stage: GateableGenerationStageType) {
     setReviewGates((current) =>
@@ -186,22 +124,12 @@ export function PromptComposer() {
     );
   }
 
-  async function start(promptOverride?: string) {
+  function start(promptOverride?: string) {
     const goal = (promptOverride ?? value).trim();
     if (!goal || submitting) return;
     setValue(goal);
     setSubmitting(true);
-    setError(null);
-    try {
-      void reviewGates;
-      setActiveStage(5);
-      navigate(
-        `/studio?goal=${encodeURIComponent(goal)}&length=${lengthSec}`
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setSubmitting(false);
-    }
+    setActiveStage(0);
   }
 
   return (
@@ -231,11 +159,11 @@ export function PromptComposer() {
         id="goal"
         className="lp-prompt-input"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(event) => setValue(event.target.value)}
         placeholder="e.g. A social ad that hooks fast, shows the problem, demos the product, and ends with a strong CTA."
         rows={3}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start();
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) start();
         }}
       />
       <div className="lp-templates">
@@ -270,7 +198,7 @@ export function PromptComposer() {
             disabled={!value.trim() || submitting}
           >
             {submitting
-              ? "Starting your run..."
+              ? "Opening studio..."
               : `Create my ${lengthSec}-second video`}
           </button>
           <button
@@ -311,7 +239,7 @@ export function PromptComposer() {
               <select
                 className="lp-config-select"
                 value={lengthSec}
-                onChange={(e) => setLengthSec(Number(e.target.value))}
+                onChange={(event) => setLengthSec(Number(event.target.value))}
                 disabled={submitting}
               >
                 <option value={15}>15 seconds</option>
@@ -322,8 +250,8 @@ export function PromptComposer() {
             <section className="lp-config-section">
               <h3 className="lp-config-heading">Default review checkpoints</h3>
               <p className="lp-config-hint">
-                Pre-select where the one-shot run should pause for your review.
-                Leave all off to generate end to end.
+                Pre-select where the run should pause for your review. Leave all
+                off to generate end to end.
               </p>
               <div className="lp-review-options">
                 {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
@@ -355,21 +283,19 @@ export function PromptComposer() {
                   : "Review every step"}
               </button>
             </section>
-
             <section className="lp-config-section">
               <h3 className="lp-config-heading">Reference image</h3>
               <p className="lp-config-hint">
-                Optional. Upload an image (for example a Popcorn Ready
-                screenshot) to anchor a shot. Not yet wired into generation —
-                this is a placeholder for the upcoming image-to-video input.
+                Optional. Upload an image to anchor a shot. The studio will wire
+                this into generation in the editor port.
               </p>
               <label className="lp-config-upload">
                 <input
                   type="file"
                   accept="image/*"
                   hidden
-                  onChange={(e) =>
-                    setReferenceImageName(e.target.files?.[0]?.name ?? null)
+                  onChange={(event) =>
+                    setReferenceImageName(event.target.files?.[0]?.name ?? null)
                   }
                   disabled={submitting}
                 />
@@ -387,7 +313,7 @@ export function PromptComposer() {
       {submitting && (
         <div className="lp-generation-progress" aria-live="polite">
           <div className="lp-generation-progress-head">
-            <span>One-shot generation</span>
+            <span>Generation setup</span>
             <strong>{GENERATION_STAGES[activeStage].label}</strong>
           </div>
           <ol className="lp-generation-steps">
@@ -410,16 +336,10 @@ export function PromptComposer() {
             })}
           </ol>
           <p className="lp-generation-note">
-            This request runs the one-shot pipeline in a single server call, so
-            stage timing is estimated until backend progress is wired into the
-            one-shot route.
+            This Vite route hands the brief to the studio route. Backend run
+            creation lands with the editor port.
           </p>
         </div>
-      )}
-      {error && (
-        <p className="lp-prompt-error" role="alert">
-          {error}
-        </p>
       )}
     </div>
   );

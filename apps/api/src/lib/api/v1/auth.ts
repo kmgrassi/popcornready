@@ -69,7 +69,7 @@ async function supabaseAuthContext(
   email: string | null
 ): Promise<AuthContext> {
   const workspaceId = workspaceIdForUser(publicUserId);
-  await ensureWorkspace(workspaceId, email ?? "Supabase workspace");
+  await ensureWorkspace(workspaceId, email ?? "Supabase workspace", publicUserId);
   return {
     mode: "supabase",
     actor: { id: publicUserId, type: "user", email: email ?? null },
