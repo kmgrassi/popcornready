@@ -60,14 +60,16 @@ each merges, fan out its dependents (A1–A7 to several agents; B1–B6 to sever
 
 ## Coordination notes (avoid merge conflicts between parallel PRs)
 
-- **`apps/api/src/routes/v1/index.ts`** is the shared mount point. A0 must make
-  mounting a **one-line-per-group** operation (import a router + `v1.use(router)`)
-  so parallel A-PRs only add a single adjacent line. Resolve trivially.
+- **`apps/api/src/routes/v1/mount.ts`** owns the `/api/v1` Express mount and the
+  public-before-auth / protected-after-auth boundary. Route groups should live in
+  their own files and be registered through the smallest relevant mount file
+  (for example `public-routes.ts` or `protected-routes.ts`) instead of a broad
+  `index.ts` aggregator.
 - **`apps/web/src/App.tsx`** route table is the web equivalent — B0 sets it up so
   each page PR adds one `<Route>` line.
 - Each route group lives in its **own file**; each page/component in its own
-  file. No two parallel PRs should edit the same file besides the two mount
-  points above.
+  file. Avoid adding new `index.ts` aggregation points for parallel work; prefer
+  explicit module names that describe the boundary they own.
 - `apps/api/src/core/{errors,ids}.ts` were scaffold stubs. **A0 owns
   reconciling** them with the real `apps/api/src/lib/api/v1/{errors,ids}.ts`
   (consolidate to one). Later PRs must not re-fork them.
@@ -106,8 +108,10 @@ files in `src/app/api/v1/**` call these handlers. `resolveAuth(req)` in
 4. **Consolidate** `apps/api/src/core/errors.ts` + `core/ids.ts` (scaffold
    stubs) with `lib/api/v1/errors.ts` + `lib/v1/ids.ts` — one canonical
    `ApiError` (with `.envelope()`) and id helpers; update imports.
-5. Establish the mounting pattern in `routes/v1/index.ts`: each group exports a
-   `Router` (or `register(v1)`), mounted with one line. Document it in a comment.
+5. Establish the mounting pattern in `routes/v1/mount.ts` plus focused
+   registration files: each group exports a `Router` (or `register(v1)`) and is
+   mounted in the smallest file that owns its public/protected boundary.
+   Document why broad `index.ts` aggregators are avoided.
 6. **Port `GET /api/v1/me` and `projects` (`GET`/`POST /projects`,
    `GET /projects/:projectId`)** as the reference implementation, using the new
    schemas/store from `@/lib/api/v1/*`. Keep paths/payloads identical.
@@ -128,7 +132,8 @@ files in `src/app/api/v1/**` call these handlers. `resolveAuth(req)` in
 **Scope:** port to an `assets` Express router, preserving the **exact existing
 verbs**: `GET/POST /assets`, `GET /assets/:assetId`, `POST /assets/inventory`
 (inventory is POST, not GET), `PATCH /assets/:assetId/context` (context is PATCH)
-— using `@/lib/api/v1/assets.ts`. Mount in `routes/v1/index.ts`.
+— using `@/lib/api/v1/assets.ts`. Mount in the focused v1 protected route
+registration file.
 **Acceptance:** typecheck green; curl parity for each (same verbs).
 
 ## A2 — Brief routes

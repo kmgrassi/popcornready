@@ -46,6 +46,16 @@ Identity rules: [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-r
 
 - Run the dev server with `NODE_ENV=development` (a stray `NODE_ENV=test` makes
   Next skip `.env.local` and drop API keys).
+- Directory shape should reduce shared edit hotspots while keeping code
+  modular. Prefer cohesive feature/route files plus small explicit mount files
+  over broad `index.ts` aggregators. When adding Express route groups, add or
+  update the smallest registration file that owns that auth/feature boundary
+  (for example `public-routes.ts` or `protected-routes.ts`) instead of funneling
+  unrelated work through a catch-all index file.
+- Avoid creating new `index.ts` files as cross-module aggregation points unless
+  there is a strong local convention and no lower-conflict alternative. Names
+  like `mount.ts`, `routes.ts`, `client.ts`, or feature-specific files are easier
+  to review and less likely to collide across parallel agent PRs.
 - Character/keyframe images of minors must use Gemini (OpenAI image-edit rejects
   editing photorealistic minors).
 - Supabase/RLS: `public.users.id` (app/domain id) is **not** `auth.uid()` — they
