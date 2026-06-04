@@ -18,6 +18,16 @@ import {
   V1Asset,
 } from "../store";
 
+// store.ts now persists to Supabase Postgres instead of the .local/ JSON file.
+// Exercising it needs a live PostgREST gateway (supabase-js can't talk straight
+// to Postgres), so these JSON-era unit tests are skipped unless Supabase env is
+// configured. The Postgres mapping/pagination/idempotency round-trips are proven
+// by the dockerized pg harness in this PR (see the PR description).
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const dbTest: typeof test = SUPABASE_CONFIGURED ? test : (test.skip as typeof test);
+
 let tmpDir: string;
 
 beforeEach(async () => {
@@ -51,7 +61,7 @@ function asset(id: string, projectId: string, workspaceId: string): V1Asset {
   };
 }
 
-test("createProject without brief persists and is readable", async () => {
+dbTest("createProject without brief persists and is readable", async () => {
   await ensureWorkspace("ws_a", "A");
   const { project, briefVersion } = await createProject({
     workspaceId: "ws_a",
@@ -66,7 +76,7 @@ test("createProject without brief persists and is readable", async () => {
   assert.equal(read.name, "Teaser");
 });
 
-test("createProject with brief creates an initial brief version", async () => {
+dbTest("createProject with brief creates an initial brief version", async () => {
   const { project, briefVersion } = await createProject({
     workspaceId: "ws_a",
     name: "Teaser",
@@ -77,7 +87,7 @@ test("createProject with brief creates an initial brief version", async () => {
   assert.equal(project.brief?.goal, "Make a teaser");
 });
 
-test("getProject is scoped to its workspace", async () => {
+dbTest("getProject is scoped to its workspace", async () => {
   const { project } = await createProject({ workspaceId: "ws_a", name: "A" });
   await assert.rejects(
     () => getProject("ws_b", project.id),
@@ -85,7 +95,7 @@ test("getProject is scoped to its workspace", async () => {
   );
 });
 
-test("setBrief and createBriefVersion update the project", async () => {
+dbTest("setBrief and createBriefVersion update the project", async () => {
   const { project } = await createProject({ workspaceId: "ws_a", name: "A" });
   await setBrief("ws_a", project.id, brief("v0"));
   const afterSet = await getProject("ws_a", project.id);
@@ -100,7 +110,7 @@ test("setBrief and createBriefVersion update the project", async () => {
   assert.equal(afterVersion.currentBriefVersionId, briefVersion.id);
 });
 
-test("listProjects only returns the requested workspace, newest first", async () => {
+dbTest("listProjects only returns the requested workspace, newest first", async () => {
   const first = await createProject({ workspaceId: "ws_a", name: "first" });
   // Ensure distinct createdAt ordering.
   await new Promise((r) => setTimeout(r, 5));
@@ -114,7 +124,7 @@ test("listProjects only returns the requested workspace, newest first", async ()
   );
 });
 
-test("listProjects paginates with a cursor", async () => {
+dbTest("listProjects paginates with a cursor", async () => {
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
     const { project } = await createProject({ workspaceId: "ws_a", name: `p${i}` });
@@ -133,7 +143,7 @@ test("listProjects paginates with a cursor", async () => {
   assert.deepEqual(seen, [...ids].sort());
 });
 
-test("assets are listed only within their project", async () => {
+dbTest("assets are listed only within their project", async () => {
   await addAsset(asset("asset_1", "proj_a", "ws_a"));
   await addAsset(asset("asset_2", "proj_a", "ws_a"));
   await addAsset(asset("asset_3", "proj_b", "ws_a"));
@@ -149,7 +159,7 @@ test("assets are listed only within their project", async () => {
   );
 });
 
-test("idempotency records persist and are found by scope+key", async () => {
+dbTest("idempotency records persist and are found by scope+key", async () => {
   const found0 = await findIdempotencyRecord("scope", "key1");
   assert.equal(found0, undefined);
 

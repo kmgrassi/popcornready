@@ -169,7 +169,9 @@ export function StageItemCard({
   onRetry,
 }: StageItemCardProps) {
   const canRetry =
-    item.status === "failed" && item.retryable === true && !!onRetry;
+    item.status === "failed" &&
+    (item.retryable ?? item.error?.retryable) === true &&
+    !!onRetry;
 
   return (
     <article
