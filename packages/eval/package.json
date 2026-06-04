@@ -1,0 +1,22 @@
+{
+  "name": "@popcorn/eval",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "eval:suite": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@popcorn/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.3",
+    "typescript": "^5.6.3"
+  }
+}
