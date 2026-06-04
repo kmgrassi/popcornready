@@ -342,6 +342,25 @@ test("missing briefVersionId is rejected", async () => {
   });
 });
 
+test("generation rejects projects outside the actor workspace", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    await assert.rejects(
+      () =>
+        createGenerationJob({
+          store,
+          actor: { ...resolveActor(), workspaceId: "other_workspace" },
+          projectId: project.id,
+          body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+        }),
+      (err) => err instanceof ApiError && err.code === "not_found"
+    );
+  });
+});
+
 test("empty assets without a composition is rejected", async () => {
   await withStore(async (store) => {
     const project = await seedProject(store);

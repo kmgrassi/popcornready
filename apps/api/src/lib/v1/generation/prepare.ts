@@ -44,11 +44,12 @@ export function assetToClip(asset: V1Asset): Clip {
 
 export async function prepareGeneration(
   store: V1Store,
+  workspaceId: string,
   projectId: string,
   body: GenerationRequest
 ): Promise<GenerationJobInput> {
   const project = await store.getProject(projectId);
-  if (!project || project.status === "deleted") {
+  if (!project || project.workspaceId !== workspaceId || project.status === "deleted") {
     throw new ApiError("not_found", `Project not found: ${projectId}`);
   }
 

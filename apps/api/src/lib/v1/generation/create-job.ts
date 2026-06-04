@@ -104,7 +104,7 @@ export async function createGenerationJob(args: {
       }
       // Record exists but the job is gone — fall through and recreate it.
     }
-    const input = await prepareGeneration(store, projectId, body);
+    const input = await prepareGeneration(store, actor.workspaceId, projectId, body);
     const job = buildJob(actor, projectId, input, { idempotencyKey, requestId });
     await store.saveJob(job);
     await store.saveIdempotency(scope, {
@@ -116,7 +116,7 @@ export async function createGenerationJob(args: {
     return job;
   }
 
-  const input = await prepareGeneration(store, projectId, body);
+  const input = await prepareGeneration(store, actor.workspaceId, projectId, body);
   const job = buildJob(actor, projectId, input, { requestId });
   await store.saveJob(job);
   logger.info("job.created", { jobId: job.id, idempotent: false });

@@ -133,6 +133,8 @@ interface AssetRow {
   status: V1Asset["status"];
   filename: string;
   url: string | null;
+  remote_url: string | null;
+  storage_key: string | null;
   duration_sec: number | null;
   description: string | null;
   context: { userContext?: V1Asset["userContext"]; agentContext?: V1Asset["agentContext"] } | null;
@@ -140,10 +142,53 @@ interface AssetRow {
     assetKnowledge?: V1Asset["assetKnowledge"];
     clipUnderstanding?: V1Asset["clipUnderstanding"];
   } | null;
-  source: V1Asset["source"];
+  source: unknown;
   generated_asset_job_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function rowSourceToV1Source(source: unknown): V1Asset["source"] {
+  if (
+    source === "upload" ||
+    source === "remote_url" ||
+    source === "local_path" ||
+    source === "generated"
+  ) {
+    return source;
+  }
+  if (!isRecord(source)) return "upload";
+  switch (source.type) {
+    case "remote_url":
+      return "remote_url";
+    case "local_path":
+      return "local_path";
+    case "generated":
+      return "generated";
+    case "multipart_upload":
+      return "upload";
+    default:
+      return "upload";
+  }
+}
+
+export function renderableAssetUrlFromRow(
+  row: Pick<AssetRow, "url" | "remote_url" | "storage_key" | "source">
+): string {
+  if (row.url) return row.url;
+  if (
+    isRecord(row.source) &&
+    row.source.type === "remote_url" &&
+    typeof row.source.url === "string"
+  ) {
+    return row.source.url;
+  }
+  if (row.remote_url) return row.remote_url;
+  return row.storage_key ?? "";
 }
 
 function rowToAsset(r: AssetRow): V1Asset {
@@ -155,9 +200,9 @@ function rowToAsset(r: AssetRow): V1Asset {
     kind: r.kind,
     status: r.status,
     filename: r.filename,
-    url: r.url ?? "",
+    url: renderableAssetUrlFromRow(r),
     durationSec: r.duration_sec ?? 0,
-    source: r.source,
+    source: rowSourceToV1Source(r.source),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -189,6 +234,8 @@ function assetToRow(a: V1Asset): AssetRow {
     status: a.status,
     filename: a.filename,
     url: a.url ?? null,
+    remote_url: a.source === "remote_url" ? a.url : null,
+    storage_key: null,
     duration_sec: a.durationSec ?? null,
     description: a.description ?? null,
     context: Object.keys(context).length ? context : null,
