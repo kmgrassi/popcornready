@@ -1,0 +1,27 @@
+"use client";
+
+import Link from "next/link";
+import { useAuth } from "./AuthProvider";
+
+export function AuthNavButton() {
+  const { status, user, signOut } = useAuth();
+
+  if (status === "disabled") {
+    return <Link href="/login">Sign in</Link>;
+  }
+
+  if (status === "authenticated") {
+    return (
+      <button
+        type="button"
+        className="lp-nav-button"
+        title={user?.email ?? "Signed in"}
+        onClick={() => void signOut()}
+      >
+        Sign out
+      </button>
+    );
+  }
+
+  return <Link href="/login">Sign in</Link>;
+}

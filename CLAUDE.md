@@ -13,6 +13,26 @@ assets via a dependency/provenance graph. Align new generation work to it; flag
 deviations explicitly. Do **not** entrench the old forward-only "edit the
 timeline with patches" model.
 
+## Direction (target architecture)
+
+The app is **moving off the Next.js monolith** into a monorepo split. Target stack:
+
+- **Frontend:** Vite + **React Router v7 (data mode)** SPA → Netlify — the
+  authenticated dashboard + all client logic. (Vite replaces CRA; do not add CRA.
+  Avoid building new SSR/RSC-coupled logic — Next's server model is what we're
+  leaving.)
+- **Backend:** **Express API** → Railway — business logic, the generation/job
+  stack, Supabase access, and the harper-server-style auth middleware.
+- **Data/auth:** **Supabase** (Postgres + Storage + Auth). App identity is
+  `public.users.id`; `auth.uid()` maps to it only inside RLS via
+  `current_app_user_id()`. The server talks to Supabase as the **user-scoped,
+  RLS-enforced** client; `service_role` only for trusted ops.
+
+The Next monolith still runs today on the `.local/` JSON stores; **new
+DB/Storage/auth work targets the split, not the monolith.** Full plan + PR
+breakdown: [docs/scopes/supabase-cutover-prs.md](docs/scopes/supabase-cutover-prs.md).
+Identity rules: [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-rls.md).
+
 ## Where things live
 
 - Live generation: `src/app/api/oneshot/` (sync) + `src/lib/runs/execute.ts`.
@@ -28,3 +48,8 @@ timeline with patches" model.
   Next skip `.env.local` and drop API keys).
 - Character/keyframe images of minors must use Gemini (OpenAI image-edit rejects
   editing photorealistic minors).
+- Supabase/RLS: `public.users.id` (app/domain id) is **not** `auth.uid()` — they
+  are linked by `public.users.auth_id`. RLS policies on app tables must compare
+  to `public.current_app_user_id()`, not `auth.uid()`. Before writing any
+  migration or policy that touches users, read
+  [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-rls.md).

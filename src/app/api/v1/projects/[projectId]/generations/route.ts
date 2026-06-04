@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { ApiError } from "@/lib/v1/errors";
-import { resolveActor } from "@/lib/v1/actor";
+import { resolveActorFromRequest } from "@/lib/v1/actor";
 import { createGenerationJob, runGenerationJob } from "@/lib/v1/generation";
 import { errorResponse, jsonResponse } from "@/lib/v1/http";
 import { requestId as newRequestId } from "@/lib/v1/ids";
@@ -21,18 +21,18 @@ export async function POST(
 ) {
   const requestId = newRequestId();
   const start = Date.now();
-  const actor = resolveActor();
-  const logger = createLogger({
-    requestId,
-    workspaceId: actor.workspaceId,
-    projectId: params.projectId,
-    jobType: "generation",
-  });
-  logger.info("http.request.started", {
-    method: "POST",
-    route: "/api/v1/projects/:projectId/generations",
-  });
   try {
+    const actor = await resolveActorFromRequest(req);
+    const logger = createLogger({
+      requestId,
+      workspaceId: actor.workspaceId,
+      projectId: params.projectId,
+      jobType: "generation",
+    });
+    logger.info("http.request.started", {
+      method: "POST",
+      route: "/api/v1/projects/:projectId/generations",
+    });
     const store = getStore();
     const idempotencyKey = req.headers.get("Idempotency-Key") || undefined;
 
@@ -73,10 +73,6 @@ export async function POST(
     return jsonResponse({ job }, requestId, 202);
   } catch (err) {
     const message = redactMessage(err instanceof Error ? err.message : String(err));
-    logger.warn("http.request.failed", {
-      durationMs: Date.now() - start,
-      error: { message },
-    });
     if (err instanceof ApiError) {
       return errorResponse(new ApiError(err.code, message, err.details), requestId);
     }

@@ -4,6 +4,7 @@ import path from "path";
 import { LogoMark } from "@/components/LogoMark";
 import { PromptComposer } from "@/components/PromptComposer";
 import ThemeToggle from "@/components/ThemeToggle";
+import { AuthNavButton } from "@/components/auth/AuthNavButton";
 
 const GITHUB_URL = "https://github.com/kmgrassi/popcornready";
 const EXPORT_DIR = path.join(process.cwd(), "public", "exports");
@@ -286,6 +287,7 @@ export default async function LandingPage() {
               GitHub
             </a>
             <Link href="/admin">Admin</Link>
+            <AuthNavButton />
             <Link className="lp-nav-cta" href="/studio">
               Open studio
             </Link>

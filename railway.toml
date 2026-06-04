@@ -1,11 +1,15 @@
-$schema = "https://railway.com/railway.schema.json"
+"$schema" = "https://railway.com/railway.schema.json"
+
+# Railway deploys the Express API (apps/api) from the monorepo root.
+# Set the Railway service Root Directory to the repo root so pnpm workspaces
+# resolve; the commands below filter to the @popcorn/api workspace.
 
 [build]
 builder = "RAILPACK"
-buildCommand = "npm run build"
+buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @popcorn/api... build"
 
 [deploy]
-startCommand = "npm run start"
+startCommand = "pnpm --filter @popcorn/api start"
 healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

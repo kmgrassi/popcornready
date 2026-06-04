@@ -1,8 +1,18 @@
 node_modules
 .next
+dist
+.turbo
+# pnpm is the package manager; npm/yarn lockfiles must not be tracked
+package-lock.json
+yarn.lock
+# Netlify CLI local link/state
+.netlify
+.env
 .env.local
+.env*.local
 /data
 /.local
+/apps/api/.local
 /public/uploads
 /public/exports
 /public/generated
