@@ -1,6 +1,7 @@
 import { useLayoutEffect, type ReactNode } from "react";
 import { Link, Outlet } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthProvider";
+import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
 import ThemeToggle from "./ThemeToggle";
 
@@ -32,6 +33,7 @@ export function AppLayout() {
           <nav className="web-shell-nav" aria-label="Primary">
             <Link to="/">Home</Link>
             <Link to="/studio">Studio</Link>
+            <AuthNavButton />
           </nav>
           <ThemeToggle />
         </header>

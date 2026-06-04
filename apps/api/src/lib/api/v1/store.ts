@@ -1,13 +1,29 @@
 // Persistence for the versioned agent API.
 //
 // This is a separate store from the single-project browser store (src/lib/store.ts).
-// The agent API is multi-project and multi-workspace, and the v1 contract persists
-// agent data under `.local/`. Swap the JSON file for Postgres later without changing
-// the function signatures below.
+// The agent API is multi-project and multi-workspace. This module is the ONLY
+// place that talks to the database: routes/handlers call the exported functions
+// below and never see SQL or supabase-js, so the storage backend can change here
+// without touching anything upstream.
+//
+// Backend: Supabase Postgres (schema in supabase/migrations/20260603000000_init_v1_model.sql
+// plus the public.users / workspace_members migrations). Reads/writes go through a
+// service-role client (server-trusted); RLS still guards the tables against direct
+// PostgREST access, and we keep explicit workspaceId/projectId tenancy filters on
+// every query so a service-role bug can't silently cross tenants.
+//
+// Column ↔ object mapping notes:
+//   * Tables use snake_case columns; objects use camelCase + a `schemaVersion` tag.
+//   * Timestamps are normalized to canonical ISO (`new Date(x).toISOString()`) so
+//     newest-first cursor pagination orders identically to the old JSON store.
+//   * `assets` has dedicated columns for only a subset of V1Asset's fields; the
+//     remaining context-family fields are packed into the `context` jsonb column
+//     as a structured envelope (see assetContextEnvelope / unpackAssetContext).
+//     `assets` stores METADATA only — the bytes live in storage (separate PR).
 
-import { promises as fs } from "fs";
 import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "./errors";
 import { newId } from "./ids";
 import { GeneratedAssetProvenance } from "./provenance";
@@ -136,18 +152,14 @@ export interface IdempotencyRecord {
   createdAt: string;
 }
 
-interface V1Db {
-  schemaVersion: string;
-  workspaces: V1Workspace[];
-  projects: V1Project[];
-  briefVersions: V1BriefVersion[];
-  assets: V1Asset[];
-  compositions: ContractCompositionPlan[];
-  jobs: Job[];
-  idempotency: IdempotencyRecord[];
-}
-
-const DB_SCHEMA_VERSION = "agentDb.v1";
+// ---------------------------------------------------------------------------
+// Local media paths (asset BYTES, not DB rows)
+// ---------------------------------------------------------------------------
+// These compute on-disk paths for uploaded/generated media bytes. They are
+// orthogonal to the Postgres metadata store below and are still consumed by the
+// asset byte/storage code (assets.ts / generated-assets.ts / jobs.ts), which a
+// separate storage PR owns. Kept here so this module's exported surface stays a
+// superset and nothing upstream needs to change.
 const localDirContext = new AsyncLocalStorage<string>();
 
 // Resolved per call so tests can point POPCORN_READY_LOCAL_DIR at a temp directory.
@@ -159,10 +171,6 @@ export function localDir(): string {
 
 export function withLocalDir<T>(dir: string, fn: () => T): T {
   return localDirContext.run(dir, fn);
-}
-
-function dbFile(): string {
-  return path.join(localDir(), "agent-store.json");
 }
 
 export function mediaUploadDir(workspaceId: string, projectId: string): string {
@@ -181,68 +189,258 @@ export function mediaAnalysisDir(
   return path.join(localDir(), "media", "analysis", workspaceId, projectId, assetId);
 }
 
-function emptyDb(): V1Db {
-  return {
-    schemaVersion: DB_SCHEMA_VERSION,
-    workspaces: [],
-    projects: [],
-    briefVersions: [],
-    assets: [],
-    compositions: [],
-    jobs: [],
-    idempotency: [],
-  };
-}
+// ---------------------------------------------------------------------------
+// Service-role Supabase client
+// ---------------------------------------------------------------------------
+// TODO: replace with the shared clients.ts from the auth-middleware PR. That PR
+// owns apps/api/src/lib/supabase/clients.ts; until it lands, this module keeps a
+// minimal local service-role helper so it has no cross-PR import dependency. The
+// service-role key bypasses RLS, which is why every query below still filters on
+// workspaceId/projectId explicitly (tenancy is enforced in app code, not relied
+// on from RLS).
+let serviceClient: SupabaseClient | null = null;
 
-async function readDb(): Promise<V1Db> {
-  try {
-    const raw = await fs.readFile(dbFile(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<V1Db>;
-    return { ...emptyDb(), ...parsed } as V1Db;
-  } catch {
-    return emptyDb();
+export class StoreConfigError extends Error {
+  constructor(missing: string[]) {
+    super(
+      `Supabase store is not configured: ${missing.join(", ")} ${
+        missing.length === 1 ? "is" : "are"
+      } required.`
+    );
+    this.name = "StoreConfigError";
   }
 }
 
-async function writeDb(db: V1Db): Promise<void> {
-  await fs.mkdir(localDir(), { recursive: true });
-  await fs.writeFile(dbFile(), JSON.stringify(db, null, 2), "utf8");
-}
+function getServiceSupabase(): SupabaseClient {
+  if (serviceClient) return serviceClient;
 
-// Serialize read-modify-write cycles so concurrent agent retries (idempotency,
-// asset registration) cannot interleave and corrupt the JSON file.
-let writeChain: Promise<unknown> = Promise.resolve();
+  const url = (process.env.SUPABASE_URL ?? "").trim().replace(/\/$/, "");
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
 
-function mutate<T>(fn: (db: V1Db) => T | Promise<T>): Promise<T> {
-  const run = writeChain.then(async () => {
-    const db = await readDb();
-    const result = await fn(db);
-    await writeDb(db);
-    return result;
+  const missing: string[] = [];
+  if (!url) missing.push("SUPABASE_URL");
+  if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (missing.length > 0) throw new StoreConfigError(missing);
+
+  serviceClient = createClient(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
   });
-  // Keep the chain alive even if this mutation rejects.
-  writeChain = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
+  return serviceClient;
 }
 
+// ---------------------------------------------------------------------------
+// Helpers: timestamps, errors, mapping
+// ---------------------------------------------------------------------------
+
+// Normalize a DB timestamptz (or any date-ish value) to canonical ISO so cursor
+// pagination ordering is stable across the JSON-string and Postgres backends.
+function iso(value: string | null | undefined): string {
+  if (!value) return new Date(0).toISOString();
+  return new Date(value).toISOString();
+}
+
+// supabase-js returns `error.code === "PGRST116"` (or null data) when a
+// `.single()` lookup matches no rows. Callers translate that into notFound.
+function isNoRows(error: { code?: string } | null): boolean {
+  return Boolean(error && error.code === "PGRST116");
+}
+
+function throwOnError(error: { message?: string } | null, context: string): void {
+  if (error) {
+    throw new Error(`store: ${context}: ${error.message ?? String(error)}`);
+  }
+}
+
+// --- workspaces ------------------------------------------------------------
+interface WorkspaceRow {
+  id: string;
+  schema_version: string;
+  owner_id: string | null;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapWorkspace(row: WorkspaceRow): V1Workspace {
+  return {
+    id: row.id,
+    schemaVersion: SCHEMA_VERSIONS.workspace,
+    name: row.name,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+// --- projects --------------------------------------------------------------
+interface ProjectRow {
+  id: string;
+  schema_version: string;
+  workspace_id: string;
+  name: string;
+  status: "active" | "deleted";
+  brief: VideoBrief | null;
+  current_brief_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapProject(row: ProjectRow): V1Project {
+  return {
+    id: row.id,
+    schemaVersion: SCHEMA_VERSIONS.project,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    status: row.status,
+    brief: row.brief ?? null,
+    currentBriefVersionId: row.current_brief_version_id ?? null,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+// --- brief versions --------------------------------------------------------
+interface BriefVersionRow {
+  id: string;
+  schema_version: string;
+  project_id: string;
+  brief: VideoBrief;
+  created_at: string;
+}
+
+function mapBriefVersion(row: BriefVersionRow): V1BriefVersion {
+  return {
+    id: row.id,
+    schemaVersion: SCHEMA_VERSIONS.briefVersion,
+    projectId: row.project_id,
+    brief: row.brief,
+    createdAt: iso(row.created_at),
+  };
+}
+
+// --- assets ----------------------------------------------------------------
+// The assets table has dedicated columns for a subset of V1Asset. The
+// context-family fields (context/userContext/agentContext/assetKnowledge/
+// clipUnderstanding) share the single `context` jsonb column via this envelope
+// so nothing is lost on round-trip.
+interface AssetContextEnvelope {
+  context?: AssetContext;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+  assetKnowledge?: AssetKnowledge;
+  clipUnderstanding?: V1Asset["clipUnderstanding"];
+  analysis?: V1AssetAnalysis;
+}
+
+interface AssetRow {
+  id: string;
+  schema_version: string;
+  workspace_id: string;
+  project_id: string;
+  kind: AssetKind;
+  status: "ready" | "pending";
+  filename: string;
+  remote_url: string | null;
+  storage_key: string | null;
+  source: AgentAssetSource;
+  duration_sec: number | null;
+  context: AssetContextEnvelope | null;
+  semantic_analysis: AssetSemanticAnalysis | null;
+  provenance: GeneratedAssetProvenance | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function assetContextEnvelope(asset: V1Asset): AssetContextEnvelope | null {
+  const envelope: AssetContextEnvelope = {};
+  if (asset.context !== undefined) envelope.context = asset.context;
+  if (asset.userContext !== undefined) envelope.userContext = asset.userContext;
+  if (asset.agentContext !== undefined) envelope.agentContext = asset.agentContext;
+  if (asset.assetKnowledge !== undefined) envelope.assetKnowledge = asset.assetKnowledge;
+  if (asset.clipUnderstanding !== undefined) {
+    envelope.clipUnderstanding = asset.clipUnderstanding;
+  }
+  if (asset.analysis !== undefined) envelope.analysis = asset.analysis;
+  return Object.keys(envelope).length > 0 ? envelope : null;
+}
+
+function assetToRow(asset: V1Asset): AssetRow {
+  return {
+    id: asset.id,
+    schema_version: asset.schemaVersion,
+    workspace_id: asset.workspaceId,
+    project_id: asset.projectId,
+    kind: asset.kind,
+    status: asset.status,
+    filename: asset.filename,
+    remote_url: asset.remoteUrl ?? null,
+    storage_key: asset.storageKey ?? null,
+    source: asset.source,
+    duration_sec: asset.durationSec ?? null,
+    context: assetContextEnvelope(asset),
+    semantic_analysis: asset.semanticAnalysis ?? null,
+    provenance: asset.provenance ?? null,
+    created_at: asset.createdAt,
+    updated_at: asset.updatedAt,
+  };
+}
+
+function mapAsset(row: AssetRow): V1Asset {
+  const envelope = row.context ?? {};
+  const asset: V1Asset = {
+    id: row.id,
+    schemaVersion: SCHEMA_VERSIONS.asset,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    kind: row.kind,
+    filename: row.filename,
+    status: row.status,
+    source: row.source,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+  if (row.remote_url != null) asset.remoteUrl = row.remote_url;
+  if (row.storage_key != null) asset.storageKey = row.storage_key;
+  if (row.duration_sec != null) asset.durationSec = row.duration_sec;
+  if (envelope.context !== undefined) asset.context = envelope.context;
+  if (envelope.userContext !== undefined) asset.userContext = envelope.userContext;
+  if (envelope.agentContext !== undefined) asset.agentContext = envelope.agentContext;
+  if (envelope.assetKnowledge !== undefined) asset.assetKnowledge = envelope.assetKnowledge;
+  if (envelope.clipUnderstanding !== undefined) {
+    asset.clipUnderstanding = envelope.clipUnderstanding;
+  }
+  if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
+  if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
+  if (row.provenance != null) asset.provenance = row.provenance;
+  return asset;
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
 export interface PageResult<T> {
   items: T[];
   nextCursor: string | null;
 }
 
-// Newest-first cursor pagination keyed on stable record IDs.
+// Newest-first cursor pagination keyed on stable record IDs. We over-fetch by one
+// to learn whether more rows exist, then trim. The (created_at desc, id desc)
+// ordering matches the old JSON sort exactly; the cursor is the last item's id and
+// its created_at locates the seek position even when timestamps collide.
+function orderTuple(a: { id: string; createdAt: string }, b: { id: string; createdAt: string }): number {
+  if (a.createdAt === b.createdAt) return a.id < b.id ? 1 : -1;
+  return a.createdAt < b.createdAt ? 1 : -1;
+}
+
 function paginate<T extends { id: string; createdAt: string }>(
   all: T[],
   limit: number,
   cursor: string | null
 ): PageResult<T> {
-  const sorted = [...all].sort((a, b) => {
-    if (a.createdAt === b.createdAt) return a.id < b.id ? 1 : -1;
-    return a.createdAt < b.createdAt ? 1 : -1;
-  });
+  const sorted = [...all].sort(orderTuple);
   let start = 0;
   if (cursor) {
     const idx = sorted.findIndex((item) => item.id === cursor);
@@ -256,69 +454,146 @@ function paginate<T extends { id: string; createdAt: string }>(
   return { items, nextCursor };
 }
 
-export async function ensureWorkspace(id: string, name: string): Promise<V1Workspace> {
-  return mutate((db) => {
-    let ws = db.workspaces.find((w) => w.id === id);
-    if (!ws) {
-      const now = new Date().toISOString();
-      ws = {
-        id,
-        schemaVersion: SCHEMA_VERSIONS.workspace,
-        name,
-        createdAt: now,
-        updatedAt: now,
-      };
-      db.workspaces.push(ws);
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+export async function ensureWorkspace(
+  id: string,
+  name: string,
+  ownerId?: string | null
+): Promise<V1Workspace> {
+  const db = getServiceSupabase();
+  const existing = await db
+    .from("workspaces")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  throwOnError(existing.error, "ensureWorkspace select");
+  if (existing.data) {
+    const row = existing.data as WorkspaceRow;
+    if (ownerId && !row.owner_id) {
+      const updated = await db
+        .from("workspaces")
+        .update({ owner_id: ownerId, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .is("owner_id", null)
+        .select("*")
+        .maybeSingle();
+      throwOnError(updated.error, "ensureWorkspace owner update");
+      if (updated.data) return mapWorkspace(updated.data as WorkspaceRow);
     }
-    return ws;
-  });
+    return mapWorkspace(existing.data as WorkspaceRow);
+  }
+
+  const now = new Date().toISOString();
+  const inserted = await db
+    .from("workspaces")
+    .insert({
+      id,
+      schema_version: SCHEMA_VERSIONS.workspace,
+      owner_id: ownerId ?? null,
+      name,
+      created_at: now,
+      updated_at: now,
+    })
+    .select("*")
+    .single();
+
+  // Tolerate the race where a concurrent caller inserted the same workspace
+  // between our select and insert: re-read and return the winner.
+  if (inserted.error) {
+    const reread = await db
+      .from("workspaces")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwOnError(reread.error, "ensureWorkspace reread");
+    if (reread.data) return mapWorkspace(reread.data as WorkspaceRow);
+    throwOnError(inserted.error, "ensureWorkspace insert");
+  }
+  return mapWorkspace(inserted.data as WorkspaceRow);
 }
 
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
 export async function createProject(input: {
   workspaceId: string;
   name: string;
   brief?: VideoBrief;
 }): Promise<{ project: V1Project; briefVersion: V1BriefVersion | null }> {
-  return mutate((db) => {
-    const now = new Date().toISOString();
-    const project: V1Project = {
-      id: newId("proj"),
-      schemaVersion: SCHEMA_VERSIONS.project,
-      workspaceId: input.workspaceId,
+  const db = getServiceSupabase();
+  const now = new Date().toISOString();
+  const projectId = newId("proj");
+
+  // FK ordering: brief_versions.project_id -> projects.id (NOT NULL), and
+  // projects.current_brief_version_id -> brief_versions.id. So insert the project
+  // first (with a null current_brief_version_id), then the brief version, then
+  // point the project at it.
+  const insertedProject = await db
+    .from("projects")
+    .insert({
+      id: projectId,
+      schema_version: SCHEMA_VERSIONS.project,
+      workspace_id: input.workspaceId,
       name: input.name,
       status: "active",
       brief: input.brief ?? null,
-      currentBriefVersionId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    let briefVersion: V1BriefVersion | null = null;
-    if (input.brief) {
-      briefVersion = {
-        id: newId("briefv"),
-        schemaVersion: SCHEMA_VERSIONS.briefVersion,
-        projectId: project.id,
+      current_brief_version_id: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .select("*")
+    .single();
+  throwOnError(insertedProject.error, "createProject insert project");
+  let projectRow = insertedProject.data as ProjectRow;
+
+  let briefVersion: V1BriefVersion | null = null;
+  if (input.brief) {
+    const briefVersionId = newId("briefv");
+    const insertedBrief = await db
+      .from("brief_versions")
+      .insert({
+        id: briefVersionId,
+        schema_version: SCHEMA_VERSIONS.briefVersion,
+        project_id: projectId,
         brief: input.brief,
-        createdAt: now,
-      };
-      project.currentBriefVersionId = briefVersion.id;
-      db.briefVersions.push(briefVersion);
-    }
-    db.projects.push(project);
-    return { project, briefVersion };
-  });
+        created_at: now,
+      })
+      .select("*")
+      .single();
+    throwOnError(insertedBrief.error, "createProject insert brief_version");
+    briefVersion = mapBriefVersion(insertedBrief.data as BriefVersionRow);
+
+    const updatedProject = await db
+      .from("projects")
+      .update({ current_brief_version_id: briefVersion.id, updated_at: now })
+      .eq("id", projectId)
+      .select("*")
+      .single();
+    throwOnError(updatedProject.error, "createProject link brief_version");
+    projectRow = updatedProject.data as ProjectRow;
+  }
+
+  return { project: mapProject(projectRow), briefVersion };
 }
 
 export async function getProject(
   workspaceId: string,
   projectId: string
 ): Promise<V1Project> {
-  const db = await readDb();
-  const project = db.projects.find(
-    (p) => p.id === projectId && p.workspaceId === workspaceId && p.status !== "deleted"
-  );
-  if (!project) throw notFound(`Project not found: ${projectId}`);
-  return project;
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "getProject");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  return mapProject(data as ProjectRow);
 }
 
 export async function listProjects(
@@ -326,10 +601,14 @@ export async function listProjects(
   limit: number,
   cursor: string | null
 ): Promise<PageResult<V1Project>> {
-  const db = await readDb();
-  const all = db.projects.filter(
-    (p) => p.workspaceId === workspaceId && p.status !== "deleted"
-  );
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted");
+  throwOnError(error, "listProjects");
+  const all = (data as ProjectRow[]).map(mapProject);
   return paginate(all, limit, cursor);
 }
 
@@ -338,15 +617,20 @@ export async function setBrief(
   projectId: string,
   brief: VideoBrief
 ): Promise<V1Project> {
-  return mutate((db) => {
-    const project = db.projects.find(
-      (p) => p.id === projectId && p.workspaceId === workspaceId && p.status !== "deleted"
-    );
-    if (!project) throw notFound(`Project not found: ${projectId}`);
-    project.brief = brief;
-    project.updatedAt = new Date().toISOString();
-    return project;
-  });
+  const db = getServiceSupabase();
+  // Enforce tenancy: only update a row that matches both ids and is not deleted.
+  const { data, error } = await db
+    .from("projects")
+    .update({ brief, updated_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .select("*")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "setBrief");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  return mapProject(data as ProjectRow);
 }
 
 export async function createBriefVersion(
@@ -354,25 +638,41 @@ export async function createBriefVersion(
   projectId: string,
   brief: VideoBrief
 ): Promise<{ project: V1Project; briefVersion: V1BriefVersion }> {
-  return mutate((db) => {
-    const project = db.projects.find(
-      (p) => p.id === projectId && p.workspaceId === workspaceId && p.status !== "deleted"
-    );
-    if (!project) throw notFound(`Project not found: ${projectId}`);
-    const now = new Date().toISOString();
-    const briefVersion: V1BriefVersion = {
-      id: newId("briefv"),
-      schemaVersion: SCHEMA_VERSIONS.briefVersion,
-      projectId,
+  // Confirm the project exists within the workspace before writing the version.
+  await getProject(workspaceId, projectId);
+
+  const db = getServiceSupabase();
+  const now = new Date().toISOString();
+  const briefVersionId = newId("briefv");
+  const insertedBrief = await db
+    .from("brief_versions")
+    .insert({
+      id: briefVersionId,
+      schema_version: SCHEMA_VERSIONS.briefVersion,
+      project_id: projectId,
       brief,
-      createdAt: now,
-    };
-    db.briefVersions.push(briefVersion);
-    project.brief = brief;
-    project.currentBriefVersionId = briefVersion.id;
-    project.updatedAt = now;
-    return { project, briefVersion };
-  });
+      created_at: now,
+    })
+    .select("*")
+    .single();
+  throwOnError(insertedBrief.error, "createBriefVersion insert");
+  const briefVersion = mapBriefVersion(insertedBrief.data as BriefVersionRow);
+
+  const updatedProject = await db
+    .from("projects")
+    .update({
+      brief,
+      current_brief_version_id: briefVersion.id,
+      updated_at: now,
+    })
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .select("*")
+    .single();
+  throwOnError(updatedProject.error, "createBriefVersion update project");
+
+  return { project: mapProject(updatedProject.data as ProjectRow), briefVersion };
 }
 
 export async function listBriefVersions(
@@ -382,16 +682,28 @@ export async function listBriefVersions(
   cursor: string | null
 ): Promise<PageResult<V1BriefVersion>> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const all = db.briefVersions.filter((b) => b.projectId === projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("brief_versions")
+    .select("*")
+    .eq("project_id", projectId);
+  throwOnError(error, "listBriefVersions");
+  const all = (data as BriefVersionRow[]).map(mapBriefVersion);
   return paginate(all, limit, cursor);
 }
 
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
 export async function addAsset(asset: V1Asset): Promise<V1Asset> {
-  return mutate((db) => {
-    db.assets.push(asset);
-    return asset;
-  });
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .insert(assetToRow(asset))
+    .select("*")
+    .single();
+  throwOnError(error, "addAsset");
+  return mapAsset(data as AssetRow);
 }
 
 export async function getAsset(
@@ -399,12 +711,18 @@ export async function getAsset(
   projectId: string,
   assetId: string
 ): Promise<V1Asset> {
-  const db = await readDb();
-  const asset = db.assets.find(
-    (a) => a.id === assetId && a.projectId === projectId && a.workspaceId === workspaceId
-  );
-  if (!asset) throw notFound(`Asset not found: ${assetId}`);
-  return asset;
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, "getAsset");
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return mapAsset(data as AssetRow);
 }
 
 export async function updateAsset(
@@ -413,15 +731,25 @@ export async function updateAsset(
   assetId: string,
   updater: (asset: V1Asset) => void
 ): Promise<V1Asset> {
-  return mutate((db) => {
-    const asset = db.assets.find(
-      (a) => a.id === assetId && a.projectId === projectId && a.workspaceId === workspaceId
-    );
-    if (!asset) throw notFound(`Asset not found: ${assetId}`);
-    updater(asset);
-    asset.updatedAt = new Date().toISOString();
-    return asset;
-  });
+  // Read-modify-write: load the current row (with tenancy filter), apply the
+  // mutation in memory, then persist the full row back.
+  const current = await getAsset(workspaceId, projectId, assetId);
+  updater(current);
+  current.updatedAt = new Date().toISOString();
+
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .update(assetToRow(current))
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .select("*")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, "updateAsset");
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return mapAsset(data as AssetRow);
 }
 
 export async function updateAssetAnalysis(
@@ -448,28 +776,163 @@ export async function listAssets(
   cursor: string | null
 ): Promise<PageResult<V1Asset>> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const all = db.assets.filter(
-    (a) => a.projectId === projectId && a.workspaceId === workspaceId
-  );
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+  throwOnError(error, "listAssets");
+  const all = (data as AssetRow[]).map(mapAsset);
   return paginate(all, limit, cursor);
+}
+
+function isCharacterAnchorAsset(asset: V1Asset): boolean {
+  return Boolean(
+    asset.userContext?.characterNames?.length ||
+      asset.userContext?.intendedUse?.includes("character_reference") ||
+      asset.context?.recommendedRoles?.some((role) => /character/i.test(role))
+  );
+}
+
+export async function listCharacterAnchorAssets(
+  workspaceId: string,
+  projectId: string,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<V1Asset>> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+  throwOnError(error, "listCharacterAnchorAssets");
+  const anchors = (data as AssetRow[]).map(mapAsset).filter(isCharacterAnchorAsset);
+  return paginate(anchors, limit, cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Compositions and jobs
+// ---------------------------------------------------------------------------
+interface CompositionRow {
+  id: string;
+  schema_version: string;
+  project_id: string;
+  brief_version_id: string | null;
+  mode: ContractCompositionPlan["mode"];
+  status: ContractCompositionPlan["status"];
+  planned_beats: ContractCompositionPlan["plannedBeats"];
+  generated_asset_job_ids: string[];
+  ready_asset_ids: string[];
+  narration_strategy: ContractCompositionPlan["narrationStrategy"] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function compositionToRow(composition: ContractCompositionPlan): CompositionRow {
+  return {
+    id: composition.id,
+    schema_version: composition.schemaVersion,
+    project_id: composition.projectId,
+    brief_version_id: composition.briefVersionId || null,
+    mode: composition.mode,
+    status: composition.status,
+    planned_beats: composition.plannedBeats,
+    generated_asset_job_ids: composition.generatedAssetJobIds,
+    ready_asset_ids: composition.readyAssetIds,
+    narration_strategy: composition.narrationStrategy ?? null,
+    created_at: composition.createdAt,
+    updated_at: composition.updatedAt,
+  };
+}
+
+function mapComposition(row: CompositionRow): ContractCompositionPlan {
+  return {
+    id: row.id,
+    schemaVersion: CONTRACT_SCHEMA.composition,
+    projectId: row.project_id,
+    briefVersionId: row.brief_version_id ?? "",
+    mode: row.mode,
+    status: row.status,
+    plannedBeats: row.planned_beats ?? [],
+    generatedAssetJobIds: row.generated_asset_job_ids ?? [],
+    readyAssetIds: row.ready_asset_ids ?? [],
+    narrationStrategy: row.narration_strategy ?? undefined,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+interface JobRow {
+  id: string;
+  schema_version: string;
+  workspace_id: string;
+  project_id: string;
+  request_id: string | null;
+  type: JobType;
+  status: JobStatus;
+  progress: Job["progress"];
+  input: unknown;
+  result: unknown;
+  error: Job["error"];
+  idempotency_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function jobToRow(job: Job): JobRow {
+  return {
+    id: job.id,
+    schema_version: job.schemaVersion,
+    workspace_id: job.workspaceId,
+    project_id: job.projectId,
+    request_id: job.requestId ?? null,
+    type: job.type,
+    status: job.status,
+    progress: job.progress,
+    input: job.input,
+    result: job.result,
+    error: job.error,
+    idempotency_key: job.idempotencyKey ?? null,
+    created_at: job.createdAt,
+    updated_at: job.updatedAt,
+  };
+}
+
+function mapJob(row: JobRow): Job {
+  return {
+    id: row.id,
+    schemaVersion: CONTRACT_SCHEMA.job,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    requestId: row.request_id ?? undefined,
+    type: row.type,
+    status: row.status,
+    progress: row.progress ?? {},
+    input: row.input ?? null,
+    result: row.result ?? null,
+    error: row.error ?? null,
+    idempotencyKey: row.idempotency_key ?? undefined,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
 }
 
 export async function saveCompositionPlan(
   workspaceId: string,
   composition: ContractCompositionPlan
 ): Promise<ContractCompositionPlan> {
-  return mutate((db) => {
-    const project = db.projects.find(
-      (p) =>
-        p.id === composition.projectId &&
-        p.workspaceId === workspaceId &&
-        p.status !== "deleted"
-    );
-    if (!project) throw notFound(`Project not found: ${composition.projectId}`);
-    db.compositions.push(composition);
-    return composition;
-  });
+  await getProject(workspaceId, composition.projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .insert(compositionToRow(composition))
+    .select("*")
+    .single();
+  throwOnError(error, "saveCompositionPlan");
+  return mapComposition(data as CompositionRow);
 }
 
 export async function getCompositionPlan(
@@ -478,12 +941,17 @@ export async function getCompositionPlan(
   compositionId: string
 ): Promise<ContractCompositionPlan> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const composition = db.compositions.find(
-    (candidate) => candidate.id === compositionId && candidate.projectId === projectId
-  );
-  if (!composition) throw notFound(`Composition not found: ${compositionId}`);
-  return composition;
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .select("*")
+    .eq("id", compositionId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Composition not found: ${compositionId}`);
+  throwOnError(error, "getCompositionPlan");
+  if (!data) throw notFound(`Composition not found: ${compositionId}`);
+  return mapComposition(data as CompositionRow);
 }
 
 export async function listCompositionPlans(
@@ -493,8 +961,13 @@ export async function listCompositionPlans(
   cursor: string | null
 ): Promise<PageResult<ContractCompositionPlan>> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const all = db.compositions.filter((composition) => composition.projectId === projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .select("*")
+    .eq("project_id", projectId);
+  throwOnError(error, "listCompositionPlans");
+  const all = (data as CompositionRow[]).map(mapComposition);
   return paginate(all, limit, cursor);
 }
 
@@ -507,33 +980,34 @@ export async function createJob(input: {
   payload?: unknown;
   result?: unknown;
 }): Promise<Job> {
-  return mutate((db) => {
-    const project = db.projects.find(
-      (p) => p.id === input.projectId && p.workspaceId === input.workspaceId && p.status !== "deleted"
-    );
-    if (!project) throw notFound(`Project not found: ${input.projectId}`);
-    const now = new Date().toISOString();
-    const job: Job = {
-      id: newId("job"),
-      schemaVersion: CONTRACT_SCHEMA.job,
-      workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      requestId: input.requestId,
-      type: input.type,
-      status: input.status ?? "queued",
-      progress: {
-        percent: input.status === "succeeded" ? 100 : 0,
-        currentStep: input.status === "succeeded" ? "completed" : "queued",
-      },
-      input: input.payload ?? null,
-      result: input.result ?? null,
-      error: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    db.jobs.push(job);
-    return job;
-  });
+  await getProject(input.workspaceId, input.projectId);
+  const now = new Date().toISOString();
+  const job: Job = {
+    id: newId("job"),
+    schemaVersion: CONTRACT_SCHEMA.job,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    requestId: input.requestId,
+    type: input.type,
+    status: input.status ?? "queued",
+    progress: {
+      percent: input.status === "succeeded" ? 100 : 0,
+      currentStep: input.status === "succeeded" ? "completed" : "queued",
+    },
+    input: input.payload ?? null,
+    result: input.result ?? null,
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("jobs")
+    .insert(jobToRow(job))
+    .select("*")
+    .single();
+  throwOnError(error, "createJob");
+  return mapJob(data as JobRow);
 }
 
 export async function getJob(
@@ -542,15 +1016,18 @@ export async function getJob(
   jobId: string
 ): Promise<Job> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const job = db.jobs.find(
-    (candidate) =>
-      candidate.id === jobId &&
-      candidate.projectId === projectId &&
-      candidate.workspaceId === workspaceId
-  );
-  if (!job) throw notFound(`Job not found: ${jobId}`);
-  return job;
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("jobs")
+    .select("*")
+    .eq("id", jobId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Job not found: ${jobId}`);
+  throwOnError(error, "getJob");
+  if (!data) throw notFound(`Job not found: ${jobId}`);
+  return mapJob(data as JobRow);
 }
 
 export async function listJobs(
@@ -561,30 +1038,79 @@ export async function listJobs(
   cursor: string | null
 ): Promise<PageResult<Job>> {
   await getProject(workspaceId, projectId);
-  const db = await readDb();
-  const all = db.jobs.filter(
-    (job) =>
-      job.projectId === projectId &&
-      job.workspaceId === workspaceId &&
-      (type === null || job.type === type)
-  );
+  const db = getServiceSupabase();
+  let query = db
+    .from("jobs")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+  if (type !== null) {
+    query = query.eq("type", type);
+  }
+  const { data, error } = await query;
+  throwOnError(error, "listJobs");
+  const all = (data as JobRow[]).map(mapJob);
   return paginate(all, limit, cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Idempotency
+// ---------------------------------------------------------------------------
+interface IdempotencyRow {
+  scope: string;
+  key: string;
+  body_hash: string | null;
+  status: number | null;
+  response_body: unknown;
+  created_at: string;
+}
+
+function mapIdempotency(row: IdempotencyRow): IdempotencyRecord {
+  return {
+    scope: row.scope,
+    key: row.key,
+    bodyHash: row.body_hash ?? "",
+    status: row.status ?? 0,
+    responseBody: row.response_body,
+    createdAt: iso(row.created_at),
+  };
 }
 
 export async function findIdempotencyRecord(
   scope: string,
   key: string
 ): Promise<IdempotencyRecord | undefined> {
-  const db = await readDb();
-  return db.idempotency.find((r) => r.scope === scope && r.key === key);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("idempotency")
+    .select("*")
+    .eq("scope", scope)
+    .eq("key", key)
+    .maybeSingle();
+  if (isNoRows(error)) return undefined;
+  throwOnError(error, "findIdempotencyRecord");
+  if (!data) return undefined;
+  return mapIdempotency(data as IdempotencyRow);
 }
 
 export async function saveIdempotencyRecord(
   record: IdempotencyRecord
 ): Promise<void> {
-  await mutate((db) => {
-    if (!db.idempotency.some((r) => r.scope === record.scope && r.key === record.key)) {
-      db.idempotency.push(record);
-    }
-  });
+  const db = getServiceSupabase();
+  // First write wins (matching the JSON store's "does not duplicate" semantics):
+  // ignore the conflict on the (scope, key) primary key.
+  const { error } = await db
+    .from("idempotency")
+    .upsert(
+      {
+        scope: record.scope,
+        key: record.key,
+        body_hash: record.bodyHash,
+        status: record.status,
+        response_body: record.responseBody,
+        created_at: record.createdAt,
+      },
+      { onConflict: "scope,key", ignoreDuplicates: true }
+    );
+  throwOnError(error, "saveIdempotencyRecord");
 }

@@ -13,13 +13,18 @@ import {
   getAsset,
   getCompositionPlan,
   getJob,
-  listAssets,
+  listCharacterAnchorAssets,
   listCompositionPlans,
   listJobs,
   saveCompositionPlan,
+  updateAsset,
   type V1Asset,
 } from "@/lib/api/v1/store";
 import { SCHEMA, type CompositionMode, type PlannedBeat } from "@popcorn/shared/v1/types";
+import type {
+  CharacterConsistencyGrade,
+  CharacterConsistencyReview,
+} from "@popcorn/shared/types";
 
 export const miscCapabilitiesRouter = Router();
 
@@ -37,6 +42,14 @@ const ALIGNMENT_STRATEGIES = new Set([
   "extend_timeline",
   "rewrite_script",
 ]);
+
+function parseReviewGrade(value: unknown, field: string): CharacterConsistencyGrade {
+  const grade = String(value || "needs_review");
+  if (!REVIEW_GRADES.has(grade)) {
+    throw new ApiError("validation_failed", `${field} must be pass, needs_review, or fail.`);
+  }
+  return grade as CharacterConsistencyGrade;
+}
 
 function objectBody(body: unknown): JsonObject {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -111,14 +124,6 @@ function parsePlannedBeats(body: JsonObject, targetLengthSec: number): PlannedBe
   ];
 }
 
-function isCharacterAnchor(asset: V1Asset): boolean {
-  return Boolean(
-    asset.userContext?.characterNames?.length ||
-      asset.userContext?.intendedUse?.includes("character_reference") ||
-      asset.context?.recommendedRoles?.some((role) => /character/i.test(role))
-  );
-}
-
 function characterAnchorFor(asset: V1Asset) {
   return {
     id: asset.id,
@@ -130,21 +135,16 @@ function characterAnchorFor(asset: V1Asset) {
   };
 }
 
-function parseReview(body: unknown) {
+function parseReview(body: unknown): CharacterConsistencyReview {
   const input = objectBody(body);
-  const review = {
-    identity: String(input.identity || "needs_review"),
-    wardrobe: String(input.wardrobe || "needs_review"),
-    style: String(input.style || "needs_review"),
-    temporal: input.temporal === undefined ? undefined : String(input.temporal),
+  const review: CharacterConsistencyReview = {
+    identity: parseReviewGrade(input.identity, "identity"),
+    wardrobe: parseReviewGrade(input.wardrobe, "wardrobe"),
+    style: parseReviewGrade(input.style, "style"),
+    temporal:
+      input.temporal === undefined ? undefined : parseReviewGrade(input.temporal, "temporal"),
     notes: optionalString(input.notes) ?? "",
   };
-  for (const [field, value] of Object.entries(review)) {
-    if (field === "notes" || value === undefined) continue;
-    if (!REVIEW_GRADES.has(value)) {
-      throw new ApiError("validation_failed", `${field} must be pass, needs_review, or fail.`);
-    }
-  }
   return review;
 }
 
@@ -181,7 +181,7 @@ miscCapabilitiesRouter.post(
       id: newId("comp"),
       schemaVersion: SCHEMA.composition,
       projectId,
-      briefVersionId: optionalString(input.briefVersionId) ?? "briefv_unversioned",
+      briefVersionId: optionalString(input.briefVersionId) ?? "",
       mode: parseCompositionMode(input.mode),
       status: "ready_for_timeline" as const,
       plannedBeats,
@@ -231,11 +231,16 @@ miscCapabilitiesRouter.get(
   route(async ({ auth, req }, params) => {
     const projectId = requiredParam(params, "projectId");
     const { limit, cursor } = parsePagination(req.searchParams);
-    const { items, nextCursor } = await listAssets(auth.workspaceId, projectId, limit, cursor);
+    const { items, nextCursor } = await listCharacterAnchorAssets(
+      auth.workspaceId,
+      projectId,
+      limit,
+      cursor
+    );
     return {
       status: 200,
       body: {
-        characterAnchors: items.filter(isCharacterAnchor).map(characterAnchorFor),
+        characterAnchors: items.map(characterAnchorFor),
         pagination: { limit, nextCursor },
       },
     };
@@ -326,20 +331,39 @@ miscCapabilitiesRouter.patch(
     const projectId = requiredParam(params, "projectId");
     const assetId = requiredParam(params, "assetId");
     const review = parseReview(body);
-    const asset = await updateAssetContext(auth, projectId, assetId, {
-      context: {
-        summary: review.notes || undefined,
-        recommendedRoles: ["character_reference", `identity:${review.identity}`],
-      },
-      userContext: {
-        tags: [
-          "character_reviewed",
-          `identity:${review.identity}`,
-          `wardrobe:${review.wardrobe}`,
-          `style:${review.style}`,
-          ...(review.temporal ? [`temporal:${review.temporal}`] : []),
+    const asset = await updateAsset(auth.workspaceId, projectId, assetId, (candidate) => {
+      const binding = candidate.provenance?.characterBinding;
+      if (!binding) {
+        throw new ApiError(
+          "validation_failed",
+          "Generated asset has no character binding to review."
+        );
+      }
+      binding.consistencyReview = review;
+      candidate.context = {
+        ...(candidate.context ?? {}),
+        summary: review.notes || candidate.context?.summary,
+        recommendedRoles: [
+          ...new Set([
+            ...(candidate.context?.recommendedRoles ?? []),
+            "character_reference",
+            `identity:${review.identity}`,
+          ]),
         ],
-      },
+      };
+      candidate.userContext = {
+        ...(candidate.userContext ?? {}),
+        tags: [
+          ...new Set([
+            ...(candidate.userContext?.tags ?? []),
+            "character_reviewed",
+            `identity:${review.identity}`,
+            `wardrobe:${review.wardrobe}`,
+            `style:${review.style}`,
+            ...(review.temporal ? [`temporal:${review.temporal}`] : []),
+          ]),
+        ],
+      };
     });
     return { status: 200, body: { asset, review } };
   })
