@@ -2,6 +2,7 @@ import type {
   GenerationRunStatus,
   GenerationStageItem,
 } from "@popcorn/shared/v1/types";
+import { JudgmentBadge } from "../evals/JudgmentBadge";
 
 type StageItemKind = GenerationStageItem["kind"];
 
@@ -189,7 +190,10 @@ export function StageItemCard({
             {item.label}
           </h3>
         </div>
-        <StatusPill status={item.status} />
+        <div className="stage-item-card-badges">
+          <JudgmentBadge judgment={item.judgment} compact />
+          <StatusPill status={item.status} />
+        </div>
       </header>
 
       {item.status === "queued" && (

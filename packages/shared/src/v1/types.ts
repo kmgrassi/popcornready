@@ -535,6 +535,19 @@ export interface GenerationErrorSummary {
   details?: string;
 }
 
+export type GenerationJudgmentVerdict = "pass" | "needs_review" | "fail";
+
+export interface GenerationJudgmentSummary {
+  judgmentId: string;
+  evaluatorId: string;
+  verdict: GenerationJudgmentVerdict;
+  rationale: string;
+  recommendedAction?: "keep" | "regenerate" | "manual_review";
+  grades?: Record<string, number | "pass" | "needs_review" | "fail">;
+  evidenceRef?: string;
+  createdAt: string;
+}
+
 export interface GenerationRun {
   runId: string;
   projectId: string;
@@ -550,6 +563,7 @@ export interface GenerationRun {
   startedAt?: string;
   completedAt?: string;
   error?: GenerationErrorSummary;
+  judgment?: GenerationJudgmentSummary;
 }
 
 export interface GenerationStage {
@@ -570,6 +584,7 @@ export interface GenerationStage {
   createdAt: string;
   updatedAt: string;
   error?: GenerationErrorSummary;
+  judgment?: GenerationJudgmentSummary;
 }
 
 // Child item of an asset-heavy stage so the UI can show per-beat cards.
@@ -596,6 +611,7 @@ export interface GenerationStageItem {
   createdAt: string;
   updatedAt: string;
   error?: GenerationErrorSummary;
+  judgment?: GenerationJudgmentSummary;
 }
 
 // Canonical order and default labels for the stage rail. Individual runs may

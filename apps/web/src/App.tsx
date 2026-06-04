@@ -4,6 +4,8 @@ import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
+import { AdminEvalsPage } from "./routes/AdminEvalsPage";
+import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
@@ -17,7 +19,9 @@ export function App() {
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
+        <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/evals" element={<AdminEvalsPage />} />
         <Route path="/projects/:projectId/runs/:runId" element={<RunProgressPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
