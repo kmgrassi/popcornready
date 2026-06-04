@@ -7,6 +7,7 @@ import { generationEntrypointsRouter } from "./generation-entrypoints.js";
 import { generationRunsRouter } from "./generation-runs.js";
 import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
+import { miscCapabilitiesRouter } from "./misc-capabilities.js";
 import { projectsRouter } from "./projects.js";
 import { timelinesRouter } from "./timelines.js";
 
@@ -30,6 +31,7 @@ export function mountV1(app: Express) {
   v1.use(projectsRouter);
   v1.use(assetsRouter);
   v1.use(briefRouter);
+  v1.use(miscCapabilitiesRouter);
   v1.use(generationEntrypointsRouter);
   v1.use(generationRunsRouter);
   v1.use(timelinesRouter);
