@@ -408,6 +408,14 @@ export interface AnalyzeBatchInput {
   analysisOptions: AnalyzeBatchOptions;
 }
 
+export interface AnalyzeAssetInput {
+  regenerate?: boolean;
+  analysisOptions?: {
+    sampleFrames?: boolean;
+    transcribeAudio?: boolean;
+  };
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1001,16 +1009,20 @@ function parseAssetContext(
     fields.push({ path, message: "Must be an object." });
     return undefined;
   }
-  return {
-    summary: optionalString(input.summary, `${path}.summary`, fields),
-    recommendedRoles: optionalStringArray(
-      input.recommendedRoles,
-      `${path}.recommendedRoles`,
-      fields
-    ),
-    transcriptText: optionalString(input.transcriptText, `${path}.transcriptText`, fields),
-    moments: optionalMomentArray(input.moments, `${path}.moments`, fields),
-  };
+  const context: AssetContext = {};
+  const summary = optionalString(input.summary, `${path}.summary`, fields);
+  const recommendedRoles = optionalStringArray(
+    input.recommendedRoles,
+    `${path}.recommendedRoles`,
+    fields
+  );
+  const transcriptText = optionalString(input.transcriptText, `${path}.transcriptText`, fields);
+  const moments = optionalMomentArray(input.moments, `${path}.moments`, fields);
+  if (summary !== undefined) context.summary = summary;
+  if (recommendedRoles !== undefined) context.recommendedRoles = recommendedRoles;
+  if (transcriptText !== undefined) context.transcriptText = transcriptText;
+  if (moments !== undefined) context.moments = moments;
+  return context;
 }
 
 export function parseRegisterAsset(input: unknown): RegisterAssetInput {
@@ -1179,6 +1191,41 @@ export function parseAnalyzeBatch(input: unknown): AnalyzeBatchInput {
       maxVideoSamples: Math.max(defaultVideoSamples, maxVideoSamples),
       storage: storage ?? "local",
     },
+  };
+}
+
+export function parseAnalyzeAsset(input: unknown): AnalyzeAssetInput {
+  const body = input === undefined || input === null ? {} : input;
+  if (!isPlainObject(body)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  let analysisOptions: AnalyzeAssetInput["analysisOptions"];
+  if (body.analysisOptions !== undefined && body.analysisOptions !== null) {
+    if (!isPlainObject(body.analysisOptions)) {
+      fields.push({ path: "analysisOptions", message: "Must be an object." });
+    } else {
+      analysisOptions = {
+        sampleFrames: optionalBoolean(
+          body.analysisOptions.sampleFrames,
+          "analysisOptions.sampleFrames",
+          fields
+        ),
+        transcribeAudio: optionalBoolean(
+          body.analysisOptions.transcribeAudio,
+          "analysisOptions.transcribeAudio",
+          fields
+        ),
+      };
+    }
+  }
+  const regenerate = optionalBoolean(body.regenerate, "regenerate", fields);
+  throwIfInvalid(fields);
+  return {
+    ...(regenerate === undefined ? {} : { regenerate }),
+    ...(analysisOptions ? { analysisOptions } : {}),
   };
 }
 

@@ -187,6 +187,45 @@ test("createRunWithSeedStages persists selected review gates on the run and stag
   );
 });
 
+test("createRunWithSeedStages gates timeline assembly for low-confidence asset review", async () => {
+  const payload = await createRunWithSeedStages({
+    store,
+    projectId: "proj_uploaded_review",
+    body: {
+      reviewGates: ["creative_plan"],
+      assetReview: {
+        lowConfidenceAssetIds: ["asset_low_1", "asset_low_2"],
+      },
+    },
+  });
+
+  assert.deepEqual(payload.run.reviewGates, ["creative_plan", "timeline_assembly"]);
+  assert.equal(
+    payload.stages.find((stage) => stage.type === "timeline_assembly")?.isReviewGate,
+    true
+  );
+});
+
+test("createRunWithSeedStages rejects malformed asset review metadata", async () => {
+  await assert.rejects(
+    () =>
+      createRunWithSeedStages({
+        store,
+        projectId: "proj_uploaded_review_bad",
+        body: {
+          assetReview: {
+            lowConfidenceAssetIds: ["asset_ok", ""],
+          },
+        },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.code, "validation_failed");
+      return true;
+    }
+  );
+});
+
 test("createRunWithSeedStages rejects invalid review gates", async () => {
   await assert.rejects(
     () =>
