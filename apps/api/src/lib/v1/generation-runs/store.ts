@@ -48,6 +48,28 @@ export type UpdateGenerationStageItemPatch = Partial<
   Omit<GenerationStageItem, "itemId" | "stageId" | "createdAt">
 >;
 
+// A stage/item's output persisted as a first-class, addressable artifact so an
+// evaluator can read it as evidence after the producing step succeeds (Stage
+// Eval Framework §3 "Evidence-bearing hook"). The plan, the assembled timeline,
+// and similar structured outputs are stored here keyed by `artifactId`; the
+// stage/item that produced them carries the same id via `attachArtifact` /
+// `resultArtifactId`, so the run graph references it while the bytes live here.
+export interface GenerationStageArtifact {
+  artifactId: string;
+  runId: string;
+  stageId: string;
+  itemId?: string;
+  kind: GenerationStageItem["kind"];
+  // The structured output (plan, timeline, …) the evaluator reads. JSON-shaped.
+  content: unknown;
+  createdAt: string;
+}
+
+export type CreateGenerationStageArtifactInput = Omit<
+  GenerationStageArtifact,
+  "artifactId" | "createdAt"
+> & { artifactId?: string };
+
 // --- Store -----------------------------------------------------------------
 
 export interface GenerationRunsStore {
@@ -73,12 +95,18 @@ export interface GenerationRunsStore {
     patch: UpdateGenerationStageItemPatch
   ): Promise<GenerationStageItem>;
   listStageItemsForStage(stageId: string): Promise<GenerationStageItem[]>;
+
+  saveStageArtifact(
+    input: CreateGenerationStageArtifactInput
+  ): Promise<GenerationStageArtifact>;
+  getStageArtifact(artifactId: string): Promise<GenerationStageArtifact | null>;
 }
 
 const COLLECTIONS = {
   runs: "generation-runs",
   stages: "generation-stages",
   stageItems: "generation-stage-items",
+  stageArtifacts: "generation-stage-artifacts",
 } as const;
 
 function safeKey(key: string): string {
@@ -292,6 +320,43 @@ function stageItemToRow(i: GenerationStageItem): StageItemRow {
   };
 }
 
+// --- stage artifacts -------------------------------------------------------
+
+interface StageArtifactRow {
+  artifact_id: string;
+  run_id: string;
+  stage_id: string;
+  item_id: string | null;
+  kind: GenerationStageItem["kind"];
+  content: unknown;
+  created_at: string;
+}
+
+function rowToStageArtifact(r: StageArtifactRow): GenerationStageArtifact {
+  const artifact: GenerationStageArtifact = {
+    artifactId: r.artifact_id,
+    runId: r.run_id,
+    stageId: r.stage_id,
+    kind: r.kind,
+    content: r.content,
+    createdAt: r.created_at,
+  };
+  if (r.item_id != null) artifact.itemId = r.item_id;
+  return artifact;
+}
+
+function stageArtifactToRow(a: GenerationStageArtifact): StageArtifactRow {
+  return {
+    artifact_id: a.artifactId,
+    run_id: a.runId,
+    stage_id: a.stageId,
+    item_id: a.itemId ?? null,
+    kind: a.kind,
+    content: a.content,
+    created_at: a.createdAt,
+  };
+}
+
 export function createSupabaseGenerationRunsStore(
   db: SupabaseClient = getServiceSupabase()
 ): GenerationRunsStore {
@@ -463,6 +528,33 @@ export function createSupabaseGenerationRunsStore(
         .order("created_at", { ascending: true });
       if (error) fail("list stage items", error);
       return ((data as StageItemRow[]) ?? []).map(rowToStageItem);
+    },
+
+    async saveStageArtifact(input) {
+      const now = new Date().toISOString();
+      const artifact: GenerationStageArtifact = {
+        ...input,
+        artifactId: input.artifactId ?? newId("genart"),
+        createdAt: now,
+      };
+      const { error } = await db
+        .from("generation_stage_artifacts")
+        .upsert(stageArtifactToRow(artifact), { onConflict: "artifact_id" });
+      if (error) fail("save stage artifact", error);
+      return artifact;
+    },
+
+    async getStageArtifact(artifactId) {
+      const { data, error } = await db
+        .from("generation_stage_artifacts")
+        .select("*")
+        .eq("artifact_id", artifactId)
+        .single();
+      if (error) {
+        if (isMissing(error)) return null;
+        fail("get stage artifact", error);
+      }
+      return data ? rowToStageArtifact(data as StageArtifactRow) : null;
     },
   };
 }
@@ -641,6 +733,20 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
         .filter((i) => i.stageId === stageId)
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
     },
+
+    async saveStageArtifact(input) {
+      const now = new Date().toISOString();
+      const artifact: GenerationStageArtifact = {
+        ...input,
+        artifactId: input.artifactId ?? newId("genart"),
+        createdAt: now,
+      };
+      await writeJson(COLLECTIONS.stageArtifacts, artifact.artifactId, artifact);
+      return artifact;
+    },
+
+    getStageArtifact: (artifactId) =>
+      readJson<GenerationStageArtifact>(COLLECTIONS.stageArtifacts, artifactId),
   };
 }
 
