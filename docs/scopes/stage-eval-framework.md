@@ -43,9 +43,12 @@ frames, the stitched cut) and grades it against the step's intent:
 - At **stitching / assembly**: did it cut the clips together correctly
   (continuity, order, pacing, no gaps)?
 
-The framework runs these AI judges as a **repeatable suite** (so we can catch
-quality regressions when prompts/models change) and **reuses the same verdicts
-inline** on real generations (so every artifact shows its grade as it pops).
+The framework runs these AI judges three ways off one shared verdict record: as a
+**repeatable suite** (so we can catch quality regressions when prompts/models
+change), **inline** on real generations (so every artifact shows its grade as it
+pops), and from an **admin workbench** where a person drives one story through
+the pipeline — cheaply, prompts-only by default — and fires the judge on each
+asset individually to see how the agent is doing (§6C).
 
 Non-goal: replacing the existing unit tests. Those stay (they guard
 deterministic logic — patch application, edit-graph compilation, idempotency).
@@ -144,6 +147,7 @@ interface Judgment {
   rationale: string;
   recommendedAction?: "keep" | "regenerate" | "manual_review";
   evidenceRef?: string;             // pointer to the JSON/frames the judge saw
+  trigger: "auto" | "manual";       // auto = stage hook / suite; manual = admin fired it from the workbench (§6C)
 
   costUsd: number;
   latencyMs: number;
@@ -175,9 +179,11 @@ interface CaseExpectation {
   assertions?: string[];                        // natural-language must-holds the judge checks
 }
 
-interface EvalRun {                  // mirrors GenerationRun, for the suite
+interface EvalRun {                  // mirrors GenerationRun — covers the batch suite AND a manual workbench session
   id: string;
-  suiteId: string;
+  source: "suite" | "manual_workbench"; // batch regression vs an admin driving one story by hand (§6C)
+  suiteId?: string;                 // set when source = "suite"
+  generationMode: "prompts_only" | "full"; // prompts_only skips expensive provider calls — judge the specs without video spend
   gitSha: string;
   branch: string;
   judgeModels: Record<string, string>; // evaluatorId → model, for reproducibility
@@ -279,7 +285,9 @@ calibration is itself a regression.
 
 ## 6. UI
 
-Two surfaces, sharing the Judgment data.
+Three surfaces, all sharing the Judgment data: (A) inline badges on live runs,
+(B) the batch suite dashboard, and (C) the admin workbench for driving one story
+interactively, judgment by judgment.
 
 ### A. Inline — verdict badges on the run view
 
@@ -308,10 +316,50 @@ stage/item:
 - **Judge calibration** — the meta-eval match rate (§5), so the team trusts the
   judges before trusting their verdicts.
 
+### C. Admin eval workbench (interactive, one story at a time)
+
+The hands-on counterpart to the batch suite: an **admin-only** workbench where a
+person drives a single story through the pipeline and judges each artifact
+individually to *see how the agent is doing*. This is the original "manually
+tested framework" — a UI, human-paced, one-by-one.
+
+Flow:
+
+1. **Pick / author a story.** Choose an existing brief or type a goal
+   (length/style/aspect). This seeds a `manual_workbench` `EvalRun`.
+2. **Generate — prompts-only by default.** The generation agent runs the stages,
+   but in **`prompts_only` mode** it produces *the prompts/specs for every asset*
+   (the plan/story arc, each anchor prompt, each beat keyframe prompt, each beat
+   clip prompt, audio spec) **without calling the expensive video/image
+   providers**. A **"generate for real"** toggle escalates a chosen beat (or the
+   whole story) to actual media when the admin wants to inspect pixels. So the
+   default loop costs pennies (text only) and only spends on media on demand.
+3. **Walk the artifacts as they pop.** A stage-by-stage board lists every produced
+   artifact (each beat's prompt, each generated asset) as a card — exactly the
+   NORTH_STAR "artifacts visible as they pop" inspection view, but admin-driven.
+4. **Judge each one individually.** Every card has a **"Run judge"** button that
+   fires the registered evaluator for that artifact *on demand* (an `auto:false`,
+   `trigger: "manual"` Judgment) — the **admin/judge agent** evaluates that single
+   asset/prompt against its independent spec and returns the verdict + dimension
+   scores + rationale + recommended action, inline on the card. Re-run, tweak the
+   rubric, and re-judge freely; every run appends a Judgment (immutable history).
+5. **Per-story scorecard.** A roll-up across stages — where the agent is strong /
+   weak on *this* story — plus the judge-calibration signal if labeled.
+6. **Promote to a regression case.** One click turns the (good or
+   deliberately-bad) workbench run into a saved `EvalCase`, freezing its
+   prompts/artifacts so the suite (B) replays it forever.
+
+This needs two things beyond the suite: the **`prompts_only` generation mode**
+(plan + per-asset prompt construction + `preflight`, stopping before provider
+calls) and an **on-demand single-artifact judge endpoint**
+(`POST …/judgments { evaluatorId, artifactId }`) that the "Run judge" button and
+the inline "re-judge" action both call.
+
 Home: the web app — `apps/web` (Vite SPA) → `apps/api` v1 eval endpoints. The
-dashboard is a new `/evals` SPA route. It lands once the eval API surface exists
-in `apps/api`; the suite harness (§8 P1) is usable from the CLI before the
-dashboard ships.
+batch dashboard (B) is a new `/evals` SPA route; the workbench (C) is an
+admin-gated `/admin/evals` route (admin auth per `docs/scopes/auth-app-architecture.md`).
+Both land once the eval API surface exists in `apps/api`; the suite harness
+(§8 P1) is usable from the CLI before any dashboard ships.
 
 ## 7. The stitching judge (the one real gap)
 
@@ -349,6 +397,12 @@ ordered by what each piece needs from it:
   hybrid `blocking_gate` / `observational` modes; add the eval v1 endpoints and
   the `/evals` dashboard + run-diff in `apps/web`; "save live run as regression
   case."
+- **P2b — Admin workbench (§6C).** Adds the **`prompts_only` generation mode**
+  (plan + per-asset prompt construction + `preflight`, stopping before provider
+  calls), the **on-demand single-artifact judge endpoint**, and the admin-gated
+  `/admin/evals` UI (story picker → prompts-only generate → per-card "Run judge"
+  → per-story scorecard → promote-to-case). Shares the eval API + Judgment record
+  from P2; the only net-new engine capability is the prompts-only dry run.
 - **P3 — Expectations + judge calibration + the stitching judge.**
   `CaseExpectation`/`ExpectationResult`, labeled good/broken fixtures, the
   `stitch_continuity` evaluator, and a CI gate that fails on regression /
