@@ -14,6 +14,7 @@ interface SidebarPanelProps {
   timeline: Timeline | null;
   busy: boolean;
   onRevise: () => void;
+  showActions?: boolean;
 }
 
 export function SidebarPanel({
@@ -24,6 +25,7 @@ export function SidebarPanel({
   timeline,
   busy,
   onRevise,
+  showActions = true,
 }: SidebarPanelProps) {
   return (
     <div className="col">
@@ -63,33 +65,37 @@ export function SidebarPanel({
         </>
       )}
 
-      <h2>Revise (chat)</h2>
-      <div className="chat">
-        {(project?.chat ?? []).length === 0 && (
-          <p className="muted">
-            Ask for changes: “make it punchier”, “use less talking head”, “shorten
-            to 15s”, “add captions”.
-          </p>
-        )}
-        {(project?.chat ?? []).map((item, index) => (
-          <div className={`msg ${item.role}`} key={index}>
-            {item.content}
+      {showActions && (
+        <>
+          <h2>Revise (chat)</h2>
+          <div className="chat">
+            {(project?.chat ?? []).length === 0 && (
+              <p className="muted">
+                Ask for changes: “make it punchier”, “use less talking head”,
+                “shorten to 15s”, “add captions”.
+              </p>
+            )}
+            {(project?.chat ?? []).map((item, index) => (
+              <div className={`msg ${item.role}`} key={index}>
+                {item.content}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        placeholder="Make the hook punchier and add captions…"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onRevise();
-        }}
-      />
-      <div style={{ marginTop: 8 }}>
-        <button onClick={onRevise} disabled={busy || !timeline}>
-          Send revision
-        </button>
-      </div>
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Make the hook punchier and add captions…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onRevise();
+            }}
+          />
+          <div style={{ marginTop: 8 }}>
+            <button onClick={onRevise} disabled={busy || !timeline}>
+              Send revision
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

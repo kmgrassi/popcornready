@@ -12,7 +12,6 @@ import {
   CharacterFormState,
   emptyCharacterForm,
 } from "./shared";
-import { v1Api } from "../../lib/api-client";
 
 type UseCharacterLibraryParams = {
   assetProvider: string;
@@ -204,22 +203,10 @@ export function useCharacterLibrary({
     setError(null);
     setBusy("Regenerating with character references...");
     try {
-      const data = await v1Api.generateAsset({
-        provider: clip.generatedBy?.provider || assetProvider,
-        kind: clip.kind || "image",
-        regenerateFromClipId: clip.id,
-        prompt: newShotDelta ? nextPrompt : undefined,
-        description: newShotDelta ? nextPrompt : clip.description,
-        model: clip.generatedBy?.model,
-        size: binding.providerSettings?.aspectRatio,
-        seconds: clip.durationSec,
-        durationSec: clip.durationSec,
-        consistencyMode: binding.consistencyMode,
-        characterProfileIds: binding.characterProfileIds,
-        characterReferenceIds: binding.referenceIds,
-        shotDelta: newShotDelta && nextPrompt ? { prompt: nextPrompt } : undefined,
-      });
-      setProject(data.project);
+      void binding;
+      void newShotDelta;
+      void nextPrompt;
+      unsupported("Asset generation");
     } catch (regenerateError: any) {
       setError(regenerateError.message);
     } finally {

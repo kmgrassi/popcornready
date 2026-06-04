@@ -7,7 +7,6 @@ import {
   GENERATION_STAGE_LABELS,
   GateableGenerationStageType,
 } from "@popcorn/shared/v1/types";
-import { v1Api } from "../lib/api-client";
 
 const FEATURED_TEMPLATE: { icon: string; label: string; text: string; prompt: string } = {
   icon: "🏆",
@@ -194,22 +193,7 @@ export function PromptComposer() {
     setSubmitting(true);
     setError(null);
     try {
-      // The one-shot route runs the full planner -> generation -> assembly
-      // pipeline in a single call and persists the project, so the editor can
-      // open immediately. The v1 generation-runs endpoint only seeds a queued
-      // run today (real execution is a later scope), so submitting there would
-      // leave the run queued forever; route landing generation here instead.
-      // reviewGates is forwarded for forward-compatibility but the one-shot
-      // pipeline does not yet honor per-stage review gating.
-      const data = await v1Api.createStudioProject({
-        goal,
-        targetLengthSec: lengthSec,
-        style: "cinematic story",
-        aspectRatio: "9:16",
-        storyContext: {},
-      });
       void reviewGates;
-      if (!data.project) throw new Error("Unable to create your project.");
       setActiveStage(5);
       navigate(
         `/studio?goal=${encodeURIComponent(goal)}&length=${lengthSec}`

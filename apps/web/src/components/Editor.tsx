@@ -214,147 +214,30 @@ export function Editor({
   async function handleUpload() {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    setError(null);
-    setBusy("Uploading clip…");
-    try {
-      const durationSec = await readDuration(file);
-      const data = await v1Api.uploadAsset({
-        file,
-        durationSec,
-        description: desc,
-      });
-      setProject(data.project);
-      setDesc("");
-      if (fileRef.current) fileRef.current.value = "";
-    } catch (uploadError: any) {
-      setError(uploadError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Asset upload is unavailable until the v1 assets route is mounted.");
   }
 
   async function handleGenerate() {
-    setError(null);
-    setExportResult(null);
-    setBusy("Planning beats, selecting clips, running the critic…");
-    try {
-      const data = await v1Api.generateCut({
-        goal,
-        targetLengthSec: targetLength,
-        style,
-        aspectRatio: aspect,
-        storyContext,
-        mode: editMode,
-        assetIds: selectedEditAssetIds,
-        allowGeneratedGapFill: editMode === "hybrid",
-      });
-      setProject(data.project);
-    } catch (generateError: any) {
-      setError(generateError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Timeline generation is unavailable until the v1 generation route is mounted.");
   }
 
   async function handleOneShot() {
     if (!goal.trim()) return;
-    setError(null);
-    setExportResult(null);
-    setBusy(
-      "Creating your video from the prompt — planning, generating a clip for each scene, and cutting. This can take a couple of minutes…"
-    );
-    try {
-      const data = await v1Api.createStudioProject({
-        goal,
-        targetLengthSec: targetLength,
-        style,
-        aspectRatio: aspect,
-        storyContext,
-      });
-      setProject(data.project);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Prompt-to-video generation is unavailable until the v1 generation route is mounted.");
   }
 
   async function handleGenerateAsset() {
     if (!assetPrompt.trim()) return;
-    setError(null);
-    setBusy(
-      assetKind === "video"
-        ? "Reviewing prompt, then generating video asset…"
-        : "Reviewing prompt, then generating image asset…"
-    );
-    try {
-      const data = await v1Api.generateAsset({
-        provider: assetProvider,
-        kind: assetKind,
-        prompt: assetPrompt,
-        description: assetDesc || assetPrompt,
-        size:
-          assetKind === "video" && assetSize === DEFAULT_IMAGE_SIZE
-            ? DEFAULT_VIDEO_SIZE
-            : assetSize,
-        seconds: assetSeconds,
-        durationSec: assetKind === "image" ? 4 : assetSeconds,
-        referenceClipIds,
-        characterProfileIds,
-        consistencyMode,
-        shotDelta: shotDeltaPrompt.trim()
-          ? { prompt: shotDeltaPrompt.trim() }
-          : undefined,
-        preflightReviewIterations,
-        script: goal,
-        storyContext,
-        characterReferenceIds: selectedCharacterReferenceIds,
-      });
-      setProject(data.project);
-      setAssetPrompt("");
-      setAssetDesc("");
-      setReferenceClipIds([]);
-      setShotDeltaPrompt("");
-      setSelectedCharacterReferenceIds([]);
-    } catch (assetError: any) {
-      setError(assetError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Asset generation is unavailable until the v1 generated-assets route is mounted.");
   }
 
   async function handleRevise() {
     if (!message.trim()) return;
-    setError(null);
-    setExportResult(null);
-    const nextMessage = message;
-    setMessage("");
-    setBusy("Revising the cut…");
-    try {
-      const data = await v1Api.reviseCut({ message: nextMessage });
-      setProject(data.project);
-    } catch (reviseError: any) {
-      setError(reviseError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Timeline revision is unavailable until the v1 revision route is mounted.");
   }
 
   async function handleExport() {
-    setError(null);
-    setBusy("Rendering MP4 with Remotion (first run downloads a browser)…");
-    try {
-      const data = await v1Api.exportTimeline({
-        audioAssetIds: selectedAudioClipId ? [selectedAudioClipId] : [],
-        durationPolicy,
-      });
-      setExportResult(data);
-      await refreshCreatedVideos();
-    } catch (exportError: any) {
-      setError(exportError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Timeline export is unavailable until the v1 export route is mounted.");
   }
 
   async function handleAlignAudio(
@@ -364,23 +247,7 @@ export function Editor({
       setError("Select an audio overlay to align.");
       return;
     }
-    setError(null);
-    setBusy(
-      strategy === "rewrite_script"
-        ? "Rewriting narration to fit the timeline…"
-        : "Extending the timeline to fit the narration…"
-    );
-    try {
-      const data = await v1Api.alignAudio({
-        strategy,
-        audioClipId: selectedAudioClipId,
-      });
-      if (data.project) setProject(data.project);
-    } catch (alignError: any) {
-      setError(alignError.message);
-    } finally {
-      setBusy(null);
-    }
+    setError("Audio alignment is unavailable until the v1 alignment route is mounted.");
   }
 
   function toggleReferenceClip(id: string) {
@@ -447,102 +314,13 @@ export function Editor({
         {error && <div className="error">{error}</div>}
         {busy && <div className="spinner">⏳ {busy}</div>}
 
-        <h2>1 · Upload media</h2>
-        <input ref={fileRef} type="file" accept="video/*,image/*" />
-        <label>Description (what&apos;s in this asset — helps the AI choose)</label>
-        <input
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-          placeholder="e.g. close-up of product, smiling face, city b-roll"
-        />
-        <div style={{ marginTop: 8 }}>
-          <button onClick={handleUpload} disabled={!!busy}>
-            Add asset
-          </button>
-        </div>
-
-        <CharacterPanel
-          activeCharacter={activeCharacter}
-          activeCharacterId={activeCharacterId}
-          activeCharacterReferences={activeCharacterReferences}
-          busy={!!busy}
-          characterForm={characterForm}
-          characterReferences={characterReferences}
-          clipById={clipById}
-          editingCharacterId={editingCharacterId}
-          imageClips={imageClips}
-          referenceAssetId={referenceAssetId}
-          referenceNotes={referenceNotes}
-          referenceQuality={referenceQuality}
-          referenceRole={referenceRole}
-          setActiveCharacterId={setActiveCharacterId}
-          setCharacterForm={setCharacterForm}
-          setEditingCharacterId={setEditingCharacterId}
-          setReferenceAssetId={setReferenceAssetId}
-          setReferenceNotes={setReferenceNotes}
-          setReferenceQuality={setReferenceQuality}
-          setReferenceRole={setReferenceRole}
-          visibleCharacters={visibleCharacters}
-          onArchiveCharacter={archiveCharacter}
-          onDeleteReference={deleteReference}
-          onEditCharacter={editCharacter}
-          onPatchReference={patchReference}
-          onSaveCharacter={saveCharacter}
-          onSaveReference={() => void saveReference()}
-        />
-
-        <AssetGenerationPanel
-          assetDesc={assetDesc}
-          assetKind={assetKind}
-          assetPrompt={assetPrompt}
-          assetProvider={assetProvider}
-          assetSeconds={assetSeconds}
-          assetSize={assetSize}
-          busy={!!busy}
-          characterProfileIds={characterProfileIds}
-          characterProfiles={characterProfiles}
-          characterReferences={characterReferences}
-          clipById={clipById}
-          consistencyMode={consistencyMode}
-          imageClips={imageClips}
-          preflightReviewIterations={preflightReviewIterations}
-          referenceClipIds={referenceClipIds}
-          selectedCharacterReferenceIds={selectedCharacterReferenceIds}
-          shotDeltaPrompt={shotDeltaPrompt}
-          setAssetDesc={setAssetDesc}
-          setAssetKind={handleAssetKindChange}
-          setAssetPrompt={setAssetPrompt}
-          setAssetProvider={setAssetProvider}
-          setAssetSeconds={setAssetSeconds}
-          setAssetSize={setAssetSize}
-          setConsistencyMode={setConsistencyMode}
-          setPreflightReviewIterations={setPreflightReviewIterations}
-          setShotDeltaPrompt={setShotDeltaPrompt}
-          onGenerateAsset={handleGenerateAsset}
-          onToggleCharacterProfile={toggleCharacterProfile}
-          onToggleReferenceClip={toggleReferenceClip}
-          onToggleSelectedCharacterReference={toggleSelectedCharacterReference}
-        />
-
-        <LibraryPanel
-          activeCharacter={activeCharacter}
-          busy={!!busy}
-          clips={clips}
-          defaultReferenceRole={referenceRole}
-          selectedEditAssetIds={selectedEditAssetIds}
-          onAddReferenceForAsset={addReferenceForAsset}
-          onHandleRegenerateAsset={handleRegenerateAsset}
-          onSaveReview={saveReview}
-          onToggleEditAsset={toggleEditAsset}
-        />
-
         <BriefPanel
           aspect={aspect}
           busy={!!busy}
           clipsCount={clips.length}
           editMode={editMode}
           goal={goal}
-          hasLibraryGeneration={clips.length > 0}
+          hasLibraryGeneration={false}
           selectedEditAssetsCount={selectedEditAssetIds.length}
           storyContext={storyContext}
           style={style}
@@ -554,7 +332,6 @@ export function Editor({
           setTargetLength={setTargetLength}
           setStoryField={setStoryField}
           onGenerate={handleGenerate}
-          onOneShot={handleOneShot}
         />
       </div>
 
@@ -577,6 +354,7 @@ export function Editor({
         onAlignAudio={handleAlignAudio}
         onExport={handleExport}
         onRefreshCreatedVideos={refreshCreatedVideos}
+        showActions={false}
       />
 
       <SidebarPanel
@@ -587,6 +365,7 @@ export function Editor({
         setMessage={setMessage}
         timeline={timeline}
         onRevise={handleRevise}
+        showActions={false}
       />
     </div>
   );

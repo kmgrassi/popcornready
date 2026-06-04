@@ -30,6 +30,7 @@ interface PreviewPanelProps {
   onAlignAudio: (strategy: "rewrite_script" | "extend_timeline") => void;
   onExport: () => void;
   onRefreshCreatedVideos: () => void;
+  showActions?: boolean;
 }
 
 export function PreviewPanel({
@@ -51,6 +52,7 @@ export function PreviewPanel({
   onAlignAudio,
   onExport,
   onRefreshCreatedVideos,
+  showActions = true,
 }: PreviewPanelProps) {
   return (
     <div className="col center">
@@ -62,7 +64,7 @@ export function PreviewPanel({
             {timeline.segments.length} segments ·{" "}
             {timelineDurationSec(timeline).toFixed(1)}s · {timeline.aspectRatio}
           </div>
-          {audioClips.length > 0 && (
+          {showActions && audioClips.length > 0 && (
             <div style={{ marginBottom: 8 }}>
               <label style={{ textAlign: "left" }}>Audio overlay</label>
               <select
@@ -118,9 +120,11 @@ export function PreviewPanel({
               )}
             </div>
           )}
-          <button className="secondary" onClick={onExport} disabled={busy}>
-            Export MP4
-          </button>
+          {showActions && (
+            <button className="secondary" onClick={onExport} disabled={busy}>
+              Export MP4
+            </button>
+          )}
           {exportResult && (
             <div style={{ marginTop: 10 }}>
               <a href={exportResult.url} target="_blank" rel="noreferrer">
