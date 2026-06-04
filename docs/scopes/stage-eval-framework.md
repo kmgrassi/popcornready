@@ -184,6 +184,7 @@ interface EvalRun {                  // mirrors GenerationRun — covers the bat
   source: "suite" | "manual_workbench"; // batch regression vs an admin driving one story by hand (§6C)
   suiteId?: string;                 // set when source = "suite"
   generationMode: "prompts_only" | "full"; // prompts_only skips expensive provider calls — judge the specs without video spend
+  stopAfter?: GenerationStageType;  // debug/test breakpoint: halt after this stage and await continue (unset = autonomous)
   gitSha: string;
   branch: string;
   judgeModels: Record<string, string>; // evaluatorId → model, for reproducibility
@@ -243,6 +244,25 @@ interface ExpectationResult {        // grades the JUDGE (meta-eval), only when 
 - **The verdict is recomputed deterministically from grades**, never read from
   the model's own `passed` field (the `eval-prompt-grader.ts` `computePassed`
   pattern). The judge supplies scores + rationale; the framework decides pass/fail.
+- **Bounded execution for debug/test — autonomous by default, stops are opt-in.**
+  The normal production path runs straight through (`docs/NORTH_STAR.md`
+  principle 2). For debugging and for tests, the run input carries opt-in
+  execution controls that the autonomous path simply leaves unset:
+  - **`stopAfter` — a breakpoint at a stage boundary.** Halt after a named stage
+    (e.g. `creative_plan`) and **await an explicit continue**, so a human or the
+    suite can inspect/judge the artifact before any further (and any expensive)
+    work runs. Reuses the same pause plumbing as `reviewGates` (the run sits
+    paused; a `continue` resumes it) — it differs only in *intent*: a debug/test
+    breakpoint, not a human review gate.
+  - **`prompts_only` — a dry-run depth.** A special, common stop: run plan +
+    per-asset prompt construction + `preflight`, but **stop before any provider
+    call**, producing the specs without media spend. This is the workbench's
+    default (§6C) and is just the cheap end of the same bounded-execution control.
+
+  Both are knobs on the *one engine* (the live `GenerationRun` and the
+  fixture-driven `EvalRun` share them), so a debug run, a test run, and a
+  production run differ only by which stops are set — never by a separate code
+  path.
 
 ### Storage
 
@@ -349,9 +369,13 @@ Flow:
    deliberately-bad) workbench run into a saved `EvalCase`, freezing its
    prompts/artifacts so the suite (B) replays it forever.
 
-This needs two things beyond the suite: the **`prompts_only` generation mode**
-(plan + per-asset prompt construction + `preflight`, stopping before provider
-calls) and an **on-demand single-artifact judge endpoint**
+The admin can also **step the run stage-by-stage** using `stopAfter` (§3
+principles): halt after `creative_plan`, judge the arc, then continue to the next
+stage — a breakpoint walk through the pipeline.
+
+This needs three things beyond the suite: the **bounded-execution controls**
+(`stopAfter` breakpoints + the `prompts_only` dry-run — both from §3, both on the
+shared engine), and an **on-demand single-artifact judge endpoint**
 (`POST …/judgments { evaluatorId, artifactId }`) that the "Run judge" button and
 the inline "re-judge" action both call.
 
@@ -397,12 +421,16 @@ ordered by what each piece needs from it:
   hybrid `blocking_gate` / `observational` modes; add the eval v1 endpoints and
   the `/evals` dashboard + run-diff in `apps/web`; "save live run as regression
   case."
-- **P2b — Admin workbench (§6C).** Adds the **`prompts_only` generation mode**
-  (plan + per-asset prompt construction + `preflight`, stopping before provider
-  calls), the **on-demand single-artifact judge endpoint**, and the admin-gated
-  `/admin/evals` UI (story picker → prompts-only generate → per-card "Run judge"
-  → per-story scorecard → promote-to-case). Shares the eval API + Judgment record
-  from P2; the only net-new engine capability is the prompts-only dry run.
+- **P2b — Admin workbench (§6C) + bounded execution.** Adds the engine's
+  **bounded-execution controls** — `stopAfter` stage breakpoints (reusing the
+  `reviewGates` pause plumbing) and the **`prompts_only` dry-run** (plan +
+  per-asset prompt construction + `preflight`, stopping before provider calls) —
+  the **on-demand single-artifact judge endpoint**, and the admin-gated
+  `/admin/evals` UI (story picker → prompts-only / step-by-step generate →
+  per-card "Run judge" → per-story scorecard → promote-to-case). Shares the eval
+  API + Judgment record from P2; the net-new engine capability is the
+  bounded-execution stop controls. The autonomous production path leaves them
+  unset, so this adds no behavior change to normal runs.
 - **P3 — Expectations + judge calibration + the stitching judge.**
   `CaseExpectation`/`ExpectationResult`, labeled good/broken fixtures, the
   `stitch_continuity` evaluator, and a CI gate that fails on regression /
