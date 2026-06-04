@@ -4,6 +4,10 @@ import { useAuth } from "./AuthProvider";
 export function AuthNavButton() {
   const { status, user, signOut } = useAuth();
 
+  if (status === "disabled") {
+    return <Link to="/login">Sign in</Link>;
+  }
+
   if (status === "authenticated") {
     return (
       <button

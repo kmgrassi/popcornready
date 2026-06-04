@@ -20,6 +20,14 @@ import {
 import { V1Job } from "../jobs";
 import { createProject, getAsset, listAssets } from "../store";
 
+// These exercise the v1 store, which now persists to Supabase Postgres (needs a
+// live PostgREST gateway). Skipped unless Supabase env is configured; the store's
+// asset round-trips are proven by the dockerized pg harness in this PR.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const dbTest: typeof test = SUPABASE_CONFIGURED ? test : (test.skip as typeof test);
+
 const auth: AuthContext = {
   mode: "local",
   actor: { id: "local_dev", type: "local" },
@@ -54,7 +62,7 @@ async function expectApiError(
   });
 }
 
-test("creates image, video, and audio generated assets and lists them", async () => {
+dbTest("creates image, video, and audio generated assets and lists them", async () => {
   const projectId = await newProjectId("agent video");
 
   const image = await createGeneratedAsset({
@@ -108,7 +116,7 @@ test("creates image, video, and audio generated assets and lists them", async ()
   assert.ok(items.every((a) => a.source.type === "generated"));
 });
 
-test("persists actual audio duration in provenance", async () => {
+dbTest("persists actual audio duration in provenance", async () => {
   const projectId = await newProjectId("audio provenance");
 
   const res = await createGeneratedAsset({
@@ -132,7 +140,7 @@ test("persists actual audio duration in provenance", async () => {
   assert.equal(asset.durationSec, 5);
 });
 
-test("persists provider settings used to produce the asset", async () => {
+dbTest("persists provider settings used to produce the asset", async () => {
   const projectId = await newProjectId("provider settings");
 
   const image = await createGeneratedAsset({
@@ -180,7 +188,7 @@ test("persists provider settings used to produce the asset", async () => {
   assert.equal(audioAsset.provenance?.providerSettings?.audioMode, "speech");
 });
 
-test("routes NVIDIA Cosmos video through the generated-assets adapter", async (t) => {
+dbTest("routes NVIDIA Cosmos video through the generated-assets adapter", async (t) => {
   const projectId = await newProjectId("nvidia generated asset");
   const originalFetch = globalThis.fetch;
   const originalApiKey = process.env.NVIDIA_API_KEY;
@@ -262,7 +270,7 @@ test("routes NVIDIA Cosmos video through the generated-assets adapter", async (t
   assert.equal(asset.provenance?.providerSettings?.resolution, "480_16_9");
 });
 
-test("records character binding metadata when character fields are provided", async () => {
+dbTest("records character binding metadata when character fields are provided", async () => {
   const projectId = await newProjectId("character binding");
 
   const res = await createGeneratedAsset({
@@ -292,7 +300,7 @@ test("records character binding metadata when character fields are provided", as
   );
 });
 
-test("returns typed errors for unsupported and invalid requests", async () => {
+dbTest("returns typed errors for unsupported and invalid requests", async () => {
   const projectId = await newProjectId("errors");
 
   // Audio requested from an image/video-only provider.
