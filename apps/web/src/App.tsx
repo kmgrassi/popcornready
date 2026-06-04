@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
+import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
@@ -17,6 +18,7 @@ export function App() {
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/projects/:projectId/runs/:runId" element={<RunProgressPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="*" element={<Placeholder name="Not found" />} />

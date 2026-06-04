@@ -7,7 +7,8 @@ type StageItemKind = GenerationStageItem["kind"];
 
 // Caller-resolved view of the artifact an item is rendering. Stage items
 // reference assets/artifacts by id; the parent resolves the id to a URL or
-// text payload and passes the result in.
+// text payload and passes the result in. Keeping the card storage-neutral
+// means it works the same whether the asset lives on disk or in S3.
 export interface StageItemAsset {
   url?: string;
   mimeType?: string;
@@ -19,6 +20,9 @@ export interface StageItemAsset {
 export interface StageItemCardProps {
   item: GenerationStageItem;
   asset?: StageItemAsset;
+  // Optional short status line shown under the progress bar while running.
+  // GenerationStageItem itself has no message field; the parent owns this
+  // text (typically derived from the matching Job's JobProgress.message).
   statusMessage?: string;
   onRetry?: (item: GenerationStageItem) => void;
 }
@@ -61,7 +65,6 @@ function Skeleton({ kind }: { kind: StageItemKind }) {
 function ProgressBar({ percent }: { percent?: number }) {
   const determinate = typeof percent === "number" && Number.isFinite(percent);
   const clamped = determinate ? Math.max(0, Math.min(100, percent)) : 0;
-
   return (
     <div
       className={`progress-bar ${determinate ? "determinate" : "indeterminate"}`}

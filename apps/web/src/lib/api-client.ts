@@ -1,9 +1,11 @@
 import type {
   BriefVersion,
+  GateableGenerationStageType,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
 import type { Project } from "@popcorn/shared/types";
+import type { GenerationRunDetail } from "./v1/generation-runs/status";
 import {
   authenticatedFetch,
   getAuthenticatedHeaders,
@@ -138,6 +140,11 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
+export interface RejectGenerationRunInput {
+  stageType?: GateableGenerationStageType;
+  note?: string;
+}
+
 export interface StudioProjectResponse {
   project: Project | null;
 }
@@ -169,6 +176,28 @@ export const v1Api = {
   getProject: (projectId: string) =>
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
+    ),
+  getGenerationRun: (
+    projectId: string,
+    runId: string,
+    signal?: AbortSignal
+  ) =>
+    apiRequest<GenerationRunDetail>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}`,
+      { signal }
+    ),
+  updateGenerationRun: (
+    projectId: string,
+    runId: string,
+    action: "approve" | "reject" | "cancel",
+    body?: RejectGenerationRunInput
+  ) =>
+    apiRequest<GenerationRunDetail>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}/${action}`,
+      {
+        method: "POST",
+        body: body ?? {},
+      }
     ),
   getStudioProject: async (): Promise<StudioProjectResponse> => {
     const { projects } = await v1Api.listProjects({ limit: 1 });
