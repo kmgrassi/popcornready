@@ -4,6 +4,7 @@ import { authMiddleware } from "../../middleware/auth.js";
 import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
 import { projectsRouter } from "./projects.js";
+import { generationsRouter } from "./generations.js";
 
 // Mounts the versioned agent API under /api/v1. Route groups are added here as
 // each is ported from the former Next.js handlers (see MIGRATION.md for the
@@ -23,6 +24,7 @@ export function mountV1(app: Express) {
   // One line per protected route group: parallel A-track PRs add their router here.
   v1.use(meRouter);
   v1.use(projectsRouter);
+  v1.use(generationsRouter);
 
   app.use("/api/v1", v1);
 }
