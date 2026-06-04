@@ -23,6 +23,16 @@ export function AuthForm({ mode }: AuthFormProps) {
       return;
     }
 
+    if (status === "loading") {
+      setReady(false);
+      return;
+    }
+
+    if (status === "authenticated") {
+      setReady(true);
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       try {
@@ -38,7 +48,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     return () => {
       cancelled = true;
     };
-  }, [configured]);
+  }, [configured, status]);
 
   useEffect(() => {
     if (status === "authenticated") navigate("/studio", { replace: true });
