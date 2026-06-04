@@ -26,6 +26,9 @@ importers:
       '@popcorn/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@popcorn/eval':
+        specifier: workspace:*
+        version: link:../../packages/eval
       '@popcorn/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
