@@ -1,6 +1,8 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AdminPage } from "./routes/AdminPage";
+import { LoginPage } from "./routes/LoginPage";
+import { SignupPage } from "./routes/SignupPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
 // apps/web/src/routes/* and adds exactly one child <Route> here.
@@ -11,8 +13,8 @@ export function App() {
         <Route index element={<Placeholder name="Home" />} />
         <Route path="/studio" element={<Placeholder name="Studio" />} />
         <Route path="/admin" element={<AdminPage />} />
-        <Route path="/login" element={<Placeholder name="Login" />} />
-        <Route path="/signup" element={<Placeholder name="Signup" />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
         <Route path="*" element={<Placeholder name="Not found" />} />
       </Route>
     </Routes>
