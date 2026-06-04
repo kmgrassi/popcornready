@@ -4,6 +4,7 @@ import { ApiError } from "../errors";
 import { V1Store } from "../store";
 import {
   CompositionPlan,
+  CompositionMode,
   GenerationJobInput,
   GenerationRequest,
   V1Asset,
@@ -41,6 +42,79 @@ export function assetToClip(asset: V1Asset): Clip {
 }
 
 // --- Validation / resolution ----------------------------------------------
+
+const COMPOSITION_MODES = new Set<CompositionMode>([
+  "asset_driven",
+  "prompt_only",
+  "hybrid",
+]);
+
+function parseMode(value: unknown): CompositionMode | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !COMPOSITION_MODES.has(value as CompositionMode)) {
+    throw new ApiError(
+      "validation_failed",
+      "mode must be asset_driven, prompt_only, or hybrid.",
+      {
+        fields: [
+          {
+            path: "mode",
+            message: "Must be one of: asset_driven, prompt_only, hybrid.",
+          },
+        ],
+      }
+    );
+  }
+  return value as CompositionMode;
+}
+
+function parseAllowGeneratedGapFill(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") {
+    throw new ApiError("validation_failed", "allowGeneratedGapFill must be a boolean.", {
+      fields: [{ path: "allowGeneratedGapFill", message: "Must be true or false." }],
+    });
+  }
+  return value;
+}
+
+function unique(ids: string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function generatedGapBeatNames(composition: CompositionPlan): string[] {
+  return composition.plannedBeats
+    .filter(
+      (beat) =>
+        beat.assetStrategy === "generate_image" ||
+        beat.assetStrategy === "generate_video"
+    )
+    .map((beat) => beat.name);
+}
+
+function requireExplicitHybridGapFillChoice(
+  composition: CompositionPlan,
+  allowGeneratedGapFill: boolean | undefined
+): void {
+  const missingBeats = generatedGapBeatNames(composition);
+  if (composition.mode !== "hybrid" || missingBeats.length === 0) return;
+  if (allowGeneratedGapFill !== undefined) return;
+
+  throw new ApiError(
+    "validation_failed",
+    "Hybrid gap fill requires an explicit allowGeneratedGapFill choice.",
+    {
+      fields: [
+        {
+          path: "allowGeneratedGapFill",
+          message:
+            "Set true to include generated gap-fill assets, or false to proceed uploaded-only.",
+        },
+      ],
+      missingBeats,
+    }
+  );
+}
 
 export async function prepareGeneration(
   store: V1Store,
@@ -81,6 +155,8 @@ export async function prepareGeneration(
     ? body.assetIds.map((id) => String(id))
     : [];
   const compositionId = body.compositionId ? String(body.compositionId) : undefined;
+  const requestedMode = parseMode(body.mode);
+  const allowGeneratedGapFill = parseAllowGeneratedGapFill(body.allowGeneratedGapFill);
 
   let composition: CompositionPlan | null = null;
   if (compositionId) {
@@ -105,13 +181,59 @@ export async function prepareGeneration(
         }
       );
     }
+    if (requestedMode && composition.mode !== requestedMode) {
+      throw new ApiError(
+        "validation_failed",
+        `Composition ${compositionId} is ${composition.mode}, not ${requestedMode}.`,
+        {
+          fields: [
+            {
+              path: "mode",
+              message: "Requested mode must match the composition mode.",
+            },
+          ],
+        }
+      );
+    }
   }
 
   let assetIds: string[];
   if (requestedAssetIds.length > 0) {
-    // Asset-driven or hybrid: the agent supplies the asset set explicitly.
-    assetIds = requestedAssetIds;
+    if (composition?.mode === "hybrid" && generatedGapBeatNames(composition).length > 0) {
+      requireExplicitHybridGapFillChoice(composition, allowGeneratedGapFill);
+      if (allowGeneratedGapFill) {
+        if (composition.status !== "ready_for_timeline") {
+          throw new ApiError(
+            "asset_not_ready",
+            `Composition ${compositionId} has generated gap-fill assets that are not ready (status: ${composition.status}).`,
+            { missingBeats: generatedGapBeatNames(composition) }
+          );
+        }
+        assetIds = unique([...requestedAssetIds, ...composition.readyAssetIds]);
+      } else {
+        assetIds = requestedAssetIds;
+      }
+    } else {
+      // Asset-driven or uploaded-only hybrid: the agent supplies the asset set explicitly.
+      assetIds = requestedAssetIds;
+    }
   } else if (composition) {
+    requireExplicitHybridGapFillChoice(composition, allowGeneratedGapFill);
+    if (composition.mode === "hybrid" && allowGeneratedGapFill === false) {
+      throw new ApiError(
+        "validation_failed",
+        "assetIds is required to proceed uploaded-only with a hybrid composition.",
+        {
+          fields: [
+            {
+              path: "assetIds",
+              message:
+                "Provide uploaded assetIds, or set allowGeneratedGapFill true to use generated assets.",
+            },
+          ],
+        }
+      );
+    }
     // Prompt-only: assetIds may be empty only when the composition is done.
     if (composition.status !== "ready_for_timeline") {
       throw new ApiError(
@@ -159,7 +281,14 @@ export async function prepareGeneration(
     );
   }
 
-  const generatedAssetJobIds = new Set<string>(composition?.generatedAssetJobIds ?? []);
+  const includeCompositionGeneratedJobs = Boolean(
+    composition &&
+      (requestedAssetIds.length === 0 ||
+        (composition.mode === "hybrid" && allowGeneratedGapFill === true))
+  );
+  const generatedAssetJobIds = new Set<string>(
+    includeCompositionGeneratedJobs ? composition?.generatedAssetJobIds ?? [] : []
+  );
   for (const asset of resolved) {
     if (asset.generatedAssetJobId) generatedAssetJobIds.add(asset.generatedAssetJobId);
   }
@@ -174,6 +303,8 @@ export async function prepareGeneration(
   return {
     briefVersionId,
     ...(compositionId ? { compositionId } : {}),
+    ...(requestedMode ? { mode: requestedMode } : composition ? { mode: composition.mode } : {}),
+    ...(allowGeneratedGapFill === undefined ? {} : { allowGeneratedGapFill }),
     assetIds,
     generatedAssetJobIds: [...generatedAssetJobIds],
     ...(showCaptions === undefined ? {} : { showCaptions }),
