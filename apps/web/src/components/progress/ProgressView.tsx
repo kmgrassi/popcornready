@@ -28,6 +28,11 @@ interface ProgressViewProps {
     onReject: () => void;
     onCancel: () => void;
   };
+  cancelAction?: {
+    pending?: boolean;
+    error?: string | null;
+    onCancel: () => void;
+  };
   /** Optional list of other demo runs to link to from the header. */
   alternateRuns?: { runId: string; label: string }[];
 }
@@ -41,6 +46,7 @@ export function ProgressView({
   stages,
   stageItems = [],
   reviewActions,
+  cancelAction,
   alternateRuns,
 }: ProgressViewProps) {
   const [detail, setDetail] = useState({ run, stages, stageItems });
@@ -60,8 +66,12 @@ export function ProgressView({
   const reviewItems = detail.run.reviewGate
     ? detail.stageItems.filter((item) => item.stageId === detail.run.reviewGate?.stageId)
     : [];
+  const generatedItems = detail.run.reviewGate
+    ? detail.stageItems.filter((item) => item.stageId !== detail.run.reviewGate?.stageId)
+    : detail.stageItems;
   const pending = reviewActions?.pending ?? (fallbackApproving ? "approve" : undefined);
   const actionError = reviewActions?.error ?? fallbackError;
+  const showCancelAction = !terminal && !detail.run.reviewGate && !!cancelAction;
 
   async function approveFallback() {
     const reviewGate = detail.run.reviewGate;
@@ -160,6 +170,37 @@ export function ProgressView({
         <section className="progress-main">
           {terminal ? <TerminalState run={detail.run} /> : <StatusBanner run={detail.run} />}
 
+          {showCancelAction ? (
+            <section
+              className="progress-empty-card awaiting-review-card"
+              aria-labelledby="run-actions-heading"
+            >
+              <div className="review-gate-head">
+                <div>
+                  <p className="progress-eyebrow">Run controls</p>
+                  <h2 id="run-actions-heading" className="progress-card-heading">
+                    Active generation
+                  </h2>
+                </div>
+                <div className="review-actions">
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    onClick={cancelAction.onCancel}
+                    disabled={cancelAction.pending}
+                  >
+                    {cancelAction.pending ? "Canceling..." : "Cancel generation"}
+                  </button>
+                </div>
+              </div>
+              {cancelAction.error ? (
+                <p className="review-gate-error" role="alert">
+                  {cancelAction.error}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
           {detail.run.reviewGate ? (
             <section
               className="review-gate-card awaiting-review-card"
@@ -232,13 +273,26 @@ export function ProgressView({
             </section>
           ) : null}
 
-          <div className="progress-empty-card">
-            <h2 className="progress-card-heading">Generated assets</h2>
-            <p className="muted">
-              Generated visuals, audio, and timeline beats will appear here as
-              each stage produces them.
-            </p>
-          </div>
+          <section
+            className="progress-empty-card awaiting-review-card"
+            aria-labelledby="generated-assets-heading"
+          >
+            <h2 id="generated-assets-heading" className="progress-card-heading">
+              Generated assets
+            </h2>
+            {generatedItems.length > 0 ? (
+              <div className="stage-item-grid review-output-grid">
+                {generatedItems.map((item) => (
+                  <StageItemCard key={item.itemId} item={item} />
+                ))}
+              </div>
+            ) : (
+              <p className="muted">
+                Generated visuals, audio, and timeline beats will appear here as
+                each stage produces them.
+              </p>
+            )}
+          </section>
         </section>
 
         <aside className="progress-rail-pane" aria-label="Stage rail">

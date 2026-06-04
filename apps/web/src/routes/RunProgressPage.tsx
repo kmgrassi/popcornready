@@ -106,6 +106,7 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
   }, [applyPayload, projectId, runId]);
 
   async function runAction(action: "approve" | "reject" | "cancel") {
+    if (actionPending) return;
     setActionPending(action);
     setActionError(null);
     try {
@@ -155,6 +156,15 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
       run={payload.run}
       stages={payload.stages}
       stageItems={payload.stageItems}
+      cancelAction={
+        !payload.run.reviewGate && !isTerminal(payload.run.status)
+          ? {
+              pending: actionPending === "cancel",
+              error: actionError,
+              onCancel: () => void runAction("cancel"),
+            }
+          : undefined
+      }
       reviewActions={
         payload.run.reviewGate
           ? {

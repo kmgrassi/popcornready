@@ -1,6 +1,3 @@
-"use client";
-
-import React from "react";
 import type {
   GenerationRunStatus,
   GenerationStageItem,
@@ -67,7 +64,7 @@ function Skeleton({ kind }: { kind: StageItemKind }) {
 
 function ProgressBar({ percent }: { percent?: number }) {
   const determinate = typeof percent === "number" && Number.isFinite(percent);
-  const clamped = determinate ? Math.max(0, Math.min(100, percent as number)) : 0;
+  const clamped = determinate ? Math.max(0, Math.min(100, percent)) : 0;
   return (
     <div
       className={`progress-bar ${determinate ? "determinate" : "indeterminate"}`}
@@ -101,6 +98,7 @@ function MediaFrame({
   if (!asset?.url) {
     return <div className="media-frame placeholder" aria-hidden="true" />;
   }
+
   if (item.kind === "image") {
     return (
       <div className="media-frame">
@@ -108,6 +106,7 @@ function MediaFrame({
       </div>
     );
   }
+
   return (
     <div className="media-frame">
       <video
@@ -173,7 +172,9 @@ export function StageItemCard({
   onRetry,
 }: StageItemCardProps) {
   const canRetry =
-    item.status === "failed" && item.retryable === true && !!onRetry;
+    item.status === "failed" &&
+    (item.retryable ?? item.error?.retryable) === true &&
+    !!onRetry;
 
   return (
     <article
@@ -209,7 +210,7 @@ export function StageItemCard({
               )}
               {item.provider && statusMessage && (
                 <span className="dot" aria-hidden="true">
-                  ·
+                  &middot;
                 </span>
               )}
               {statusMessage && (
@@ -243,7 +244,7 @@ export function StageItemCard({
             <button
               type="button"
               className="secondary compact stage-item-retry"
-              onClick={() => onRetry!(item)}
+              onClick={() => onRetry(item)}
             >
               Retry
             </button>
