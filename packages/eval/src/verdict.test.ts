@@ -29,3 +29,24 @@ test("evaluateExpectations reports grade floor misses for matching stages", () =
     { matched: false, detail: "storyArc 5 < 7" }
   );
 });
+
+test("evaluateExpectations fails closed for unsupported golden and assertion expectations", () => {
+  assert.deepEqual(
+    evaluateExpectations(
+      "creative_plan",
+      { storyArc: 9 },
+      [
+        {
+          stageType: "creative_plan",
+          goldenArtifactId: "golden-plan",
+          assertions: ["The plan resolves the conflict."],
+        },
+      ]
+    ),
+    {
+      matched: false,
+      detail:
+        "goldenArtifactId expectations are not supported yet; assertion expectations are not supported yet",
+    }
+  );
+});

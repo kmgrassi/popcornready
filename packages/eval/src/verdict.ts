@@ -49,6 +49,13 @@ export function evaluateExpectations(
   const misses: string[] = [];
 
   for (const expectation of relevant) {
+    if (expectation.goldenArtifactId) {
+      misses.push("goldenArtifactId expectations are not supported yet");
+    }
+    if ((expectation.assertions?.length ?? 0) > 0) {
+      misses.push("assertion expectations are not supported yet");
+    }
+
     for (const [dimension, floor] of Object.entries(expectation.gradeFloors ?? {})) {
       const grade = grades[dimension];
       if (typeof grade !== "number") {

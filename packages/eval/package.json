@@ -10,7 +10,7 @@
   "scripts": {
     "eval:suite": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@popcorn/shared": "workspace:*"
