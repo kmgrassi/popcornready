@@ -69,9 +69,17 @@ brief_intake → creative_plan → asset_generation → audio_generation
 ```
 
 Every stage runs through a progress emitter — `RunStageHandle` /
-`RunStageItemHandle` (`src/lib/v1/generation-progress.ts`) — whose
-`succeed({ artifactId, assetId })` is called exactly once per stage/item. **That
-is the one interception point** the framework hooks.
+`RunStageItemHandle` (`src/lib/v1/generation-progress.ts`) — with one terminal
+call per stage/item. **This is the natural interception point the framework
+hooks — but it is not evidence-bearing today**, which is a prerequisite we must
+fix first (see "Evidence-bearing hook" below): item-level
+`succeed({ assetId, artifactId })` *does* carry the produced media, but
+**stage-level `succeed()` only takes a `message`** (`StageSucceedOptions`), and
+text stages like `creative_plan` call `succeed()` with the plan held in a local
+variable and **never persisted** (`apps/api/src/lib/v1/generation.ts:255-262`,
+`generation-progress.ts:50-52`). So a judge that merely wraps `succeed()` would
+have **nothing to evaluate** for story-arc or timeline-assembly. The hook must be
+made evidence-bearing before judging rides on it.
 
 **Judges that already exist** (reuse, don't rebuild):
 
@@ -213,12 +221,27 @@ interface ExpectationResult {        // grades the JUDGE (meta-eval), only when 
   the ffmpeg path in `video-snapshot-review.ts`); the **stitching judge needs
   boundary frames** (the last frame of clip N + first frame of clip N+1) plus the
   timeline.
-- **One hook point.** Wrap the progress emitter so that on every
-  `stage.succeed()` / `item.succeed(artifactId)` the registered evaluator(s) fire
-  and write Judgments. **Inline mode** = real `runGenerationJob`
+- **Evidence-bearing hook (prerequisite — do this first).** The judge can only
+  run if the thing it judges is *available and persisted* at the hook. Today it is
+  not for text stages: `StageSucceedOptions` is `{ message }` only, and
+  `creative_plan` succeeds with the plan in a local var, unpersisted
+  (`apps/api/src/lib/v1/generation.ts:255-262`). So **before** wiring evaluators,
+  every stage/tool must emit its output as a **persisted, addressable artifact**:
+  extend the terminal call to carry a result artifact
+  (`StageSucceedOptions.resultArtifactId`, mirroring the item-level
+  `assetId`/`artifactId`) and persist the stage's output (plan, timeline, …) as a
+  first-class artifact keyed to the stage. This is **no-regret** — it is exactly
+  NORTH_STAR principle 9 ("nothing is throwaway — everything is persisted") and
+  principle 4's "generation is a first-class node," which the un-persisted plan
+  already violates. The eval framework is the forcing function, not the owner.
+- **One hook point (once evidence-bearing).** With each stage/tool persisting its
+  artifact, wrap the progress emitter so that on every `stage.succeed()` /
+  `item.succeed()` the registered evaluator(s) read the just-persisted artifact,
+  fire, and write Judgments. **Inline mode** = real `runGenerationJob`
   (`src/lib/v1/generation.ts`). **Offline mode** = a harness that drives a
   fixture through the same stages behind the same hook. This is how we get "a
-  test at every tool call" without scattering assertions.
+  test at every tool call" without scattering assertions — *provided* the
+  prerequisite above lands first.
 - **Hybrid enforcement — gate the cheap upstream, observe the expensive
   downstream.** Each evaluator has a `mode`. Stages *before the high-cost video
   fan-out* — story arc/plan, character anchors, keyframes/storyboard — are
@@ -415,12 +438,19 @@ ordered by what each piece needs from it:
   `EvaluatorContext`, and a CLI suite harness that drives fixtures through the
   judges and writes Judgments. Runnable as soon as the judges land in
   `packages/agent` — even before generation is ported to `apps/api`.
+- **P2 prereq — evidence-bearing stages.** Make every stage/tool persist its
+  output as an addressable artifact and carry it on the terminal call
+  (`StageSucceedOptions.resultArtifactId`; persist the plan/timeline as
+  first-class artifacts). Without this the inline hook has nothing to judge for
+  text stages (see §3 "Evidence-bearing hook"). No-regret; aligns with NORTH_STAR
+  principles 4 & 9. The CLI suite (P1) doesn't need it — it calls the judges
+  directly — but inline gating and the workbench do.
 - **P2 — Live inline gating + dashboard.** Lands when the generation stack
   (`runGenerationJob`, generation-runs) is ported into `apps/api/src/core`
-  (MIGRATION.md route-parity work). Hook the ported progress emitter for the
-  hybrid `blocking_gate` / `observational` modes; add the eval v1 endpoints and
-  the `/evals` dashboard + run-diff in `apps/web`; "save live run as regression
-  case."
+  (MIGRATION.md route-parity work) **and** the P2 prereq above is in. Hook the
+  ported progress emitter for the hybrid `blocking_gate` / `observational` modes;
+  add the eval v1 endpoints and the `/evals` dashboard + run-diff in `apps/web`;
+  "save live run as regression case."
 - **P2b — Admin workbench (§6C) + bounded execution.** Adds the engine's
   **bounded-execution controls** — `stopAfter` stage breakpoints (reusing the
   `reviewGates` pause plumbing) and the **`prompts_only` dry-run** (plan +
