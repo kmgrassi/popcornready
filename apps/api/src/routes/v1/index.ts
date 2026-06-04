@@ -3,6 +3,7 @@ import { Router } from "express";
 import { authMiddleware } from "../../middleware/auth.js";
 import { healthRouter } from "./health.js";
 import { meRouter } from "./me.js";
+import { miscCapabilitiesRouter } from "./misc-capabilities.js";
 import { projectsRouter } from "./projects.js";
 
 // Mounts the versioned agent API under /api/v1. Route groups are added here as
@@ -23,6 +24,7 @@ export function mountV1(app: Express) {
   // One line per protected route group: parallel A-track PRs add their router here.
   v1.use(meRouter);
   v1.use(projectsRouter);
+  v1.use(miscCapabilitiesRouter);
 
   app.use("/api/v1", v1);
 }

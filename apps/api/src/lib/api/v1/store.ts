@@ -13,6 +13,13 @@ import { newId } from "./ids";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
+  type CompositionPlan as ContractCompositionPlan,
+  type Job,
+  type JobStatus,
+  type JobType,
+  SCHEMA as CONTRACT_SCHEMA,
+} from "@popcorn/shared/v1/types";
+import {
   AgentAssetSource,
   AgentAssetContext,
   AgentClipContext,
@@ -135,6 +142,8 @@ interface V1Db {
   projects: V1Project[];
   briefVersions: V1BriefVersion[];
   assets: V1Asset[];
+  compositions: ContractCompositionPlan[];
+  jobs: Job[];
   idempotency: IdempotencyRecord[];
 }
 
@@ -179,6 +188,8 @@ function emptyDb(): V1Db {
     projects: [],
     briefVersions: [],
     assets: [],
+    compositions: [],
+    jobs: [],
     idempotency: [],
   };
 }
@@ -440,6 +451,122 @@ export async function listAssets(
   const db = await readDb();
   const all = db.assets.filter(
     (a) => a.projectId === projectId && a.workspaceId === workspaceId
+  );
+  return paginate(all, limit, cursor);
+}
+
+export async function saveCompositionPlan(
+  workspaceId: string,
+  composition: ContractCompositionPlan
+): Promise<ContractCompositionPlan> {
+  return mutate((db) => {
+    const project = db.projects.find(
+      (p) =>
+        p.id === composition.projectId &&
+        p.workspaceId === workspaceId &&
+        p.status !== "deleted"
+    );
+    if (!project) throw notFound(`Project not found: ${composition.projectId}`);
+    db.compositions.push(composition);
+    return composition;
+  });
+}
+
+export async function getCompositionPlan(
+  workspaceId: string,
+  projectId: string,
+  compositionId: string
+): Promise<ContractCompositionPlan> {
+  await getProject(workspaceId, projectId);
+  const db = await readDb();
+  const composition = db.compositions.find(
+    (candidate) => candidate.id === compositionId && candidate.projectId === projectId
+  );
+  if (!composition) throw notFound(`Composition not found: ${compositionId}`);
+  return composition;
+}
+
+export async function listCompositionPlans(
+  workspaceId: string,
+  projectId: string,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<ContractCompositionPlan>> {
+  await getProject(workspaceId, projectId);
+  const db = await readDb();
+  const all = db.compositions.filter((composition) => composition.projectId === projectId);
+  return paginate(all, limit, cursor);
+}
+
+export async function createJob(input: {
+  workspaceId: string;
+  projectId: string;
+  type: JobType;
+  status?: JobStatus;
+  requestId?: string;
+  payload?: unknown;
+  result?: unknown;
+}): Promise<Job> {
+  return mutate((db) => {
+    const project = db.projects.find(
+      (p) => p.id === input.projectId && p.workspaceId === input.workspaceId && p.status !== "deleted"
+    );
+    if (!project) throw notFound(`Project not found: ${input.projectId}`);
+    const now = new Date().toISOString();
+    const job: Job = {
+      id: newId("job"),
+      schemaVersion: CONTRACT_SCHEMA.job,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      requestId: input.requestId,
+      type: input.type,
+      status: input.status ?? "queued",
+      progress: {
+        percent: input.status === "succeeded" ? 100 : 0,
+        currentStep: input.status === "succeeded" ? "completed" : "queued",
+      },
+      input: input.payload ?? null,
+      result: input.result ?? null,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.jobs.push(job);
+    return job;
+  });
+}
+
+export async function getJob(
+  workspaceId: string,
+  projectId: string,
+  jobId: string
+): Promise<Job> {
+  await getProject(workspaceId, projectId);
+  const db = await readDb();
+  const job = db.jobs.find(
+    (candidate) =>
+      candidate.id === jobId &&
+      candidate.projectId === projectId &&
+      candidate.workspaceId === workspaceId
+  );
+  if (!job) throw notFound(`Job not found: ${jobId}`);
+  return job;
+}
+
+export async function listJobs(
+  workspaceId: string,
+  projectId: string,
+  type: JobType | null,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<Job>> {
+  await getProject(workspaceId, projectId);
+  const db = await readDb();
+  const all = db.jobs.filter(
+    (job) =>
+      job.projectId === projectId &&
+      job.workspaceId === workspaceId &&
+      (type === null || job.type === type)
   );
   return paginate(all, limit, cursor);
 }
