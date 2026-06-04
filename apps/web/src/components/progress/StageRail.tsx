@@ -6,6 +6,7 @@ import {
   type RunReviewGate,
   type GenerationStage,
 } from "@popcorn/shared/v1/types";
+import { JudgmentBadge } from "../evals/JudgmentBadge";
 
 interface StageRailProps {
   stages: GenerationStage[];
@@ -73,6 +74,7 @@ export function StageRail({ stages, reviewGate }: StageRailProps) {
                       ? "Reviewed"
                       : STATUS_LABEL[stage.status]}
                 </span>
+                <JudgmentBadge judgment={stage.judgment} compact />
               </div>
               {awaitingReview ? (
                 <p className="stage-message">Ready for your review.</p>

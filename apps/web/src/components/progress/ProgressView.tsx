@@ -9,6 +9,7 @@ import {
   type GenerationStageItem,
 } from "@popcorn/shared/v1/types";
 import { StageItemCard } from "../generation-progress/StageItemCard";
+import { JudgmentBadge } from "../evals/JudgmentBadge";
 import {
   GenerationRunClient,
   GenerationRunRequestError,
@@ -215,6 +216,7 @@ export function ProgressView({
                     is ready
                   </h2>
                 </div>
+                <JudgmentBadge judgment={reviewStage?.judgment ?? null} />
                 <div className="review-actions">
                   <button
                     type="button"
