@@ -1,6 +1,7 @@
 import type { Router } from "express";
 import { assetsRouter } from "./assets.js";
 import { briefRouter } from "./brief.js";
+import { evalRouter } from "./eval.js";
 import { generationEntrypointsRouter } from "./generation-entrypoints.js";
 import { generationRunsRouter } from "./generation-runs.js";
 import { generationsRouter } from "./generations.js";
@@ -19,4 +20,5 @@ export function mountProtectedV1Routes(v1: Router) {
   v1.use(generationRunsRouter);
   v1.use(timelinesRouter);
   v1.use(generationsRouter);
+  v1.use(evalRouter);
 }
