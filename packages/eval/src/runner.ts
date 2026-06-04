@@ -7,6 +7,7 @@ import type {
   EvalSuiteFixture,
   Evaluator,
   EvaluatorContext,
+  ExpectationCheck,
   Judgment,
 } from "./types";
 import { EvaluatorRegistry } from "./registry";
@@ -47,7 +48,7 @@ export async function runEvalSuite(options: RunEvalSuiteOptions): Promise<EvalRu
       const evaluators = options.registry.forStage(artifact.stageType, artifact.tool);
       for (const evaluator of evaluators) {
         evalRun.judgeModels[evaluator.id] = evaluator.judgeModel;
-        const judgment = await runEvaluator({
+        const { judgment, expectationChecks } = await runEvaluator({
           evaluator,
           artifact,
           caseId: fixtureCase.id,
@@ -61,7 +62,8 @@ export async function runEvalSuite(options: RunEvalSuiteOptions): Promise<EvalRu
         const expectation = evaluateExpectations(
           artifact.stageType,
           judgment.grades,
-          fixtureCase.expectations
+          fixtureCase.expectations,
+          expectationChecks
         );
         if (expectation) {
           expectationResults.push({
@@ -91,7 +93,7 @@ async function runEvaluator(args: {
   expectations: EvaluatorContext["expectations"];
   now: () => Date;
   id: () => string;
-}): Promise<Judgment> {
+}): Promise<{ judgment: Judgment; expectationChecks: ExpectationCheck[] }> {
   const stageId = `${args.caseId}:${args.artifact.stageType}`;
   const context: EvaluatorContext = {
     stageType: args.artifact.stageType,
@@ -114,25 +116,28 @@ async function runEvaluator(args: {
   const latencyMs = draft.latencyMs ?? Date.now() - startedAt;
 
   return {
-    id: args.id(),
-    evaluatorId: args.evaluator.id,
-    rubricVersion: args.evaluator.rubricVersion,
-    judgeModel: args.evaluator.judgeModel,
-    evalRunId: args.evalRunId,
-    caseId: args.caseId,
-    stageId,
-    itemId: args.artifact.itemId,
-    artifactId: args.artifact.artifactId,
-    assetId: args.artifact.assetId,
-    grades: draft.grades,
-    verdict: computeVerdict(draft.grades, args.evaluator.thresholds),
-    rationale: draft.rationale,
-    recommendedAction: draft.recommendedAction,
-    evidenceRef: draft.evidenceRef ?? args.artifact.evidenceRef,
-    trigger: "auto",
-    costUsd: draft.costUsd ?? 0,
-    latencyMs,
-    createdAt: args.now().toISOString(),
+    judgment: {
+      id: args.id(),
+      evaluatorId: args.evaluator.id,
+      rubricVersion: args.evaluator.rubricVersion,
+      judgeModel: args.evaluator.judgeModel,
+      evalRunId: args.evalRunId,
+      caseId: args.caseId,
+      stageId,
+      itemId: args.artifact.itemId,
+      artifactId: args.artifact.artifactId,
+      assetId: args.artifact.assetId,
+      grades: draft.grades,
+      verdict: computeVerdict(draft.grades, args.evaluator.thresholds),
+      rationale: draft.rationale,
+      recommendedAction: draft.recommendedAction,
+      evidenceRef: draft.evidenceRef ?? args.artifact.evidenceRef,
+      trigger: "auto",
+      costUsd: draft.costUsd ?? 0,
+      latencyMs,
+      createdAt: args.now().toISOString(),
+    },
+    expectationChecks: draft.expectationChecks ?? [],
   };
 }
 

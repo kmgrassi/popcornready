@@ -312,6 +312,9 @@ Two judging styles, per the scoping decision:
   behavior didn't drift.
 
 Most suite cases will be reference-free; a curated minority carry expectations.
+In the portable core, `CaseExpectation` stays declarative while evaluators report
+golden/artifact and assertion outcomes through `ExpectationCheck`; the framework
+combines those checks with grade floors into the immutable `ExpectationResult`.
 
 ## 5. Grading the judge (meta-eval — required, because the test is an AI)
 
@@ -439,7 +442,8 @@ ordered by what each piece needs from it:
   judges and writes Judgments. Runnable as soon as the judges land in
   `packages/agent` — even before generation is ported to `apps/api`.
   **Started:** `@popcorn/eval` now owns the portable types, registry,
-  deterministic verdict computation, default decision policies, and fixture
+  deterministic verdict computation, default decision policies,
+  expectation-aware matching, and fixture
   suite runner; judge extraction remains follow-up.
 - **P2 prereq — evidence-bearing stages.** Make every stage/tool persist its
   output as an addressable artifact and carry it on the terminal call

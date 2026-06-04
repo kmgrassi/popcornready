@@ -43,6 +43,7 @@ export interface JudgmentDraft {
   rationale: string;
   recommendedAction?: RecommendedAction;
   evidenceRef?: string;
+  expectationChecks?: ExpectationCheck[];
   costUsd?: number;
   latencyMs?: number;
 }
@@ -118,6 +119,20 @@ export interface CaseExpectation {
   goldenArtifactId?: string;
   assertions?: string[];
 }
+
+export type ExpectationCheck =
+  | {
+      kind: "golden_artifact";
+      goldenArtifactId: string;
+      matched: boolean;
+      detail?: string;
+    }
+  | {
+      kind: "assertion";
+      assertion: string;
+      matched: boolean;
+      detail?: string;
+    };
 
 export interface EvalRun {
   id: string;

@@ -27,6 +27,18 @@ const planEvaluator: Evaluator = {
         promptReadiness: artifact.promptReadiness,
       },
       rationale: "Fixture scorer",
+      expectationChecks: [
+        {
+          kind: "golden_artifact",
+          goldenArtifactId: "golden-plan-pass",
+          matched: true,
+        },
+        {
+          kind: "assertion",
+          assertion: "The plan resolves the goal.",
+          matched: true,
+        },
+      ],
       costUsd: 0.01,
       latencyMs: 12,
     };
@@ -55,6 +67,8 @@ test("runEvalSuite emits append-only judgments and aggregates verdicts", async (
           {
             stageType: "creative_plan",
             gradeFloors: { storyArc: 7 },
+            goldenArtifactId: "golden-plan-pass",
+            assertions: ["The plan resolves the goal."],
           },
         ],
         artifacts: [

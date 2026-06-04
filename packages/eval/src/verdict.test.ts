@@ -41,7 +41,38 @@ test("evaluateExpectations does not count needs_review as a floor match", () => 
   );
 });
 
-test("evaluateExpectations fails closed for unsupported golden and assertion expectations", () => {
+test("evaluateExpectations combines grade floors, golden artifacts, and assertions", () => {
+  assert.deepEqual(
+    evaluateExpectations(
+      "creative_plan",
+      { storyArc: 9 },
+      [
+        {
+          stageType: "creative_plan",
+          goldenArtifactId: "golden-plan",
+          assertions: ["The plan resolves the conflict."],
+        },
+      ],
+      [
+        {
+          kind: "golden_artifact",
+          goldenArtifactId: "golden-plan",
+          matched: true,
+        },
+        {
+          kind: "assertion",
+          assertion: "The plan resolves the conflict.",
+          matched: true,
+        },
+      ]
+    ),
+    {
+      matched: true,
+    }
+  );
+});
+
+test("evaluateExpectations fails closed for missing expectation checks", () => {
   assert.deepEqual(
     evaluateExpectations(
       "creative_plan",
@@ -57,7 +88,7 @@ test("evaluateExpectations fails closed for unsupported golden and assertion exp
     {
       matched: false,
       detail:
-        "goldenArtifactId expectations are not supported yet; assertion expectations are not supported yet",
+        'missing goldenArtifactId check golden-plan; missing assertion check "The plan resolves the conflict."',
     }
   );
 });
