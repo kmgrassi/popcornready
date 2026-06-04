@@ -22,6 +22,15 @@ export type RecommendedAction = "keep" | "regenerate" | "manual_review";
 
 export type JudgmentGrade = number | JudgmentVerdict;
 
+export interface EvaluationTarget {
+  stageType: GenerationStageType;
+  tool?: string;
+  itemId?: string;
+  artifactId?: string;
+  assetId?: string;
+  modality: EvalModality;
+}
+
 export interface EvaluatorContext {
   stageType: GenerationStageType;
   tool?: string;
@@ -36,6 +45,13 @@ export interface EvaluatorContext {
   artifactId?: string;
   assetId?: string;
   trigger: JudgmentTrigger;
+}
+
+export interface UnsafeEvaluatorContextInput extends EvaluatorContext {
+  generatorPrompt?: unknown;
+  generatorMessages?: unknown;
+  chainOfThought?: unknown;
+  workingContext?: unknown;
 }
 
 export interface JudgmentDraft {

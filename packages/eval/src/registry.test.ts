@@ -44,3 +44,17 @@ test("registry rejects duplicate evaluator ids", () => {
 
   assert.throws(() => registry.register(baseEvaluator), /already registered/);
 });
+
+test("register rejects duplicate evaluator IDs across stages and tools", () => {
+  const registry = new EvaluatorRegistry();
+  registry.register(baseEvaluator);
+
+  assert.throws(
+    () =>
+      registry.register({
+        ...baseEvaluator,
+        stageType: "quality_review",
+      }),
+    /Evaluator already registered: plan\.generic/
+  );
+});

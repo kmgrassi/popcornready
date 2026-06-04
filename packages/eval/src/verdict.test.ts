@@ -7,6 +7,17 @@ test("computeVerdict fails when any numeric grade is below its threshold", () =>
   assert.equal(computeVerdict({ storyArc: 6.9, clarity: 10 }, { storyArc: 7 }), "fail");
 });
 
+test("computeVerdict fails when a thresholded grade is missing", () => {
+  assert.equal(
+    computeVerdict({ storyArc: 9 }, { storyArc: 7, visualFeasibility: 7 }),
+    "fail"
+  );
+});
+
+test("computeVerdict fails when a thresholded grade is not numeric", () => {
+  assert.equal(computeVerdict({ storyArc: "pass" }, { storyArc: 7 }), "fail");
+});
+
 test("computeVerdict returns needs_review for threshold-adjacent numeric grades", () => {
   assert.equal(computeVerdict({ storyArc: 7.5 }, { storyArc: 7 }), "needs_review");
 });

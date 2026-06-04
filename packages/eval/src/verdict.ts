@@ -10,18 +10,21 @@ export function computeVerdict(
 ): JudgmentVerdict {
   let hasNeedsReview = false;
 
+  for (const [dimension, threshold] of Object.entries(thresholds)) {
+    const grade = grades[dimension];
+    if (typeof grade !== "number") {
+      return "fail";
+    }
+    if (grade < threshold) {
+      return "fail";
+    }
+    if (grade < threshold + 1) {
+      hasNeedsReview = true;
+    }
+  }
+
   for (const [dimension, grade] of Object.entries(grades)) {
     if (typeof grade === "number") {
-      const threshold = thresholds[dimension];
-      if (threshold == null) {
-        continue;
-      }
-      if (grade < threshold) {
-        return "fail";
-      }
-      if (grade < threshold + 1) {
-        hasNeedsReview = true;
-      }
       continue;
     }
 
