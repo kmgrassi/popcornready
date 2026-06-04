@@ -45,6 +45,21 @@ structured timeline model (`src/lib/types.ts`) and then renders it deterministic
 - Asset metadata and generated media are organized per project store.
 - Rendering is reproducible across preview and export.
 
+## Architecture & direction
+
+The codebase is a Next.js monolith today, but it's **moving to a monorepo split**:
+
+- **Frontend** — Vite + React Router v7 (data mode) SPA → Netlify.
+- **Backend** — Express API → Railway (logic, the generation/job stack, Supabase).
+- **Data/auth** — Supabase (Postgres + Storage + Auth); app identity is
+  `public.users.id`, mapped from `auth.uid()` only inside RLS.
+
+New DB/Storage/auth work targets the split, not the monolith. The full plan,
+rationale, and PR breakdown live in
+[`docs/scopes/supabase-cutover-prs.md`](docs/scopes/supabase-cutover-prs.md); see
+also the agent guide [`CLAUDE.md`](CLAUDE.md) and the identity model in
+[`docs/supabase-identity-and-rls.md`](docs/supabase-identity-and-rls.md).
+
 ## Features
 
 - **Structured pipeline**
