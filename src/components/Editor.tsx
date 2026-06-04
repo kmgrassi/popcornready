@@ -7,6 +7,7 @@ import {
   Clip,
   Project,
   StoryContext,
+  UploadedFootageEditMode,
 } from "@/lib/types";
 import { DEFAULT_STORY_CONTEXT } from "@/lib/story-context";
 import {
@@ -92,6 +93,10 @@ export function Editor({
 
   const [message, setMessage] = useState("");
   const [selectedAudioClipId, setSelectedAudioClipId] = useState("");
+  const [editMode, setEditMode] = useState<UploadedFootageEditMode>(
+    "asset_driven"
+  );
+  const [selectedEditAssetIds, setSelectedEditAssetIds] = useState<string[]>([]);
   const [durationPolicy, setDurationPolicy] = useState<DurationPolicy>(
     DEFAULT_DURATION_POLICY
   );
@@ -169,6 +174,10 @@ export function Editor({
     () => clips.filter((clip) => clip.kind === "audio"),
     [clips]
   );
+  const editableVisualClips = useMemo(
+    () => clips.filter((clip) => (clip.kind || "video") !== "audio"),
+    [clips]
+  );
   const clipById = Object.fromEntries(clips.map((clip) => [clip.id, clip]));
   const imageClips = clips.filter((clip) => (clip.kind || "video") === "image");
 
@@ -180,6 +189,27 @@ export function Editor({
       return audioClips.length === 1 ? audioClips[0].id : "";
     });
   }, [audioClips]);
+
+  useEffect(() => {
+    const savedEdit = project?.uploadedFootageEdit;
+    if (savedEdit) {
+      const availableIds = new Set(editableVisualClips.map((clip) => clip.id));
+      setEditMode(savedEdit.mode);
+      setSelectedEditAssetIds(
+        savedEdit.selectedAssetIds.filter((id) => availableIds.has(id))
+      );
+      return;
+    }
+
+    setSelectedEditAssetIds((current) => {
+      const availableIds = new Set(editableVisualClips.map((clip) => clip.id));
+      const kept = current.filter((id) => availableIds.has(id));
+      if (kept.length > 0 || editableVisualClips.length === 0) return kept;
+      return editableVisualClips
+        .filter((clip) => clip.source !== "generated")
+        .map((clip) => clip.id);
+    });
+  }, [editableVisualClips, project?.uploadedFootageEdit]);
 
   async function handleUpload() {
     const file = fileRef.current?.files?.[0];
@@ -222,6 +252,9 @@ export function Editor({
           style,
           aspectRatio: aspect,
           storyContext,
+          mode: editMode,
+          assetIds: selectedEditAssetIds,
+          allowGeneratedGapFill: editMode === "hybrid",
         }),
       });
       const data = await response.json();
@@ -418,6 +451,12 @@ export function Editor({
     );
   }
 
+  function toggleEditAsset(id: string) {
+    setSelectedEditAssetIds((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+    );
+  }
+
   function setStoryField<K extends keyof StoryContext>(
     key: K,
     value: StoryContext[K]
@@ -528,21 +567,26 @@ export function Editor({
           busy={!!busy}
           clips={clips}
           defaultReferenceRole={referenceRole}
+          selectedEditAssetIds={selectedEditAssetIds}
           onAddReferenceForAsset={addReferenceForAsset}
           onHandleRegenerateAsset={handleRegenerateAsset}
           onSaveReview={saveReview}
+          onToggleEditAsset={toggleEditAsset}
         />
 
         <BriefPanel
           aspect={aspect}
           busy={!!busy}
           clipsCount={clips.length}
+          editMode={editMode}
           goal={goal}
           hasLibraryGeneration={clips.length > 0}
+          selectedEditAssetsCount={selectedEditAssetIds.length}
           storyContext={storyContext}
           style={style}
           targetLength={targetLength}
           setAspect={setAspect}
+          setEditMode={setEditMode}
           setGoal={setGoal}
           setStyle={setStyle}
           setTargetLength={setTargetLength}

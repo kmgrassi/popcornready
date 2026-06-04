@@ -1,16 +1,23 @@
 import React from "react";
-import { AspectRatio, StoryContext } from "@/lib/types";
+import {
+  AspectRatio,
+  StoryContext,
+  UploadedFootageEditMode,
+} from "@/lib/types";
 
 interface BriefPanelProps {
   aspect: AspectRatio;
   busy: boolean;
   clipsCount: number;
+  editMode: UploadedFootageEditMode;
   goal: string;
   hasLibraryGeneration: boolean;
+  selectedEditAssetsCount: number;
   storyContext: StoryContext;
   style: string;
   targetLength: number;
   setAspect: (value: AspectRatio) => void;
+  setEditMode: (value: UploadedFootageEditMode) => void;
   setGoal: (value: string) => void;
   setStyle: (value: string) => void;
   setTargetLength: (value: number) => void;
@@ -26,12 +33,15 @@ export function BriefPanel({
   aspect,
   busy,
   clipsCount,
+  editMode,
   goal,
   hasLibraryGeneration,
+  selectedEditAssetsCount,
   storyContext,
   style,
   targetLength,
   setAspect,
+  setEditMode,
   setGoal,
   setStyle,
   setTargetLength,
@@ -73,6 +83,16 @@ export function BriefPanel({
       </div>
       <label>Style</label>
       <input value={style} onChange={(e) => setStyle(e.target.value)} />
+      <label>Uploaded-footage mode</label>
+      <select
+        value={editMode}
+        onChange={(e) =>
+          setEditMode(e.target.value as UploadedFootageEditMode)
+        }
+      >
+        <option value="asset_driven">Uploaded only</option>
+        <option value="hybrid">Allow AI gap fill</option>
+      </select>
 
       <h2>Story context</h2>
       <div className="row" style={{ marginTop: 8 }}>
@@ -153,7 +173,12 @@ export function BriefPanel({
         <button
           className={canCreateFromPrompt ? "secondary" : undefined}
           onClick={onGenerate}
-          disabled={busy || !hasLibraryGeneration || !goal.trim()}
+          disabled={
+            busy ||
+            !hasLibraryGeneration ||
+            selectedEditAssetsCount === 0 ||
+            !goal.trim()
+          }
           title={
             canCreateFromPrompt ? "Cut from your uploaded/generated clips" : undefined
           }
@@ -164,7 +189,8 @@ export function BriefPanel({
       {canCreateFromPrompt && (
         <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
           “Create video from prompt” generates a visual for each beat — no clips
-          required. “Cut from my clips” uses your library.
+          required. “Cut from my clips” uses {selectedEditAssetsCount} selected
+          library asset{selectedEditAssetsCount === 1 ? "" : "s"}.
         </p>
       )}
     </>

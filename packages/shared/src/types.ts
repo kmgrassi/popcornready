@@ -82,6 +82,21 @@ export interface PlanCritiqueReport {
   revisedPlan: EditPlan;
 }
 
+export type UploadedFootageEditMode = "asset_driven" | "hybrid";
+
+export interface UploadedFootagePlanReview {
+  storyArc: ReviewGrade;
+  sourceCoverage: ReviewGrade;
+  timing: ReviewGrade;
+  missingBeats: string[];
+  recommendedMode:
+    | "uploaded_only"
+    | "hybrid_generate_gaps"
+    | "needs_more_source";
+  summary: string;
+  revisedPlan: EditPlan;
+}
+
 export interface VideoSnapshotReview {
   storyMatch: ReviewGrade;
   characterMatch: ReviewGrade;
@@ -412,6 +427,13 @@ export interface Project {
   compositions?: CompositionPlan[];
   assetGenerationJobs?: AssetGenerationJob[];
   preGenerationReview?: PlanCritiqueReport | null;
+  uploadedFootageEdit?: {
+    mode: UploadedFootageEditMode;
+    selectedAssetIds: string[];
+    allowGeneratedGapFill: boolean;
+    planReview: UploadedFootagePlanReview;
+    updatedAt: string;
+  };
   critic: CriticReport | null;
   chat: ChatMessage[];
   updatedAt: string;
