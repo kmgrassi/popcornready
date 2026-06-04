@@ -155,6 +155,74 @@ test("diffRuns reports verdict flips between two runs of the same suite", async 
   assert.equal(diff.flips[0].artifactId, "art_plan_1");
 });
 
+test("diffRuns keeps same-stage item judgments distinct when artifactId is absent", async () => {
+  await store.saveRun({
+    id: "evalrun_before",
+    source: "suite",
+    suiteId: "evalsuite_1",
+    generationMode: "prompts_only",
+    gitSha: "abc123",
+    branch: "feat/eval-http-api",
+    judgeModels: {},
+    status: "succeeded",
+    createdAt: "2026-06-04T10:00:00.000Z",
+  });
+  await store.saveRun({
+    id: "evalrun_after",
+    source: "suite",
+    suiteId: "evalsuite_1",
+    generationMode: "prompts_only",
+    gitSha: "abc124",
+    branch: "feat/eval-http-api",
+    judgeModels: {},
+    status: "succeeded",
+    createdAt: "2026-06-04T11:00:00.000Z",
+  });
+
+  for (const itemId of ["item_a", "item_b"]) {
+    await store.saveJudgment({
+      id: `judgment_before_${itemId}`,
+      evaluatorId: "story_arc.v1",
+      rubricVersion: "v1",
+      judgeModel: "test-judge",
+      evalRunId: "evalrun_before",
+      caseId: "evalcase_1",
+      stageId: "stage_shared",
+      itemId,
+      grades: { storyArc: 9 },
+      verdict: "pass",
+      rationale: "before",
+      trigger: "auto",
+      costUsd: 0,
+      latencyMs: 1,
+      createdAt: "2026-06-04T10:00:01.000Z",
+    });
+    await store.saveJudgment({
+      id: `judgment_after_${itemId}`,
+      evaluatorId: "story_arc.v1",
+      rubricVersion: "v1",
+      judgeModel: "test-judge",
+      evalRunId: "evalrun_after",
+      caseId: "evalcase_1",
+      stageId: "stage_shared",
+      itemId,
+      grades: { storyArc: 2 },
+      verdict: "fail",
+      rationale: "after",
+      trigger: "auto",
+      costUsd: 0,
+      latencyMs: 1,
+      createdAt: "2026-06-04T11:00:01.000Z",
+    });
+  }
+
+  const diff = await diffRuns("evalrun_before", "evalrun_after", store);
+  assert.deepEqual(
+    diff.flips.map((flip) => flip.itemId).sort(),
+    ["item_a", "item_b"]
+  );
+});
+
 test("diffRuns throws not_found when a run is missing", async () => {
   const { suiteId } = await seedSuiteWithCase();
   const run = await startSuiteRun({ suiteId }, store, registryWith(stubEvaluator(9)));

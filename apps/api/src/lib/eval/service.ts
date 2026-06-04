@@ -155,6 +155,8 @@ export interface VerdictFlip {
   stageId: string;
   evaluatorId: string;
   artifactId?: string;
+  itemId?: string;
+  assetId?: string;
   before: Judgment["verdict"];
   after: Judgment["verdict"];
 }
@@ -168,7 +170,14 @@ export interface RunDiff {
 // A judgment's identity for diffing: same case + same evaluator + same artifact
 // across the two runs is "the same cell" whose verdict may have flipped.
 function judgmentKey(j: Judgment): string {
-  return `${j.caseId ?? ""}::${j.evaluatorId}::${j.artifactId ?? j.stageId}`;
+  const targetId = j.artifactId
+    ? `artifact:${j.artifactId}`
+    : j.itemId
+      ? `item:${j.itemId}`
+      : j.assetId
+        ? `asset:${j.assetId}`
+        : `stage:${j.stageId}`;
+  return `${j.caseId ?? ""}::${j.evaluatorId}::${targetId}`;
 }
 
 export async function diffRuns(
@@ -205,6 +214,8 @@ export async function diffRuns(
     };
     if (base.caseId != null) flip.caseId = base.caseId;
     if (base.artifactId != null) flip.artifactId = base.artifactId;
+    if (base.itemId != null) flip.itemId = base.itemId;
+    if (base.assetId != null) flip.assetId = base.assetId;
     flips.push(flip);
   }
 
