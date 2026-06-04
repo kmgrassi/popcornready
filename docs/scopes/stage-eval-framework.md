@@ -511,12 +511,24 @@ Still open:
 
 ## 10. Related reading
 
-- `docs/NORTH_STAR.md` — §P3 inspection/gates, the asset-pool immutability model.
-- `docs/scopes/prompt-grading.md` + `docs/scopes/prompt-grading-test-cases.md` —
-  the existing per-modality rubric + verdict-match harness to generalize.
-- `docs/scopes/video-snapshot-review.md` — the vision-judge + ffmpeg frame
-  pattern the image/clip/stitch evaluators reuse.
-- `docs/scopes/generation-review-checkpoints.md` + `generation-progress-ui.md` —
-  the run/stage UI the inline badges extend.
-- `docs/scopes/ooda-feedback-loop.md` — where judge verdicts can feed back into
-  prompt/asset improvement.
+- [North Star](../NORTH_STAR.md) — authoritative product direction for
+  agent-orchestrated, non-linear generation, plus the P3 inspection/gates and
+  append-only asset-pool model this framework extends.
+- [Prompt grading](./prompt-grading.md) and
+  [prompt-grading test cases](./prompt-grading-test-cases.md) — existing
+  per-modality rubric, deterministic verdict recomputation, and verdict-match
+  harness to generalize for stage judges and meta-eval calibration.
+- [Video snapshot review](./video-snapshot-review.md) — vision-judge and ffmpeg
+  frame-extraction pattern reused by image, clip, and stitching evaluators.
+- [Generation review checkpoints](./generation-review-checkpoints.md) and
+  [generation progress UI](./generation-progress-ui.md) — review-gate plumbing
+  and run/stage UI that inline judgment badges extend.
+- [OODA feedback loop](./ooda-feedback-loop.md) — how judge verdicts can feed
+  back into prompt and asset improvement.
+- [Supabase cutover PRs](./supabase-cutover-prs.md) and
+  [auth/app architecture](./auth-app-architecture.md) — target split-stack,
+  Supabase, and admin-auth context for the eval API, Judgment storage, and
+  `/admin/evals` workbench.
+- [Monorepo migration plan](../../MIGRATION.md) — package extraction and route
+  parity sequencing that gates when `packages/eval`, `packages/agent`, and the
+  Express eval endpoints can land.
