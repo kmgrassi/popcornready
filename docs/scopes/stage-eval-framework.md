@@ -14,7 +14,7 @@
 > 3. **Hybrid enforcement** — cheap upstream stages (arc, characters, storyboard)
 >    are synchronous blocking gates *before* expensive video gen; expensive
 >    downstream outputs are async/sampled telemetry on live runs — sampled per
->    modality, text 100% / media sliced (§3, §9.1, §9.5).
+>    modality — text 100%, media judged per-clip starting at 100% (§3, §9.1, §9.5).
 > 4. **Same judge model, context-isolated** — bias is controlled by what the judge
 >    sees (asset + independent spec, never the generator's context), not by forcing
 >    a different model; judge model pinned for reproducibility (§3, §9.2).
@@ -220,7 +220,8 @@ interface ExpectationResult {        // grades the JUDGE (meta-eval), only when 
   spend on a broken arc or a wrong character). Expensive/downstream outputs
   (per-beat clips, final cut) are `observational` on live runs: judged
   async-after, never blocking, and **sampled per modality** — text/structured at
-  100%, media sliced with only a subset judged (§9.5). The **gating boundary sits
+  100%, media judged per-clip (the per-beat clip is the unit; start 100%, ramp
+  down — §9.5). The **gating boundary sits
   right before video generation.** In the suite, every evaluator runs synchronously regardless
   of `mode`. Reuses the existing `reviewGates` mechanism in the run model.
 - **Context isolation is the bias guard — not a different model.** The judge gets
@@ -375,17 +376,24 @@ ordered by what each piece needs from it:
    mutable project pool).
 
 5. **Per-modality sampling (observational only).** Blocking gates always run at
-   100%. Within *observational* judging, the sample rate is keyed by modality:
-   **text/structured outputs — plans, prompts, captions, timeline JSON — are
-   judged at 100%** (cheap, high signal); **media outputs are sliced and only a
-   sampled subset is judged** — the per-beat clips are the slices, and a
-   configurable fraction of clips (plus the final cut) go to the expensive vision
-   judge. Start the media fraction high and lower it as throughput grows.
+   100%. Within *observational* judging, the sample rate **and granularity** are
+   keyed by modality:
+   - **Text/structured outputs — 100%.** Plans, prompts, story arcs, captions,
+     timeline JSON: every one is judged (cheap, high signal).
+   - **Media — one Judgment per clip, starting at 100% of clips.** The **per-beat
+     clip is the sampling unit** (the slice): the framework judges *whole clips* —
+     **not** the entire stitched video as one unit, and **not** sub-clip
+     snippets/frames as separate samples (a clip's 20/50/80% frames are *evidence*
+     for its single Judgment, not their own samples). **Start by judging 100% of
+     clips**, then ramp the fraction down over time as throughput/cost grows. (The
+     assembled cut is judged separately by the stitch-continuity evaluator, §7 —
+     that is not part of this per-clip sampling.)
 
 Still open:
 
-- **Media sample fraction** — the exact percentage and whether it adapts to a
-  volume/cost budget (the *policy* is fixed in §9.5; only the number is open).
+- **Media ramp-down schedule** — *when* and *how* to drop the per-clip fraction
+  below 100% (a throughput threshold or cost budget). The start is fixed at 100%
+  and the unit is the clip (§9.5); only the ramp policy is open.
 - **Ensemble upgrade** (2-judge `needs_review` tie-break) for high-stakes stages
   — deferred past P1.
 
