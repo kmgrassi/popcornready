@@ -29,6 +29,13 @@ import { newId } from "./ids";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
+  type CompositionPlan as ContractCompositionPlan,
+  type Job,
+  type JobStatus,
+  type JobType,
+  SCHEMA as CONTRACT_SCHEMA,
+} from "@popcorn/shared/v1/types";
+import {
   AgentAssetSource,
   AgentAssetContext,
   AgentClipContext,
@@ -777,6 +784,272 @@ export async function listAssets(
     .eq("workspace_id", workspaceId);
   throwOnError(error, "listAssets");
   const all = (data as AssetRow[]).map(mapAsset);
+  return paginate(all, limit, cursor);
+}
+
+function isCharacterAnchorAsset(asset: V1Asset): boolean {
+  return Boolean(
+    asset.userContext?.characterNames?.length ||
+      asset.userContext?.intendedUse?.includes("character_reference") ||
+      asset.context?.recommendedRoles?.some((role) => /character/i.test(role))
+  );
+}
+
+export async function listCharacterAnchorAssets(
+  workspaceId: string,
+  projectId: string,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<V1Asset>> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+  throwOnError(error, "listCharacterAnchorAssets");
+  const anchors = (data as AssetRow[]).map(mapAsset).filter(isCharacterAnchorAsset);
+  return paginate(anchors, limit, cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Compositions and jobs
+// ---------------------------------------------------------------------------
+interface CompositionRow {
+  id: string;
+  schema_version: string;
+  project_id: string;
+  brief_version_id: string | null;
+  mode: ContractCompositionPlan["mode"];
+  status: ContractCompositionPlan["status"];
+  planned_beats: ContractCompositionPlan["plannedBeats"];
+  generated_asset_job_ids: string[];
+  ready_asset_ids: string[];
+  narration_strategy: ContractCompositionPlan["narrationStrategy"] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function compositionToRow(composition: ContractCompositionPlan): CompositionRow {
+  return {
+    id: composition.id,
+    schema_version: composition.schemaVersion,
+    project_id: composition.projectId,
+    brief_version_id: composition.briefVersionId || null,
+    mode: composition.mode,
+    status: composition.status,
+    planned_beats: composition.plannedBeats,
+    generated_asset_job_ids: composition.generatedAssetJobIds,
+    ready_asset_ids: composition.readyAssetIds,
+    narration_strategy: composition.narrationStrategy ?? null,
+    created_at: composition.createdAt,
+    updated_at: composition.updatedAt,
+  };
+}
+
+function mapComposition(row: CompositionRow): ContractCompositionPlan {
+  return {
+    id: row.id,
+    schemaVersion: CONTRACT_SCHEMA.composition,
+    projectId: row.project_id,
+    briefVersionId: row.brief_version_id ?? "",
+    mode: row.mode,
+    status: row.status,
+    plannedBeats: row.planned_beats ?? [],
+    generatedAssetJobIds: row.generated_asset_job_ids ?? [],
+    readyAssetIds: row.ready_asset_ids ?? [],
+    narrationStrategy: row.narration_strategy ?? undefined,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+interface JobRow {
+  id: string;
+  schema_version: string;
+  workspace_id: string;
+  project_id: string;
+  request_id: string | null;
+  type: JobType;
+  status: JobStatus;
+  progress: Job["progress"];
+  input: unknown;
+  result: unknown;
+  error: Job["error"];
+  idempotency_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function jobToRow(job: Job): JobRow {
+  return {
+    id: job.id,
+    schema_version: job.schemaVersion,
+    workspace_id: job.workspaceId,
+    project_id: job.projectId,
+    request_id: job.requestId ?? null,
+    type: job.type,
+    status: job.status,
+    progress: job.progress,
+    input: job.input,
+    result: job.result,
+    error: job.error,
+    idempotency_key: job.idempotencyKey ?? null,
+    created_at: job.createdAt,
+    updated_at: job.updatedAt,
+  };
+}
+
+function mapJob(row: JobRow): Job {
+  return {
+    id: row.id,
+    schemaVersion: CONTRACT_SCHEMA.job,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    requestId: row.request_id ?? undefined,
+    type: row.type,
+    status: row.status,
+    progress: row.progress ?? {},
+    input: row.input ?? null,
+    result: row.result ?? null,
+    error: row.error ?? null,
+    idempotencyKey: row.idempotency_key ?? undefined,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+export async function saveCompositionPlan(
+  workspaceId: string,
+  composition: ContractCompositionPlan
+): Promise<ContractCompositionPlan> {
+  await getProject(workspaceId, composition.projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .insert(compositionToRow(composition))
+    .select("*")
+    .single();
+  throwOnError(error, "saveCompositionPlan");
+  return mapComposition(data as CompositionRow);
+}
+
+export async function getCompositionPlan(
+  workspaceId: string,
+  projectId: string,
+  compositionId: string
+): Promise<ContractCompositionPlan> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .select("*")
+    .eq("id", compositionId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Composition not found: ${compositionId}`);
+  throwOnError(error, "getCompositionPlan");
+  if (!data) throw notFound(`Composition not found: ${compositionId}`);
+  return mapComposition(data as CompositionRow);
+}
+
+export async function listCompositionPlans(
+  workspaceId: string,
+  projectId: string,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<ContractCompositionPlan>> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("compositions")
+    .select("*")
+    .eq("project_id", projectId);
+  throwOnError(error, "listCompositionPlans");
+  const all = (data as CompositionRow[]).map(mapComposition);
+  return paginate(all, limit, cursor);
+}
+
+export async function createJob(input: {
+  workspaceId: string;
+  projectId: string;
+  type: JobType;
+  status?: JobStatus;
+  requestId?: string;
+  payload?: unknown;
+  result?: unknown;
+}): Promise<Job> {
+  await getProject(input.workspaceId, input.projectId);
+  const now = new Date().toISOString();
+  const job: Job = {
+    id: newId("job"),
+    schemaVersion: CONTRACT_SCHEMA.job,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    requestId: input.requestId,
+    type: input.type,
+    status: input.status ?? "queued",
+    progress: {
+      percent: input.status === "succeeded" ? 100 : 0,
+      currentStep: input.status === "succeeded" ? "completed" : "queued",
+    },
+    input: input.payload ?? null,
+    result: input.result ?? null,
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("jobs")
+    .insert(jobToRow(job))
+    .select("*")
+    .single();
+  throwOnError(error, "createJob");
+  return mapJob(data as JobRow);
+}
+
+export async function getJob(
+  workspaceId: string,
+  projectId: string,
+  jobId: string
+): Promise<Job> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("jobs")
+    .select("*")
+    .eq("id", jobId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Job not found: ${jobId}`);
+  throwOnError(error, "getJob");
+  if (!data) throw notFound(`Job not found: ${jobId}`);
+  return mapJob(data as JobRow);
+}
+
+export async function listJobs(
+  workspaceId: string,
+  projectId: string,
+  type: JobType | null,
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<Job>> {
+  await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  let query = db
+    .from("jobs")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+  if (type !== null) {
+    query = query.eq("type", type);
+  }
+  const { data, error } = await query;
+  throwOnError(error, "listJobs");
+  const all = (data as JobRow[]).map(mapJob);
   return paginate(all, limit, cursor);
 }
 
