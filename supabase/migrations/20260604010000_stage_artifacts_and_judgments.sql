@@ -12,6 +12,9 @@
 --    appends a row.
 -- ---------------------------------------------------------------------------
 
+alter table generation_stages add column judgment jsonb;
+alter table generation_stage_items add column judgment jsonb;
+
 create table generation_stage_artifacts (
   artifact_id text primary key,
   run_id      text            not null references generation_runs (run_id) on delete cascade,

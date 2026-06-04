@@ -213,6 +213,7 @@ interface StageRow {
   job_ids: string[];
   artifact_ids: string[];
   error: GenerationStage["error"] | null;
+  judgment: GenerationStage["judgment"] | null;
   created_at: string;
   updated_at: string;
 }
@@ -237,6 +238,7 @@ function rowToStage(r: StageRow): GenerationStage {
   if (r.started_at != null) stage.startedAt = r.started_at;
   if (r.completed_at != null) stage.completedAt = r.completed_at;
   if (r.error != null) stage.error = r.error;
+  if (r.judgment != null) stage.judgment = r.judgment;
   return stage;
 }
 
@@ -257,6 +259,7 @@ function stageToRow(s: GenerationStage): StageRow {
     job_ids: s.jobIds ?? [],
     artifact_ids: s.artifactIds ?? [],
     error: s.error ?? null,
+    judgment: s.judgment ?? null,
     created_at: s.createdAt,
     updated_at: s.updatedAt,
   };
@@ -277,6 +280,7 @@ interface StageItemRow {
   artifact_id: string | null;
   retryable: boolean | null;
   error: GenerationStageItem["error"] | null;
+  judgment: GenerationStageItem["judgment"] | null;
   created_at: string;
   updated_at: string;
 }
@@ -298,6 +302,7 @@ function rowToStageItem(r: StageItemRow): GenerationStageItem {
   if (r.artifact_id != null) item.artifactId = r.artifact_id;
   if (r.retryable != null) item.retryable = r.retryable;
   if (r.error != null) item.error = r.error;
+  if (r.judgment != null) item.judgment = r.judgment;
   return item;
 }
 
@@ -315,6 +320,7 @@ function stageItemToRow(i: GenerationStageItem): StageItemRow {
     artifact_id: i.artifactId ?? null,
     retryable: i.retryable ?? null,
     error: i.error ?? null,
+    judgment: i.judgment ?? null,
     created_at: i.createdAt,
     updated_at: i.updatedAt,
   };
