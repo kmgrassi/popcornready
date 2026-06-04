@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EvaluatorRegistry } from "./registry";
+import { createEvaluatorRegistry, EvaluatorRegistry } from "./registry";
 import type { Evaluator } from "./types";
 
 const baseEvaluator: Evaluator = {
@@ -37,4 +37,10 @@ test("forStage includes generic evaluators and exact tool matches only", () => {
     registry.forStage("creative_plan", "outline").map((evaluator) => evaluator.id),
     ["plan.generic", "plan.outline"]
   );
+});
+
+test("registry rejects duplicate evaluator ids", () => {
+  const registry = createEvaluatorRegistry([baseEvaluator]);
+
+  assert.throws(() => registry.register(baseEvaluator), /already registered/);
 });

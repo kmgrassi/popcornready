@@ -26,3 +26,12 @@ export class EvaluatorRegistry {
     );
   }
 }
+export function createEvaluatorRegistry(evaluators: Evaluator[] = []): EvaluatorRegistry {
+  const registry = new EvaluatorRegistry();
+
+  for (const evaluator of evaluators) {
+    registry.register(evaluator);
+  }
+
+  return registry;
+}

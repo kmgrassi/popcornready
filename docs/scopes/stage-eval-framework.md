@@ -1,6 +1,6 @@
 # Stage Eval Framework — AI-as-Judge testing at every tool call
 
-> **Status:** Scope / design. **Not implemented.** This is the design record for
+> **Status:** Scope / design. P1 core started in `packages/eval`. This is the design record for
 > an evaluation framework that uses the AI to *test the AI* at every stage of
 > generation. Last updated 2026-06-04.
 >
@@ -438,6 +438,9 @@ ordered by what each piece needs from it:
   `EvaluatorContext`, and a CLI suite harness that drives fixtures through the
   judges and writes Judgments. Runnable as soon as the judges land in
   `packages/agent` — even before generation is ported to `apps/api`.
+  **Started:** `@popcorn/eval` now owns the portable types, registry,
+  deterministic verdict computation, default decision policies, and fixture
+  suite runner; judge extraction remains follow-up.
 - **P2 prereq — evidence-bearing stages.** Make every stage/tool persist its
   output as an addressable artifact and carry it on the terminal call
   (`StageSucceedOptions.resultArtifactId`; persist the plan/timeline as
@@ -500,6 +503,10 @@ ordered by what each piece needs from it:
      clips**, then ramp the fraction down over time as throughput/cost grows. (The
      assembled cut is judged separately by the stitch-continuity evaluator, §7 —
      that is not part of this per-clip sampling.)
+
+These resolved defaults are represented in code by
+`packages/eval/src/policy.ts` so suite and inline integrations share the same
+gating/sampling contract.
 
 Still open:
 
