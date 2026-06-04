@@ -122,12 +122,12 @@ const timeline: StitchTimelineSummary = {
 
 function contextFor(
   clips: StitchClip[],
-  boundaryFrames: StitchBoundaryFrame[]
+  boundaryFrames?: StitchBoundaryFrame[]
 ): EvaluatorContext {
   return {
     stageType: "export",
     modality: "video",
-    artifact: { timeline, clips, boundaryFrames },
+    artifact: { timeline, clips, ...(boundaryFrames ? { boundaryFrames } : {}) },
     intent: { intendedBeatOrder: INTENDED_BEATS },
     stageId: "case:export",
     trigger: "auto",
@@ -173,6 +173,54 @@ test("a scrambled / out-of-order sequence fails with order as the low dimension"
   // Order is the failing dimension; continuity is unaffected in this fixture.
   assert.equal(draft.grades.continuityAcrossCuts, "pass");
   assert.equal(draft.recommendedAction, "regenerate");
+  assert.equal(computeVerdict(draft.grades, evaluator.thresholds), "fail");
+});
+
+test("missing boundary frames still fail an out-of-order assembled sequence", async () => {
+  const evaluator = createStitchContinuityEvaluator({ judge: fakeStitchJudge });
+  const scrambled = [
+    clip("solution", "seg-2"),
+    clip("hook", "seg-0"),
+    clip("cta", "seg-3"),
+    clip("problem", "seg-1"),
+  ];
+  const draft = await evaluator.run(contextFor(scrambled, []));
+
+  assert.equal(draft.grades.orderCorrectness, "fail");
+  assert.equal(draft.grades.continuityAcrossCuts, "pass");
+  assert.equal(draft.grades.gapsOverlaps, "needs_review");
+  assert.equal(draft.recommendedAction, "manual_review");
+  assert.equal(computeVerdict(draft.grades, evaluator.thresholds), "fail");
+});
+
+test("missing boundary frames still grade pacing from measured durations", async () => {
+  const evaluator = createStitchContinuityEvaluator({ judge: fakeStitchJudge });
+  const clips = INTENDED_BEATS.map((beat, index) => ({
+    ...clip(beat, `seg-${index}`),
+    measuredDurationSec: index === 1 ? 2 : 5,
+  }));
+  const draft = await evaluator.run({
+    stageType: "export",
+    modality: "video",
+    artifact: {
+      timeline: {
+        ...timeline,
+        plannedDurationsSec: {
+          hook: 5,
+          problem: 5,
+          solution: 5,
+          cta: 5,
+        },
+      },
+      clips,
+      boundaryFrames: [],
+    },
+    stageId: "case:export",
+    trigger: "auto",
+  });
+
+  assert.equal(draft.grades.orderCorrectness, "pass");
+  assert.equal(draft.grades.pacingAdherence, "fail");
   assert.equal(computeVerdict(draft.grades, evaluator.thresholds), "fail");
 });
 

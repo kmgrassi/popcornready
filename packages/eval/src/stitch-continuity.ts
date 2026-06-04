@@ -84,6 +84,40 @@ function artifactFrom(ctx: EvaluatorContext): StitchContinuityArtifact {
   return artifact;
 }
 
+function assembledBeatOrder(clips: StitchClip[]): string[] {
+  return clips.map((clip) => clip.beat).filter((beat): beat is string => !!beat);
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function fallbackOrderGrade(artifact: StitchContinuityArtifact): JudgmentGrade {
+  if (artifact.clips.length < 2) return "pass";
+  const assembled = assembledBeatOrder(artifact.clips);
+  if (assembled.length === 0 || artifact.timeline.intendedBeatOrder.length === 0) {
+    return "needs_review";
+  }
+  return arraysEqual(artifact.timeline.intendedBeatOrder, assembled) ? "pass" : "fail";
+}
+
+function fallbackPacingGrade(artifact: StitchContinuityArtifact): JudgmentGrade {
+  const planned = artifact.timeline.plannedDurationsSec;
+  if (!planned) return "pass";
+
+  let compared = 0;
+  for (const clip of artifact.clips) {
+    if (!clip.beat || planned[clip.beat] == null) continue;
+    compared += 1;
+    const actual = clip.measuredDurationSec ?? clip.durationSec;
+    const expected = planned[clip.beat];
+    const toleranceSec = Math.max(0.25, expected * 0.1);
+    if (Math.abs(actual - expected) > toleranceSec) return "fail";
+  }
+
+  return compared > 0 ? "pass" : "needs_review";
+}
+
 export interface CreateStitchContinuityEvaluatorOptions {
   // The (mockable) vision judge. Tests inject a stub so they never hit a real
   // provider; production omits this and the agent helper's default Anthropic
@@ -127,14 +161,14 @@ export function createStitchContinuityEvaluator(
       const latencyMs = Date.now() - startedAt;
 
       if (!review) {
-        // No boundary evidence (e.g. a single clip, or ffmpeg unavailable). There
-        // is nothing to stitch, so order/continuity/gaps pass trivially; flag for
-        // manual review so the missing evidence is visible rather than silent.
+        // No boundary evidence (e.g. a single clip, or ffmpeg unavailable). Still
+        // grade dimensions available from structured artifact data so a scrambled
+        // or badly paced assembled cut does not get hidden behind missing frames.
         return {
           grades: {
-            orderCorrectness: "pass",
+            orderCorrectness: fallbackOrderGrade(artifact),
             continuityAcrossCuts: "pass",
-            pacingAdherence: "pass",
+            pacingAdherence: fallbackPacingGrade(artifact),
             gapsOverlaps: "needs_review",
           },
           rationale:

@@ -140,6 +140,13 @@ async function extractFrameAt(input: {
   ]);
 }
 
+export function boundarySampleDurationSec(clip: StitchClip): number {
+  return Math.max(
+    0.2,
+    Number(clip.measuredDurationSec ?? clip.durationSec) || 0.2
+  );
+}
+
 // Extract the boundary frames across every cut: the last frame of clip N and the
 // first frame of clip N+1. Reuses the same ffmpeg single-frame approach as
 // extractVideoSnapshots in video-snapshot-review.ts. Returns [] when ffmpeg is
@@ -156,7 +163,7 @@ export async function extractBoundaryFrames(input: {
   for (let index = 0; index < input.clips.length - 1; index += 1) {
     const from = input.clips[index];
     const to = input.clips[index + 1];
-    const fromDuration = Math.max(0.2, Number(from.durationSec) || 0.2);
+    const fromDuration = boundarySampleDurationSec(from);
     // Sample just inside each edge to avoid black/partial boundary frames.
     const lastAt = Math.max(0.1, fromDuration - 0.1);
     const firstAt = 0.1;
