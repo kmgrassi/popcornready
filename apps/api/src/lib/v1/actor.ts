@@ -14,6 +14,10 @@ export interface Actor {
   isLocal: boolean;
 }
 
+// Synchronous local actor used only by offline unit tests that drive the
+// file-based v1 store. Its workspaceId/actorId are file-store tags (the file
+// store keys by them in JSON, never as a DB primary key). The request-aware
+// resolver below resolves the real DB-generated workspace uuid via find-or-create.
 const LOCAL_ACTOR: Actor = {
   actorId: "local_dev",
   workspaceId: "dev_workspace",
@@ -24,17 +28,16 @@ export function isLocalMode(): boolean {
   return (process.env.AUTH_MODE || "local") === "local";
 }
 
-// In AUTH_MODE=local the API bypasses auth and resolves to the deterministic
-// dev actor/workspace. Hosted resolution is deferred to PR1.
+// Test-only synchronous resolver (see LOCAL_ACTOR). Request-aware code paths use
+// resolveActorFromRequest, which goes through Supabase/find-or-create.
 export function resolveActor(): Actor {
-  if (isLocalMode()) return LOCAL_ACTOR;
-  // Hosted auth is not implemented in this PR. Treat as local for now so the
-  // contract stays stable; PR1 replaces this with real token/key resolution.
   return LOCAL_ACTOR;
 }
 
 export async function resolveActorFromRequest(req: ApiRequestView): Promise<Actor> {
-  if (isLocalMode()) return LOCAL_ACTOR;
+  // Both local and supabase modes go through resolveAuth so the workspace id is
+  // the real DB-generated uuid (find-or-create), never the hardcoded
+  // "dev_workspace" string — the v1 store persists workspace_id to Postgres.
   try {
     const auth = await resolveAuth(req);
     return {

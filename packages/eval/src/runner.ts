@@ -25,7 +25,11 @@ export interface RunEvalSuiteOptions {
 
 export async function runEvalSuite(options: RunEvalSuiteOptions): Promise<EvalRunResult> {
   const now = options.now ?? (() => new Date());
-  const id = options.id ?? randomUUID;
+  // Ephemeral in-memory correlation ids used only to wire the result graph
+  // (judgments -> run, expectation results -> judgments) before persistence; the
+  // service remaps these to DB-generated uuids on save. `randomUUID` must be
+  // invoked, not passed by reference.
+  const id = options.id ?? (() => randomUUID());
   const createdAt = now().toISOString();
   const evalRunId = options.evalRunId ?? id();
   const judgments: Judgment[] = [];

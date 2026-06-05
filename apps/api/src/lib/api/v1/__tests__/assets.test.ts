@@ -55,6 +55,12 @@ dbTest("registerAsset records a remote_url asset as pending", async () => {
   assert.equal(asset.filename, "clip.mp4");
   assert.equal(asset.remoteUrl, "https://cdn.example.com/clip.mp4");
   assert.equal(asset.storageKey, undefined);
+  assert.ok(asset.id);
+  assert.equal(asset.assetKnowledge?.assetId, asset.id);
+  assert.equal(asset.clipUnderstanding?.assetId, asset.id);
+  assert.equal(asset.semanticAnalysis?.assetId, asset.id);
+  assert.equal(asset.semanticAnalysis?.transcript[0].assetId, asset.id);
+  assert.equal(asset.semanticAnalysis?.segments[0].assetId, asset.id);
   assert.equal(asset.semanticAnalysis?.schemaVersion, "semanticAnalysis.v1");
   assert.equal(asset.assetKnowledge?.mediaType, "video");
   assert.equal(asset.assetKnowledge?.origin, "imported");
@@ -220,6 +226,11 @@ dbTest("registerAsset copies a local_path asset into managed storage as ready", 
   assert.equal(asset.status, "ready");
   assert.equal(asset.kind, "audio");
   assert.ok(asset.storageKey);
+  assert.ok(asset.id);
+  assert.equal(asset.assetKnowledge?.assetId, asset.id);
+  assert.equal(asset.clipUnderstanding?.assetId, asset.id);
+  assert.equal(asset.semanticAnalysis?.assetId, asset.id);
+  assert.equal(asset.semanticAnalysis?.segments[0].assetId, asset.id);
 
   const copied = path.join(localDir(), asset.storageKey!);
   const bytes = await fs.readFile(copied, "utf8");

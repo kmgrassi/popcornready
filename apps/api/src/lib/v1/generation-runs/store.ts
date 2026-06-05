@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getServiceSupabase } from "../supabase-client";
@@ -21,20 +22,22 @@ import {
 
 // --- Input/patch types -----------------------------------------------------
 
+// Ids are DB-generated (uuid default gen_random_uuid); create inputs never carry
+// an id — the store reads the generated id back and returns it on the entity.
 export type CreateGenerationRunInput = Omit<
   GenerationRun,
   "runId" | "createdAt" | "updatedAt"
-> & { runId?: string };
+>;
 
 export type CreateGenerationStageInput = Omit<
   GenerationStage,
   "stageId" | "createdAt" | "updatedAt"
-> & { stageId?: string };
+>;
 
 export type CreateGenerationStageItemInput = Omit<
   GenerationStageItem,
   "itemId" | "createdAt" | "updatedAt"
-> & { itemId?: string };
+>;
 
 export type UpdateGenerationRunPatch = Partial<
   Omit<GenerationRun, "runId" | "projectId" | "createdAt">
@@ -68,7 +71,7 @@ export interface GenerationStageArtifact {
 export type CreateGenerationStageArtifactInput = Omit<
   GenerationStageArtifact,
   "artifactId" | "createdAt"
-> & { artifactId?: string };
+>;
 
 // --- Store -----------------------------------------------------------------
 
@@ -113,14 +116,6 @@ function safeKey(key: string): string {
   return key.replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
 
-function rand(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function newId(prefix: string): string {
-  return `${prefix}_${rand()}`;
-}
-
 // ---------------------------------------------------------------------------
 // Supabase (Postgres) implementation
 // ---------------------------------------------------------------------------
@@ -140,7 +135,7 @@ function fail(op: string, error: { message?: string } | null): never {
 // --- runs ------------------------------------------------------------------
 
 interface RunRow {
-  run_id: string;
+  id: string;
   project_id: string;
   brief_version_id: string | null;
   status: GenerationRun["status"];
@@ -158,7 +153,7 @@ interface RunRow {
 
 function rowToRun(r: RunRow): GenerationRun {
   const run: GenerationRun = {
-    runId: r.run_id,
+    runId: r.id,
     projectId: r.project_id,
     status: r.status,
     createdAt: r.created_at,
@@ -178,7 +173,7 @@ function rowToRun(r: RunRow): GenerationRun {
 
 function runToRow(run: GenerationRun): RunRow {
   return {
-    run_id: run.runId,
+    id: run.runId,
     project_id: run.projectId,
     brief_version_id: run.briefVersionId ?? null,
     status: run.status,
@@ -198,7 +193,7 @@ function runToRow(run: GenerationRun): RunRow {
 // --- stages ----------------------------------------------------------------
 
 interface StageRow {
-  stage_id: string;
+  id: string;
   run_id: string;
   type: GenerationStage["type"];
   label: string;
@@ -220,7 +215,7 @@ interface StageRow {
 
 function rowToStage(r: StageRow): GenerationStage {
   const stage: GenerationStage = {
-    stageId: r.stage_id,
+    stageId: r.id,
     runId: r.run_id,
     type: r.type,
     label: r.label,
@@ -244,7 +239,7 @@ function rowToStage(r: StageRow): GenerationStage {
 
 function stageToRow(s: GenerationStage): StageRow {
   return {
-    stage_id: s.stageId,
+    id: s.stageId,
     run_id: s.runId,
     type: s.type,
     label: s.label,
@@ -268,7 +263,7 @@ function stageToRow(s: GenerationStage): StageRow {
 // --- stage items -----------------------------------------------------------
 
 interface StageItemRow {
-  item_id: string;
+  id: string;
   stage_id: string;
   kind: GenerationStageItem["kind"];
   label: string;
@@ -287,7 +282,7 @@ interface StageItemRow {
 
 function rowToStageItem(r: StageItemRow): GenerationStageItem {
   const item: GenerationStageItem = {
-    itemId: r.item_id,
+    itemId: r.id,
     stageId: r.stage_id,
     kind: r.kind,
     label: r.label,
@@ -308,7 +303,7 @@ function rowToStageItem(r: StageItemRow): GenerationStageItem {
 
 function stageItemToRow(i: GenerationStageItem): StageItemRow {
   return {
-    item_id: i.itemId,
+    id: i.itemId,
     stage_id: i.stageId,
     kind: i.kind,
     label: i.label,
@@ -329,7 +324,7 @@ function stageItemToRow(i: GenerationStageItem): StageItemRow {
 // --- stage artifacts -------------------------------------------------------
 
 interface StageArtifactRow {
-  artifact_id: string;
+  id: string;
   run_id: string;
   stage_id: string;
   item_id: string | null;
@@ -340,7 +335,7 @@ interface StageArtifactRow {
 
 function rowToStageArtifact(r: StageArtifactRow): GenerationStageArtifact {
   const artifact: GenerationStageArtifact = {
-    artifactId: r.artifact_id,
+    artifactId: r.id,
     runId: r.run_id,
     stageId: r.stage_id,
     kind: r.kind,
@@ -353,7 +348,7 @@ function rowToStageArtifact(r: StageArtifactRow): GenerationStageArtifact {
 
 function stageArtifactToRow(a: GenerationStageArtifact): StageArtifactRow {
   return {
-    artifact_id: a.artifactId,
+    id: a.artifactId,
     run_id: a.runId,
     stage_id: a.stageId,
     item_id: a.itemId ?? null,
@@ -369,22 +364,28 @@ export function createSupabaseGenerationRunsStore(
   return {
     async createRun(input) {
       const now = new Date().toISOString();
-      const run: GenerationRun = {
+      // Omit the id so Postgres assigns it; read the generated id back.
+      const { id: _omit, ...row } = runToRow({
         ...input,
-        runId: input.runId ?? newId("genrun"),
+        runId: "",
         createdAt: now,
         updatedAt: now,
-      };
-      const { error } = await db.from("generation_runs").insert(runToRow(run));
+      });
+      void _omit;
+      const { data, error } = await db
+        .from("generation_runs")
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("create run", error);
-      return run;
+      return rowToRun(data as RunRow);
     },
 
     async getRun(runId) {
       const { data, error } = await db
         .from("generation_runs")
         .select("*")
-        .eq("run_id", runId)
+        .eq("id", runId)
         .single();
       if (error) {
         if (isMissing(error)) return null;
@@ -407,7 +408,7 @@ export function createSupabaseGenerationRunsStore(
       const { error } = await db
         .from("generation_runs")
         .update(runToRow(next))
-        .eq("run_id", runId);
+        .eq("id", runId);
       if (error) fail("update run", error);
       return next;
     },
@@ -424,24 +425,27 @@ export function createSupabaseGenerationRunsStore(
 
     async saveStage(input) {
       const now = new Date().toISOString();
-      const stage: GenerationStage = {
+      const { id: _omit, ...row } = stageToRow({
         ...input,
-        stageId: input.stageId ?? newId("genstage"),
+        stageId: "",
         createdAt: now,
         updatedAt: now,
-      };
-      const { error } = await db
+      });
+      void _omit;
+      const { data, error } = await db
         .from("generation_stages")
-        .upsert(stageToRow(stage), { onConflict: "stage_id" });
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save stage", error);
-      return stage;
+      return rowToStage(data as StageRow);
     },
 
     async getStage(stageId) {
       const { data, error } = await db
         .from("generation_stages")
         .select("*")
-        .eq("stage_id", stageId)
+        .eq("id", stageId)
         .single();
       if (error) {
         if (isMissing(error)) return null;
@@ -464,7 +468,7 @@ export function createSupabaseGenerationRunsStore(
       const { error } = await db
         .from("generation_stages")
         .update(stageToRow(next))
-        .eq("stage_id", stageId);
+        .eq("id", stageId);
       if (error) fail("update stage", error);
       return next;
     },
@@ -481,24 +485,27 @@ export function createSupabaseGenerationRunsStore(
 
     async saveStageItem(input) {
       const now = new Date().toISOString();
-      const item: GenerationStageItem = {
+      const { id: _omit, ...row } = stageItemToRow({
         ...input,
-        itemId: input.itemId ?? newId("genitem"),
+        itemId: "",
         createdAt: now,
         updatedAt: now,
-      };
-      const { error } = await db
+      });
+      void _omit;
+      const { data, error } = await db
         .from("generation_stage_items")
-        .upsert(stageItemToRow(item), { onConflict: "item_id" });
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save stage item", error);
-      return item;
+      return rowToStageItem(data as StageItemRow);
     },
 
     async getStageItem(itemId) {
       const { data, error } = await db
         .from("generation_stage_items")
         .select("*")
-        .eq("item_id", itemId)
+        .eq("id", itemId)
         .single();
       if (error) {
         if (isMissing(error)) return null;
@@ -521,7 +528,7 @@ export function createSupabaseGenerationRunsStore(
       const { error } = await db
         .from("generation_stage_items")
         .update(stageItemToRow(next))
-        .eq("item_id", itemId);
+        .eq("id", itemId);
       if (error) fail("update stage item", error);
       return next;
     },
@@ -538,23 +545,26 @@ export function createSupabaseGenerationRunsStore(
 
     async saveStageArtifact(input) {
       const now = new Date().toISOString();
-      const artifact: GenerationStageArtifact = {
+      const { id: _omit, ...row } = stageArtifactToRow({
         ...input,
-        artifactId: input.artifactId ?? newId("genart"),
+        artifactId: "",
         createdAt: now,
-      };
-      const { error } = await db
+      });
+      void _omit;
+      const { data, error } = await db
         .from("generation_stage_artifacts")
-        .upsert(stageArtifactToRow(artifact), { onConflict: "artifact_id" });
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save stage artifact", error);
-      return artifact;
+      return rowToStageArtifact(data as StageArtifactRow);
     },
 
     async getStageArtifact(artifactId) {
       const { data, error } = await db
         .from("generation_stage_artifacts")
         .select("*")
-        .eq("artifact_id", artifactId)
+        .eq("id", artifactId)
         .single();
       if (error) {
         if (isMissing(error)) return null;
@@ -625,7 +635,7 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
       const now = new Date().toISOString();
       const run: GenerationRun = {
         ...input,
-        runId: input.runId ?? newId("genrun"),
+        runId: randomUUID(),
         createdAt: now,
         updatedAt: now,
       };
@@ -663,7 +673,7 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
       const now = new Date().toISOString();
       const stage: GenerationStage = {
         ...input,
-        stageId: input.stageId ?? newId("genstage"),
+        stageId: randomUUID(),
         createdAt: now,
         updatedAt: now,
       };
@@ -702,7 +712,7 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
       const now = new Date().toISOString();
       const item: GenerationStageItem = {
         ...input,
-        itemId: input.itemId ?? newId("genitem"),
+        itemId: randomUUID(),
         createdAt: now,
         updatedAt: now,
       };
@@ -744,7 +754,7 @@ export function createGenerationRunsStore(rootDir: string): GenerationRunsStore 
       const now = new Date().toISOString();
       const artifact: GenerationStageArtifact = {
         ...input,
-        artifactId: input.artifactId ?? newId("genart"),
+        artifactId: randomUUID(),
         createdAt: now,
       };
       await writeJson(COLLECTIONS.stageArtifacts, artifact.artifactId, artifact);

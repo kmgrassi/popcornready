@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { mutation, route } from "@/core/adapter";
 import { ApiError } from "@/core/errors";
-import { newId } from "@/core/ids";
 import {
   parsePagination,
   parseRegisterAsset,
@@ -178,7 +177,9 @@ miscCapabilitiesRouter.post(
       ...new Set(plannedBeats.flatMap((beat) => beat.requiredAssetIds ?? [])),
     ];
     const composition = {
-      id: newId("comp"),
+      // Placeholder; saveCompositionPlan omits it and the DB assigns the id,
+      // returned as `saved.id`.
+      id: "",
       schemaVersion: SCHEMA.composition,
       projectId,
       briefVersionId: optionalString(input.briefVersionId) ?? "",

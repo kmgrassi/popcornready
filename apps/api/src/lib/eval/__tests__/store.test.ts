@@ -8,6 +8,12 @@ import type { EvalRun, Judgment } from "@popcorn/eval";
 
 import { createFileEvalStore, type EvalStore } from "../store";
 
+// Ids are DB-generated (uuid). The file store stands in for Postgres and assigns
+// the uuid on insert, so create inputs never carry an id and callers read the
+// assigned id back off the returned entity.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 let tmpDir: string;
 let store: EvalStore;
 
@@ -20,11 +26,11 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-function makeRun(overrides: Partial<EvalRun> = {}): EvalRun {
+// Run/judgment fixtures omit the id (the store assigns it). evalRunId/suiteId are
+// filled in by the caller from real returned ids.
+function makeRun(overrides: Partial<Omit<EvalRun, "id">> = {}): Omit<EvalRun, "id"> {
   return {
-    id: "evalrun_1",
     source: "suite",
-    suiteId: "evalsuite_1",
     generationMode: "prompts_only",
     gitSha: "abc1234",
     branch: "feat/eval-http-api",
@@ -37,12 +43,10 @@ function makeRun(overrides: Partial<EvalRun> = {}): EvalRun {
 
 function makeJudgment(overrides: Partial<Judgment> = {}): Judgment {
   return {
-    id: "judgment_1",
+    id: "",
     evaluatorId: "story_arc.v1",
     rubricVersion: "v1",
     judgeModel: "test-model",
-    evalRunId: "evalrun_1",
-    caseId: "evalcase_1",
     stageId: "evalcase_1:creative_plan",
     grades: { storyArc: 8 },
     verdict: "pass",
@@ -55,16 +59,16 @@ function makeJudgment(overrides: Partial<Judgment> = {}): Judgment {
   };
 }
 
-test("createSuite assigns an id when omitted and round-trips", async () => {
+test("createSuite assigns a uuid id and round-trips", async () => {
   const suite = await store.createSuite({ name: "Long-form core", description: "desc" });
-  assert.match(suite.id, /^evalsuite_/);
+  assert.match(suite.id, UUID_RE);
   const read = await store.getSuite(suite.id);
   assert.deepEqual(read, suite);
 });
 
 test("listSuites returns all saved suites", async () => {
-  await store.createSuite({ id: "evalsuite_a", name: "A" });
-  await store.createSuite({ id: "evalsuite_b", name: "B" });
+  await store.createSuite({ name: "A" });
+  await store.createSuite({ name: "B" });
   const suites = await store.listSuites();
   assert.equal(suites.length, 2);
 });
@@ -73,34 +77,42 @@ test("getSuite returns null for an unknown id", async () => {
   assert.equal(await store.getSuite("evalsuite_missing"), null);
 });
 
-test("saveCase defaults artifacts and scopes by suite", async () => {
+test("saveCase assigns a uuid id, defaults artifacts and scopes by suite", async () => {
+  const suite = await store.createSuite({ name: "Core" });
+  const other = await store.createSuite({ name: "Other suite" });
   const created = await store.saveCase({
-    suiteId: "evalsuite_1",
+    suiteId: suite.id,
     label: "Launch arc",
     stimulus: { kind: "brief", goal: "g", targetLengthSec: 60, style: "doc", aspectRatio: "16:9" },
     stagesToRun: ["creative_plan"],
   });
-  assert.match(created.id, /^evalcase_/);
+  assert.match(created.id, UUID_RE);
   assert.deepEqual(created.artifacts, []);
 
   await store.saveCase({
-    suiteId: "evalsuite_other",
+    suiteId: other.id,
     label: "Other",
     stimulus: { kind: "brief", goal: "g", targetLengthSec: 60, style: "doc", aspectRatio: "16:9" },
     stagesToRun: ["creative_plan"],
   });
 
-  const cases = await store.listCasesForSuite("evalsuite_1");
+  const cases = await store.listCasesForSuite(suite.id);
   assert.equal(cases.length, 1);
   assert.equal(cases[0].id, created.id);
 });
 
-test("saveRun + getRun + listRunsForSuite (newest first)", async () => {
-  const older = await store.saveRun(makeRun({ id: "evalrun_old", createdAt: "2026-06-01T00:00:00.000Z" }));
-  const newer = await store.saveRun(makeRun({ id: "evalrun_new", createdAt: "2026-06-04T00:00:00.000Z" }));
+test("saveRun assigns a uuid id; getRun + listRunsForSuite (newest first)", async () => {
+  const suite = await store.createSuite({ name: "Core" });
+  const older = await store.saveRun(
+    makeRun({ suiteId: suite.id, createdAt: "2026-06-01T00:00:00.000Z" })
+  );
+  const newer = await store.saveRun(
+    makeRun({ suiteId: suite.id, createdAt: "2026-06-04T00:00:00.000Z" })
+  );
+  assert.match(older.id, UUID_RE);
 
   assert.deepEqual(await store.getRun(older.id), older);
-  const runs = await store.listRunsForSuite("evalsuite_1");
+  const runs = await store.listRunsForSuite(suite.id);
   assert.equal(runs.length, 2);
   assert.equal(runs[0].id, newer.id);
   assert.equal(runs[1].id, older.id);
@@ -110,21 +122,28 @@ test("getRun returns null for an unknown id", async () => {
   assert.equal(await store.getRun("evalrun_missing"), null);
 });
 
-test("judgments are append-only: a duplicate id is rejected", async () => {
-  const judgment = makeJudgment();
-  await store.saveJudgment(judgment);
-  await assert.rejects(() => store.saveJudgment(judgment), /append-only/);
+test("saveJudgment is append-only: every save gets a fresh id", async () => {
+  const a = await store.saveJudgment(makeJudgment());
+  const b = await store.saveJudgment(makeJudgment());
+  assert.match(a.id, UUID_RE);
+  assert.match(b.id, UUID_RE);
+  assert.notEqual(a.id, b.id);
 });
 
 test("listJudgmentsForRun scopes by run and orders oldest-first", async () => {
-  await store.saveJudgment(makeJudgment({ id: "judgment_2", createdAt: "2026-06-04T10:00:02.000Z" }));
-  await store.saveJudgment(makeJudgment({ id: "judgment_1", createdAt: "2026-06-04T10:00:01.000Z" }));
-  await store.saveJudgment(makeJudgment({ id: "judgment_x", evalRunId: "evalrun_other" }));
+  const runId = "11111111-1111-1111-1111-111111111111";
+  await store.saveJudgment(
+    makeJudgment({ evalRunId: runId, createdAt: "2026-06-04T10:00:02.000Z" })
+  );
+  await store.saveJudgment(
+    makeJudgment({ evalRunId: runId, createdAt: "2026-06-04T10:00:01.000Z" })
+  );
+  await store.saveJudgment(makeJudgment({ evalRunId: "evalrun_other" }));
 
-  const judgments = await store.listJudgmentsForRun("evalrun_1");
+  const judgments = await store.listJudgmentsForRun(runId);
   assert.deepEqual(
-    judgments.map((j) => j.id),
-    ["judgment_1", "judgment_2"]
+    judgments.map((j) => j.createdAt),
+    ["2026-06-04T10:00:01.000Z", "2026-06-04T10:00:02.000Z"]
   );
 });
 

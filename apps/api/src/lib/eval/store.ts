@@ -16,9 +16,9 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { newId } from "@/core/ids";
 import { getServiceSupabase } from "@/lib/v1/supabase-client";
 import { useSupabaseStorage } from "@/lib/supabase/storage";
 import type {
@@ -32,18 +32,22 @@ import type {
 
 // --- Input types -----------------------------------------------------------
 
-export type CreateEvalSuiteInput = Omit<EvalSuite, "id"> & { id?: string };
+// Ids are DB-generated (uuid default gen_random_uuid); create inputs omit `id`
+// and the store reads the generated id back onto the returned entity.
+export type CreateEvalSuiteInput = Omit<EvalSuite, "id">;
 
 // A case carries its inline/media artifacts (EvalFixtureCase) so the suite runner
 // can replay it without re-reaching the live pipeline. `artifacts` defaults to []
 // when omitted (a stimulus-only case the live pipeline will fill in).
 export type CreateEvalCaseInput = Omit<EvalFixtureCase, "id" | "artifacts"> & {
-  id?: string;
   artifacts?: EvalFixtureArtifact[];
 };
 
-// EvalRun.createdAt is assigned on insert; everything else comes from the runner.
-export type CreateEvalRunInput = Omit<EvalRun, "createdAt"> & { createdAt?: string };
+// EvalRun.createdAt is assigned on insert; the id is DB-generated (the runner's
+// in-memory id is a placeholder remapped by the service on persist).
+export type CreateEvalRunInput = Omit<EvalRun, "id" | "createdAt"> & {
+  createdAt?: string;
+};
 
 // --- Store interface -------------------------------------------------------
 
@@ -311,16 +315,18 @@ export function createSupabaseEvalStore(
 ): EvalStore {
   return {
     async createSuite(input) {
-      const suite: EvalSuite = { ...input, id: input.id ?? newId("evalsuite") };
-      const row: SuiteRow = {
-        id: suite.id,
-        name: suite.name,
-        description: suite.description ?? null,
-        created_at: new Date().toISOString(),
-      };
-      const { error } = await db.from("eval_suites").insert(row);
+      // Omit `id`; Postgres assigns it (gen_random_uuid) and we read it back.
+      const { data, error } = await db
+        .from("eval_suites")
+        .insert({
+          name: input.name,
+          description: input.description ?? null,
+          created_at: new Date().toISOString(),
+        })
+        .select("*")
+        .single();
       if (error) fail("create suite", error);
-      return suite;
+      return rowToSuite(data as SuiteRow);
     },
 
     async getSuite(suiteId) {
@@ -346,16 +352,19 @@ export function createSupabaseEvalStore(
     },
 
     async saveCase(input) {
-      const evalCase: EvalFixtureCase = {
+      const { id: _omit, ...row } = caseToRow({
         ...input,
-        id: input.id ?? newId("evalcase"),
+        id: "",
         artifacts: input.artifacts ?? [],
-      };
-      const { error } = await db
+      });
+      void _omit;
+      const { data, error } = await db
         .from("eval_cases")
-        .upsert(caseToRow(evalCase), { onConflict: "id" });
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save case", error);
-      return evalCase;
+      return rowToCase(data as CaseRow);
     },
 
     async getCase(caseId) {
@@ -382,10 +391,19 @@ export function createSupabaseEvalStore(
     },
 
     async saveRun(input) {
-      const run: EvalRun = { ...input, createdAt: input.createdAt ?? new Date().toISOString() };
-      const { error } = await db.from("eval_runs").upsert(runToRow(run), { onConflict: "id" });
+      const { id: _omit, ...row } = runToRow({
+        ...input,
+        id: "",
+        createdAt: input.createdAt ?? new Date().toISOString(),
+      });
+      void _omit;
+      const { data, error } = await db
+        .from("eval_runs")
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save run", error);
-      return run;
+      return rowToRun(data as RunRow);
     },
 
     async getRun(runId) {
@@ -412,11 +430,17 @@ export function createSupabaseEvalStore(
     },
 
     async saveJudgment(judgment) {
-      // Append-only: insert (never upsert) so a duplicate id surfaces as an error
-      // rather than silently overwriting an immutable verdict.
-      const { error } = await db.from("judgments").insert(judgmentToRow(judgment));
+      // Append-only: insert (never upsert) so re-judging appends a row. The id is
+      // DB-generated (gen_random_uuid); omit it and read the assigned id back.
+      const { id: _omit, ...row } = judgmentToRow({ ...judgment, id: "" });
+      void _omit;
+      const { data, error } = await db
+        .from("judgments")
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save judgment", error);
-      return judgment;
+      return rowToJudgment(data as JudgmentRow);
     },
 
     async getJudgment(judgmentId) {
@@ -512,7 +536,9 @@ export function createFileEvalStore(rootDir: string): EvalStore {
 
   return {
     async createSuite(input) {
-      const suite: EvalSuite = { ...input, id: input.id ?? newId("evalsuite") };
+      // File store stands in for the DB: it assigns the id (uuid) the same way
+      // Postgres' gen_random_uuid default would.
+      const suite: EvalSuite = { ...input, id: randomUUID() };
       await writeJson(COLLECTIONS.suites, suite.id, suite);
       return suite;
     },
@@ -527,7 +553,7 @@ export function createFileEvalStore(rootDir: string): EvalStore {
     async saveCase(input) {
       const evalCase: EvalFixtureCase = {
         ...input,
-        id: input.id ?? newId("evalcase"),
+        id: randomUUID(),
         artifacts: input.artifacts ?? [],
       };
       await writeJson(COLLECTIONS.cases, evalCase.id, evalCase);
@@ -544,6 +570,7 @@ export function createFileEvalStore(rootDir: string): EvalStore {
     async saveRun(input) {
       const run: EvalRun = {
         ...input,
+        id: randomUUID(),
         createdAt: input.createdAt ?? new Date().toISOString(),
       };
       await writeJson(COLLECTIONS.runs, run.id, run);
@@ -560,13 +587,11 @@ export function createFileEvalStore(rootDir: string): EvalStore {
     },
 
     async saveJudgment(judgment) {
-      // Append-only: a duplicate id is a programming error.
-      const existing = await readJson<Judgment>(COLLECTIONS.judgments, judgment.id);
-      if (existing) {
-        throw new Error(`eval store: judgment already exists (append-only): ${judgment.id}`);
-      }
-      await writeJson(COLLECTIONS.judgments, judgment.id, judgment);
-      return judgment;
+      // Append-only: the store assigns a fresh id (uuid) on every insert, so
+      // re-judging the same target appends a new record (never overwrites).
+      const persisted: Judgment = { ...judgment, id: randomUUID() };
+      await writeJson(COLLECTIONS.judgments, persisted.id, persisted);
+      return persisted;
     },
 
     getJudgment: (judgmentId) => readJson<Judgment>(COLLECTIONS.judgments, judgmentId),

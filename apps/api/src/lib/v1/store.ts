@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   BriefVersion,
@@ -367,8 +368,10 @@ interface EditGraphRow {
 function rowToEditGraph(r: EditGraphRow): VersionedEditGraph {
   // The full EditGraphDocument is stored in `document`; the relational columns
   // are extracted copies for FK integrity and indexing. The document is the
-  // source of truth on read.
-  return r.document;
+  // source of truth on read, EXCEPT its top-level `id`: that is the DB-generated
+  // row id (the document's internal node ids are seeded from its own in-JSON id,
+  // which is exempt and may differ from the row id).
+  return { ...r.document, id: r.id };
 }
 
 function editGraphToRow(g: VersionedEditGraph): EditGraphRow {
@@ -468,6 +471,29 @@ export function createSupabaseStore(
     if (error) fail(`save ${table}`, error);
   }
 
+  // Create-or-update keyed on the DB-generated id. When the entity has no id yet
+  // (first save), INSERT omitting `id` so Postgres assigns it (gen_random_uuid)
+  // and read the generated id back. When it already has an id (subsequent save
+  // = update), upsert by id. Returns the id that was persisted.
+  async function saveWithGeneratedId<Row extends { id: string }>(
+    table: string,
+    row: Row
+  ): Promise<string> {
+    if (row.id) {
+      await upsert(table, row, "id");
+      return row.id;
+    }
+    const { id: _omit, ...insertable } = row;
+    void _omit;
+    const { data, error } = await db
+      .from(table)
+      .insert(insertable as Record<string, unknown>)
+      .select("id")
+      .single();
+    if (error) fail(`save ${table}`, error);
+    return (data as { id: string }).id;
+  }
+
   return {
     async getProject(id) {
       const row = await getOne<ProjectRow>("projects", "id", id);
@@ -499,24 +525,24 @@ export function createSupabaseStore(
       return row ? rowToJob(row) : null;
     },
     async saveJob(job) {
-      await upsert("jobs", jobToRow(job), "id");
-      return job;
+      const id = await saveWithGeneratedId("jobs", jobToRow(job));
+      return { ...job, id };
     },
     async getEditGraph(id) {
       const row = await getOne<EditGraphRow>("edit_graphs", "id", id);
       return row ? rowToEditGraph(row) : null;
     },
     async saveEditGraph(graph) {
-      await upsert("edit_graphs", editGraphToRow(graph), "id");
-      return graph;
+      const id = await saveWithGeneratedId("edit_graphs", editGraphToRow(graph));
+      return { ...graph, id };
     },
     async getTimeline(id) {
       const row = await getOne<TimelineRow>("timelines", "id", id);
       return row ? rowToTimeline(row) : null;
     },
     async saveTimeline(timeline) {
-      await upsert("timelines", timelineToRow(timeline), "id");
-      return timeline;
+      const id = await saveWithGeneratedId("timelines", timelineToRow(timeline));
+      return { ...timeline, id };
     },
     async getIdempotency(scope) {
       const { data, error } = await db
@@ -556,54 +582,36 @@ export function createSupabaseStore(
     },
 
     async saveProject(project) {
-      // Ensure an owning workspace row exists so the FK holds. The api/v1
-      // foundation PR owns real workspace creation; this seed path mirrors what
-      // it would have written so the lib/v1 stack is runnable standalone.
-      await upsert(
-        "workspaces",
-        {
-          id: project.workspaceId,
-          name: project.workspaceId,
-          schema_version: "workspace.v1",
-        },
-        "id"
-      );
-      await upsert(
-        "projects",
-        {
-          id: project.id,
-          schema_version: project.schemaVersion,
-          workspace_id: project.workspaceId,
-          name: project.name,
-          status: project.status,
-          created_at: project.createdAt,
-          updated_at: project.updatedAt,
-        },
-        "id"
-      );
-      return project;
+      // The owning workspace already exists (find-or-create in auth resolution);
+      // its uuid is project.workspaceId, so the FK holds without seeding one here.
+      const id = await saveWithGeneratedId("projects", {
+        id: project.id,
+        schema_version: project.schemaVersion,
+        workspace_id: project.workspaceId,
+        name: project.name,
+        status: project.status,
+        created_at: project.createdAt,
+        updated_at: project.updatedAt,
+      });
+      return { ...project, id };
     },
     async saveBriefVersion(brief) {
-      await upsert(
-        "brief_versions",
-        {
-          id: brief.id,
-          schema_version: brief.schemaVersion,
-          project_id: brief.projectId,
-          brief: brief.brief,
-          created_at: brief.createdAt,
-        },
-        "id"
-      );
-      return brief;
+      const id = await saveWithGeneratedId("brief_versions", {
+        id: brief.id,
+        schema_version: brief.schemaVersion,
+        project_id: brief.projectId,
+        brief: brief.brief,
+        created_at: brief.createdAt,
+      });
+      return { ...brief, id };
     },
     async saveAsset(asset) {
-      await upsert("assets", assetToRow(asset), "id");
-      return asset;
+      const id = await saveWithGeneratedId("assets", assetToRow(asset));
+      return { ...asset, id };
     },
     async saveComposition(composition) {
-      await upsert("compositions", compositionToRow(composition), "id");
-      return composition;
+      const id = await saveWithGeneratedId("compositions", compositionToRow(composition));
+      return { ...composition, id };
     },
   };
 }
@@ -672,6 +680,17 @@ export function createStore(rootDir: string): V1Store {
     return records;
   }
 
+  // Mirror the Postgres "DB assigns the id" contract in the file store: when an
+  // entity is saved without an id (first save), assign a uuid (the DB stand-in)
+  // and key the file by it; subsequent saves carry the assigned id.
+  function saveWithId<T extends { id: string }>(
+    collection: string,
+    entity: T
+  ): Promise<T> {
+    const withId = entity.id ? entity : { ...entity, id: randomUUID() };
+    return writeJson(collection, withId.id, withId);
+  }
+
   return {
     getProject: (id) => readJson<V1Project>(COLLECTIONS.projects, id),
     getBriefVersion: (id) => readJson<BriefVersion>(COLLECTIONS.briefVersions, id),
@@ -683,21 +702,20 @@ export function createStore(rootDir: string): V1Store {
     getComposition: (id) => readJson<CompositionPlan>(COLLECTIONS.compositions, id),
 
     getJob: (id) => readJson<Job>(COLLECTIONS.jobs, id),
-    saveJob: (job) => writeJson(COLLECTIONS.jobs, job.id, job),
+    saveJob: (job) => saveWithId(COLLECTIONS.jobs, job),
     getEditGraph: (id) => readJson<VersionedEditGraph>(COLLECTIONS.editGraphs, id),
-    saveEditGraph: (graph) => writeJson(COLLECTIONS.editGraphs, graph.id, graph),
+    saveEditGraph: (graph) => saveWithId(COLLECTIONS.editGraphs, graph),
     getTimeline: (id) => readJson<VersionedTimeline>(COLLECTIONS.timelines, id),
-    saveTimeline: (timeline) => writeJson(COLLECTIONS.timelines, timeline.id, timeline),
+    saveTimeline: (timeline) => saveWithId(COLLECTIONS.timelines, timeline),
     getIdempotency: (scope) => readJson<IdempotencyRecord>(COLLECTIONS.idempotency, scope),
     async saveIdempotency(scope, record) {
       await writeJson(COLLECTIONS.idempotency, scope, record);
     },
 
-    saveProject: (project) => writeJson(COLLECTIONS.projects, project.id, project),
-    saveBriefVersion: (brief) => writeJson(COLLECTIONS.briefVersions, brief.id, brief),
-    saveAsset: (asset) => writeJson(COLLECTIONS.assets, asset.id, asset),
-    saveComposition: (composition) =>
-      writeJson(COLLECTIONS.compositions, composition.id, composition),
+    saveProject: (project) => saveWithId(COLLECTIONS.projects, project),
+    saveBriefVersion: (brief) => saveWithId(COLLECTIONS.briefVersions, brief),
+    saveAsset: (asset) => saveWithId(COLLECTIONS.assets, asset),
+    saveComposition: (composition) => saveWithId(COLLECTIONS.compositions, composition),
   };
 }
 
