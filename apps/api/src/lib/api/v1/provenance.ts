@@ -40,4 +40,12 @@ export interface GeneratedAssetProvenance {
   providerSettings?: GeneratedAssetProviderSettings;
   requestedDurationSec?: number;
   actualDurationSec?: number;
+  // Per-beat provenance recorded by the beat-scoped media endpoints
+  // (POST …/beats/:beatId/{keyframe,clip}). These are dependency edges in the
+  // provenance graph (docs/scopes/north-star-provenance-graph.md): `beatId` ties
+  // the asset to the plan beat it was generated for, and `anchorIds` to the
+  // character/scene anchors that conditioned it — the basis for selective
+  // regeneration. Absent for generic `generated-assets` calls.
+  beatId?: string;
+  anchorIds?: string[];
 }
