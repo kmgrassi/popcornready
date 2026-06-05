@@ -30,10 +30,10 @@ create index assets_visibility_idx
   on public.assets (visibility)
   where visibility = 'public';
 
--- Existing assets were written to the original private assets bucket. Keep that
--- physical location explicit until the storage toggle/cascade slice can move
--- bytes between public and private buckets.
+-- Existing assets were written to the current private Supabase `assets` bucket.
+-- Keep that physical location explicit until the storage toggle/cascade slice
+-- creates new public/private buckets and moves bytes between them.
 update public.assets
-set storage_bucket = 'assets-private'
+set storage_bucket = 'assets'
 where storage_bucket is null
   and storage_key is not null;
