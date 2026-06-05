@@ -31,8 +31,9 @@ The app is the **Vite SPA at `apps/web`** (React Router). Relevant files:
 | Form panels | `apps/web/src/components/editor/{BriefPanel,AssetGenerationPanel,CharacterPanel,LibraryPanel}.tsx` | the up-front fields to hide |
 | Preview / timeline | `apps/web/src/components/editor/{PreviewPanel,SidebarPanel}.tsx` | the editor surface |
 | App shell / nav | `apps/web/src/components/AppLayout.tsx` | **top-bar** nav (Home, How it works, Pricing, Studio, Auth, Theme) — **no sidebar** |
-| New-project entry | `apps/web/src/components/PromptComposer.tsx` | landing-page goal box + cog (length, review gates, ref image) → `POST /api/oneshot` |
-| Projects API | `GET/POST /api/v1/projects`; client `apps/web/src/lib/api-client.ts` | list/create |
+| New-project entry (legacy) | `apps/web/src/components/PromptComposer.tsx` | goal box + cog → **legacy** `POST /api/oneshot` (Next route `src/app/api/oneshot/route.ts`, returns `id: "default"`) — **does not exist in Express / the V1 run model** |
+| V1 generation API | `apps/api/src/routes/v1/generation-entrypoints.ts` + `…/generation-runs` | the real entrypoints the SPA must drive (§3.1) |
+| Projects + run API client | `apps/web/src/lib/api-client.ts` | has `createProject`, `getProject`, `getGenerationRun`, `updateGenerationRun` — **no "start run" method yet** |
 | Design tokens | `apps/web/src/styles/{tokens,base,globals}.css` | `--bg/--panel/--panel-2/--border/--accent/--muted…` + 4 themes |
 
 Form fields currently surfaced up-front (the density to remove): footage upload +
@@ -118,7 +119,7 @@ alternative — §9). Four steps, with **"Advanced options" collapsed** at each:
 | 1 · Upload footage | drag/drop clips (optional — prompt-only is allowed) | existing upload input + `LibraryPanel` logic |
 | 2 · Describe the goal | project name + creative goal/brief | `BriefPanel` goal field; `PromptComposer` textarea |
 | 3 · Choose format / platform | aspect/length + platform/format presets | `BriefPanel` aspect/length; story-context platform/format |
-| 4 · Generate rough cut | confirm → kick off generation → ProjectEditor | `POST /api/oneshot` (existing one-shot pipeline) |
+| 4 · Generate rough cut | confirm → kick off generation → ProjectEditor | V1 run model: `createProject` + generation-entrypoint → `runId` (§3.1) — **not** `/api/oneshot` |
 
 **Advanced options** (collapsed) absorb today's dense fields: asset-generation
 provider/kind/size/consistency, review gates, full story context (audience, hook,
@@ -127,6 +128,33 @@ project + run and route into ProjectEditor (showing `RunProgress` until ready).
 
 Essentials visible by default across the flow: **project name, upload, creative
 goal, Generate** — everything else under presets/advanced.
+
+### 3.1 Generation wiring — the V1 run model, not `/api/oneshot`
+
+`/api/oneshot` is the **legacy Next monolith** route
+(`src/app/api/oneshot/route.ts`, returns a hard-coded `id: "default"`) and does
+**not** exist in the Express API. Reusing it from the SPA would 404 (or bypass the
+run model and yield no `runId` to route into ProjectEditor). The New Project flow
+must drive the **V1 run model** — which is also exactly what `RunProgress` polls.
+On **Generate**:
+
+1. `POST /api/v1/projects` — create the project (api-client `createProject`) → `projectId`.
+2. Start a run via the matching **generation entrypoint**
+   (`apps/api/src/routes/v1/generation-entrypoints.ts`):
+   - clips uploaded → `POST …/projects/:projectId/generation-entrypoints/uploaded-footage`
+   - prompt-only → `POST …/projects/:projectId/generation-entrypoints/prompt`
+
+   → returns a **`runId`**.
+3. Route to `/projects/:projectId/runs/:runId` → `RunProgress` polls
+   `GET …/generation-runs/:runId` (`getGenerationRun`) and honors review gates via
+   `updateGenerationRun` (approve/reject/cancel) → on completion, hand off to
+   **ProjectEditor**.
+
+**api-client gap (PR 4 must close it):** `api-client.ts` today has
+`createProject` / `getProject` / `getGenerationRun` / `updateGenerationRun` but
+**no method to start a run** — PR 4 adds the entrypoint call. The collapsed
+**Advanced options** (review gates, story context, provider, aspect/length/style)
+become the **entrypoint request body**, not `oneshot` params.
 
 ---
 
@@ -221,10 +249,13 @@ the shell from PR 1.
   keyframe/export frame. Add `POST …/projects/:id/duplicate` +
   `DELETE …/projects/:id`; wire Open/Duplicate/Delete.
 - **PR 4 — New Project flow.** `/projects/new` 4-step wizard (upload → describe →
-  format → generate) with **Advanced options** collapsed; reuse `PromptComposer` /
-  one-shot + upload + brief fields. On generate → create project/run → route to
-  ProjectEditor (with `RunProgress`). *(Largest PR; can split into 4a structure /
-  4b advanced-options if needed.)*
+  format → generate) with **Advanced options** collapsed; reuse `PromptComposer`'s
+  goal/template UI + upload + brief fields. **Drive the V1 run model (§3.1), not
+  `/api/oneshot`:** add a "start run" method to `api-client.ts` hitting the
+  `prompt` / `uploaded-footage` generation-entrypoint, then route
+  `createProject` → entrypoint → `/projects/:id/runs/:runId` (`RunProgress`) →
+  ProjectEditor. *(Largest PR; can split into 4a wizard shell / 4b V1 generation
+  wiring + advanced options.)*
 - **PR 5 — ProjectEditor cleanup + inspector.** Calm the 3-col layout; move
   `AssetGenerationPanel` / `CharacterPanel` / full story context into a
   collapsible `EditorInspector`; preview+timeline dominant; essentials only by
