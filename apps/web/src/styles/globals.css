@@ -2684,6 +2684,18 @@ button.eval-card-link[aria-pressed="true"] {
   overflow-x: auto;
 }
 
+/* Large screens: grow the comparison table past the 1080px content column and
+   center it on the viewport, so every column (incl. the Positioning notes) has
+   room and nothing is clipped. */
+@media (min-width: 1200px) {
+  .lp-heatmap-wrap {
+    --lp-heatmap-w: min(1400px, calc(100vw - 48px));
+    width: var(--lp-heatmap-w);
+    margin-left: calc((100% - var(--lp-heatmap-w)) / 2);
+    margin-right: calc((100% - var(--lp-heatmap-w)) / 2);
+  }
+}
+
 .lp-heatmap-head,
 .lp-heatmap-row {
   display: grid;
@@ -2709,6 +2721,7 @@ button.eval-card-link[aria-pressed="true"] {
 .lp-heat-cell {
   padding: 13px 12px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .lp-heatmap-row {
@@ -2731,6 +2744,7 @@ button.eval-card-link[aria-pressed="true"] {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .lp-heat-cell {
