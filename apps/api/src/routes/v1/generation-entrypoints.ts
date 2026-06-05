@@ -382,7 +382,7 @@ generationEntrypointsRouter.post(
   mutation(async () => {
     throw new ApiError(
       "not_implemented",
-      "Timeline revision entrypoints move to /api/v1/projects/:projectId/timelines/:timelineId/revisions."
+      "Timeline revision entrypoints are not available yet; rebuild this capability on the Postgres v1 store before using it."
     );
   })
 );
