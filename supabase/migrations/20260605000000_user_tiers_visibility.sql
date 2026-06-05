@@ -69,7 +69,7 @@ where storage_bucket is null and storage_key is not null;
 
 create index projects_visibility_idx
   on public.projects (visibility)
-  where visibility = 'public';
+  where visibility = 'public' and status <> 'deleted';
 
 create index assets_visibility_idx
   on public.assets (visibility)
@@ -77,7 +77,7 @@ create index assets_visibility_idx
 
 create index projects_public_feed_idx
   on public.projects (created_at desc)
-  where visibility = 'public';
+  where visibility = 'public' and status <> 'deleted';
 
 create index assets_public_feed_idx
   on public.assets (created_at desc)
@@ -91,7 +91,7 @@ create index projects_search_idx
       coalesce(name, '') || ' ' || coalesce(brief ->> 'summary', '')
     )
   )
-  where visibility = 'public';
+  where visibility = 'public' and status <> 'deleted';
 
 create index assets_search_idx
   on public.assets
@@ -115,6 +115,7 @@ as $$
     from public.projects p
     where p.id = proj_id
       and p.visibility = 'public'
+      and p.status <> 'deleted'
   )
 $$;
 
@@ -135,6 +136,7 @@ as $$
     where a.id = asset_id
       and a.visibility = 'public'
       and p.visibility = 'public'
+      and p.status <> 'deleted'
   )
 $$;
 
@@ -179,7 +181,7 @@ grant execute on function public.generation_stage_is_public(text) to anon, authe
 
 create policy projects_public_read on public.projects
   for select to anon, authenticated
-  using (visibility = 'public');
+  using (visibility = 'public' and status <> 'deleted');
 
 create policy assets_public_read on public.assets
   for select to anon, authenticated
@@ -248,10 +250,27 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  project_workspace_id text;
 begin
+  select p.workspace_id
+  into project_workspace_id
+  from public.projects p
+  where p.id = new.project_id;
+
+  if project_workspace_id is null then
+    raise exception 'asset project does not exist (%)', new.project_id
+      using errcode = 'foreign_key_violation';
+  end if;
+
+  if new.workspace_id <> project_workspace_id then
+    raise exception 'asset workspace % must match project workspace %', new.workspace_id, project_workspace_id
+      using errcode = 'check_violation';
+  end if;
+
   if new.visibility = 'private'
-    and public.owner_tier(new.workspace_id) = 'free' then
-    raise exception 'free tier cannot make content private (workspace %)', new.workspace_id
+    and public.owner_tier(project_workspace_id) = 'free' then
+    raise exception 'free tier cannot make content private (workspace %)', project_workspace_id
       using errcode = 'check_violation';
   end if;
 
@@ -260,7 +279,7 @@ end;
 $$;
 
 create trigger assets_visibility_tier
-  before insert or update of visibility, workspace_id on public.assets
+  before insert or update of visibility, workspace_id, project_id on public.assets
   for each row execute function public.enforce_asset_visibility_tier();
 
 create table public.saved_assets (
