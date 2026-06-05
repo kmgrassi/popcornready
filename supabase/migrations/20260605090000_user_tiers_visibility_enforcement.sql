@@ -109,7 +109,19 @@ as $$
 declare
   target_workspace_id text;
 begin
-  target_workspace_id := new.workspace_id;
+  if tg_table_name = 'assets' then
+    select p.workspace_id into target_workspace_id
+    from public.projects p
+    where p.id = new.project_id;
+
+    if target_workspace_id is not null and new.workspace_id is distinct from target_workspace_id then
+      raise exception 'asset workspace % does not match project % workspace %',
+        new.workspace_id, new.project_id, target_workspace_id
+        using errcode = 'check_violation';
+    end if;
+  else
+    target_workspace_id := new.workspace_id;
+  end if;
 
   if public.owner_tier(target_workspace_id) = 'free'::public.user_tier
      and new.visibility = 'private'::public.visibility then
