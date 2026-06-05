@@ -66,7 +66,9 @@ export interface Actor {
 
 // Local development workspace, per the scope doc's Local Development section.
 // Deterministic so retried/concurrent requests map to the same tenant.
-const LOCAL_WORKSPACE_ID = "ws_local_dev";
+// Must be a valid UUID (workspaces.id is a Postgres `uuid` column). Keep in
+// sync with api/v1/auth.ts LOCAL_WORKSPACE_ID so both surfaces share a tenant.
+const LOCAL_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const LOCAL_ACTOR_ID = "agent_local_dev";
 
 // Resolve the calling agent. In AUTH_MODE=local every request resolves to a
