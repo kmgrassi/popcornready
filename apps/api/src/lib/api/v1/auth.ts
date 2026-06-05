@@ -22,7 +22,12 @@ import {
 } from "@/lib/supabase/clients";
 import { requestContext } from "@/lib/supabase/request-context";
 
-export const LOCAL_WORKSPACE_ID = "ws_local_dev";
+// Must be a valid UUID: `workspaces.id` is a Postgres `uuid` column, so a
+// plain string ("ws_local_dev") makes ensureWorkspace's select/insert throw
+// "invalid input syntax for type uuid" before it can auto-create the workspace.
+// Fixed (deterministic) so retried/concurrent local requests map to one tenant.
+// Keep in sync with agent-api/runtime.ts LOCAL_WORKSPACE_ID.
+export const LOCAL_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 export const LOCAL_WORKSPACE_NAME = "dev_workspace";
 export const LOCAL_ACTOR_ID = "local_dev";
 

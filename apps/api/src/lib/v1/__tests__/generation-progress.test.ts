@@ -34,6 +34,7 @@ import {
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
+import { LOCAL_WORKSPACE_ID } from "../../api/v1/auth";
 
 // --- Recording emitter -----------------------------------------------------
 
@@ -197,7 +198,7 @@ async function seedProject(store: V1Store, id = "proj_test"): Promise<V1Project>
   return store.saveProject({
     id,
     schemaVersion: SCHEMA.project,
-    workspaceId: "dev_workspace",
+    workspaceId: LOCAL_WORKSPACE_ID,
     name: "Test project",
     status: "active",
     createdAt: NOW,
@@ -233,7 +234,7 @@ async function seedAsset(
   return store.saveAsset({
     schemaVersion: SCHEMA.asset,
     projectId,
-    workspaceId: "dev_workspace",
+    workspaceId: LOCAL_WORKSPACE_ID,
     kind: "video",
     status: "ready",
     filename: `${overrides.id}.mp4`,
