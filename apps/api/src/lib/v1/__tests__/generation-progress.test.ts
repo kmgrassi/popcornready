@@ -10,6 +10,7 @@ import {
   createGenerationJob,
   runGenerationJob,
 } from "../generation";
+import { createGenerationRunExecution } from "../generation/run-execution";
 import {
   RunProgressEmitter,
   RunStageHandle,
@@ -23,6 +24,7 @@ import {
   createPersistedRunProgressEmitter,
   createRunWithSeedStages,
 } from "../generation-runs";
+import { createFileJudgmentStore } from "../../eval/judgment-store";
 import { V1Store, createStore } from "../store";
 import {
   AspectRatio,
@@ -331,6 +333,57 @@ test("runGenerationJob emits stages in the documented order on success", async (
     assert.ok(runPercents.includes(50), "timeline_assembly run percent");
     assert.ok(runPercents.includes(75), "quality_review run percent");
     assert.ok(runPercents.includes(100), "completion run percent");
+  });
+});
+
+test("runGenerationJob persists evidence artifacts for normal run execution", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-run-artifacts-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runExecution = await createGenerationRunExecution({
+        projectId: project.id,
+        briefVersionId: brief.id,
+        body: { briefVersionId: brief.id },
+        runStore,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      const done = await runGenerationJob(
+        store,
+        job.id,
+        fakeDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      assert.equal(done.status, "succeeded");
+
+      const stages = await runStore.listStagesForRun(runExecution.runId);
+      const planStage = stages.find((stage) => stage.type === "creative_plan");
+      const timelineStage = stages.find((stage) => stage.type === "timeline_assembly");
+      assert.equal(planStage?.artifactIds.length, 1);
+      assert.equal(timelineStage?.artifactIds.length, 1);
+
+      const planArtifact = await runStore.getStageArtifact(planStage!.artifactIds[0]);
+      const timelineArtifact = await runStore.getStageArtifact(timelineStage!.artifactIds[0]);
+      assert.equal(planArtifact?.kind, "timeline");
+      assert.equal(timelineArtifact?.kind, "timeline");
+      assert.equal(planArtifact?.stageId, planStage!.stageId);
+      assert.equal(timelineArtifact?.stageId, timelineStage!.stageId);
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/v1/generated-assets";
 import { resolveActorFromRequest } from "@/lib/v1/actor";
 import { createGenerationJob, runGenerationJob } from "@/lib/v1/generation";
+import { createGenerationRunExecution } from "@/lib/v1/generation/run-execution";
 import { createLogger } from "@/lib/v1/logger";
 import { redactMessage } from "@/lib/v1/redact";
 import { getStore } from "@/lib/v1/store";
@@ -54,9 +55,21 @@ generationsRouter.post(
     });
 
     if (job.status === "queued") {
-      void runGenerationJob(store, job.id).catch((err) => {
+      const runExecution = await createGenerationRunExecution({
+        projectId,
+        briefVersionId: requestBody.briefVersionId,
+        body: requestBody,
+      });
+      void runGenerationJob(
+        store,
+        job.id,
+        undefined,
+        runExecution.progress,
+        runExecution.execution
+      ).catch((err) => {
         logger.error("job.run.crashed", {
           jobId: job.id,
+          runId: runExecution.runId,
           error: {
             message: redactMessage(err instanceof Error ? err.message : String(err)),
           },

@@ -49,6 +49,12 @@ export interface StartStageItemOptions {
 
 export interface StageSucceedOptions {
   message?: string;
+  // Artifact id of the stage's persisted output (the plan, the assembled
+  // timeline, …). Mirrors the item-level `assetId`/`artifactId`: the stage's
+  // result is persisted as a first-class addressable artifact so an evaluator
+  // can read it as evidence after the stage succeeds (Stage Eval Framework §3
+  // "Evidence-bearing hook"). The emitter links it onto the stage.
+  resultArtifactId?: string;
 }
 
 export interface StageItemSucceedOptions {

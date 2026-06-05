@@ -20,6 +20,8 @@ import { redactMessage } from "./redact";
 import { V1Store } from "./store";
 import {
   GenerationJob,
+  GenerationStageItem,
+  GenerationStageType,
   SCHEMA,
   V1Asset,
   VersionedTimeline,
@@ -49,6 +51,51 @@ const defaultDeps: GenerationDeps = {
   selectClips: realSelectClips,
   critique: realCritique,
 };
+
+// Persists a stage's output as a first-class addressable artifact and returns
+// its id, so an evaluator can read it as evidence after the stage succeeds
+// (Stage Eval Framework §3 "Evidence-bearing hook"). Supplied by the caller
+// (the run model / route) so generation.ts stays decoupled from the runs store.
+export type StageArtifactPersister = (input: {
+  stageType: GenerationStageType;
+  kind: GenerationStageItem["kind"];
+  content: unknown;
+}) => Promise<{ artifactId: string }>;
+
+// Opt-in bounded-execution controls (Stage Eval Framework §3, NORTH_STAR
+// principle 2). The autonomous production default leaves both unset.
+export interface RunExecutionOptions {
+  // Halt after this stage and await an explicit continue (a debug/test
+  // breakpoint). Reuses the reviewGate pause: the run sits paused, a resume
+  // re-enters runGenerationJob. Unset = autonomous run.
+  stopAfter?: GenerationStageType;
+  // Dry-run depth: run plan + per-asset prompt construction + preflight, but
+  // STOP before any provider/media call (clip selection / assembly). Produces
+  // the specs without media spend. The workbench default (§6C).
+  promptsOnly?: boolean;
+  // Persists each stage's output as an addressable artifact (see above). When
+  // omitted, stages succeed without a result artifact (legacy text stages had
+  // nothing to evaluate).
+  persistStageArtifact?: StageArtifactPersister;
+}
+
+// Internal control-flow signal: a bounded-execution stop (stopAfter /
+// prompts_only) was hit. Carried out of the executor like a review-gate pause so
+// the worker halts cleanly and the run can be resumed.
+export class RunBoundedStop extends Error {
+  readonly stageType: GenerationStageType;
+  readonly reason: "stop_after" | "prompts_only";
+  constructor(stageType: GenerationStageType, reason: "stop_after" | "prompts_only") {
+    super(`Generation run halted (${reason}) after ${stageType}.`);
+    this.name = "RunBoundedStop";
+    this.stageType = stageType;
+    this.reason = reason;
+  }
+}
+
+export function isRunBoundedStop(err: unknown): err is RunBoundedStop {
+  return err instanceof RunBoundedStop;
+}
 
 async function saveJobUpdate(
   store: V1Store,
@@ -134,12 +181,17 @@ export async function runGenerationJob(
   store: V1Store,
   jobId: string,
   deps: GenerationDeps = defaultDeps,
-  progressOrLogger: Logger | RunProgressEmitter = noopProgressEmitter
+  progressOrLogger: Logger | RunProgressEmitter = noopProgressEmitter,
+  execution: RunExecutionOptions = {}
 ): Promise<GenerationJob> {
   const loaded = (await store.getJob(jobId)) as GenerationJob | null;
   if (!loaded) throw new ApiError("not_found", `Job not found: ${jobId}`);
   // Terminal/already-running jobs are not re-executed (idempotent worker claim).
   if (loaded.status !== "queued") return loaded;
+
+  const persistStageArtifact = execution.persistStageArtifact;
+  const stopAfter = execution.stopAfter;
+  const promptsOnly = execution.promptsOnly === true;
 
   const isProgressEmitter =
     typeof progressOrLogger === "object" &&
@@ -176,6 +228,17 @@ export async function runGenerationJob(
   // Track the active stage so a failure mid-flight can roll it (and only it)
   // to a `failed` terminal state.
   let activeStage: RunStageHandle | null = null;
+
+  // Bounded-execution breakpoint: after the just-succeeded stage, halt if the
+  // caller set `stopAfter` to it, or if `prompts_only` stops before the first
+  // provider/media work. Throwing RunBoundedStop unwinds to the same paused
+  // handling as a review gate. Call AFTER `stage.succeed()` so the artifact is
+  // persisted and any blocking judge has run.
+  const haltAfterIfRequested = (stageType: GenerationStageType): void => {
+    if (stopAfter === stageType) {
+      throw new RunBoundedStop(stageType, "stop_after");
+    }
+  };
 
   try {
     await progress.updateRun({ progressPercent: 5, message: "Validating request" });
@@ -259,7 +322,27 @@ export async function runGenerationJob(
       aspectRatio: brief.brief.aspectRatio,
       storyContext,
     });
-    await activeStage.succeed();
+    // Persist the plan as a first-class addressable artifact and carry its id on
+    // succeed() so the inline judge can read it as evidence (§3).
+    const planArtifact = persistStageArtifact
+      ? await persistStageArtifact({
+          stageType: "creative_plan",
+          kind: "timeline",
+          content: plan,
+        })
+      : undefined;
+    await activeStage.succeed(
+      planArtifact ? { resultArtifactId: planArtifact.artifactId } : undefined
+    );
+    activeStage = null;
+
+    // Bounded execution: prompts_only stops here — the plan/specs are produced
+    // without any clip selection / assembly (the first media-ward work). An
+    // explicit `stopAfter: creative_plan` breakpoint halts here too.
+    if (promptsOnly) {
+      throw new RunBoundedStop("creative_plan", "prompts_only");
+    }
+    haltAfterIfRequested("creative_plan");
 
     // timeline_assembly: select clips and build the timeline segments.
     job = await saveJobUpdate(
@@ -296,8 +379,23 @@ export async function runGenerationJob(
       await timelineItem.fail(summary);
       throw err;
     }
-    await timelineItem.succeed();
-    await activeStage.succeed();
+    // Persist the assembled timeline draft as the item's and stage's result
+    // artifact so the timeline_assembly evaluator has evidence to judge (§3).
+    const timelineArtifact = persistStageArtifact
+      ? await persistStageArtifact({
+          stageType: "timeline_assembly",
+          kind: "timeline",
+          content: timeline,
+        })
+      : undefined;
+    await timelineItem.succeed(
+      timelineArtifact ? { artifactId: timelineArtifact.artifactId } : undefined
+    );
+    await activeStage.succeed(
+      timelineArtifact ? { resultArtifactId: timelineArtifact.artifactId } : undefined
+    );
+    activeStage = null;
+    haltAfterIfRequested("timeline_assembly");
 
     // quality_review: critique the draft timeline and apply patches.
     job = await saveJobUpdate(
@@ -408,6 +506,17 @@ export async function runGenerationJob(
     });
     return finished;
   } catch (err) {
+    if (isRunBoundedStop(err)) {
+      logger.info("job.halted", {
+        stageType: err.stageType,
+        reason: err.reason,
+      });
+      // A bounded-execution stop (stopAfter / prompts_only) halts the worker the
+      // same way a review-gate pause does: the run/job sits paused. Roll the job
+      // back to `queued` so an explicit continue can dispatch it again (resume
+      // re-enters runGenerationJob, which only picks up `queued` jobs).
+      return saveJobUpdate(store, job, { status: "queued" }, logger);
+    }
     if (isRunReviewGatePaused(err)) {
       logger.info("job.paused_for_review", {
         stageType: err.stageType,

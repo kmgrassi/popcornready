@@ -135,6 +135,16 @@ export function createPersistedRunProgressEmitter(
 
       async succeed(opts?: StageSucceedOptions) {
         const now = new Date().toISOString();
+        // Link the stage's result artifact onto the stage before completing it,
+        // so the evidence-bearing output is referenced from the run graph.
+        if (opts?.resultArtifactId) {
+          const stage = await getStage();
+          if (!stage.artifactIds.includes(opts.resultArtifactId)) {
+            await store.updateStage(stageId, {
+              artifactIds: [...stage.artifactIds, opts.resultArtifactId],
+            });
+          }
+        }
         const completed = await store.updateStage(stageId, {
           status: "succeeded",
           progressPercent: 100,

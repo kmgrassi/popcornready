@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/v1/store";
 import { parseBrief } from "@/lib/api/v1/schemas";
 import { createGenerationJob, runGenerationJob } from "@/lib/v1/generation";
+import { createGenerationRunExecution } from "@/lib/v1/generation/run-execution";
 import { Actor } from "@/lib/v1/actor";
 import { getStore, V1Store } from "@/lib/v1/store";
 import { SCHEMA, GenerationRequest, V1Asset } from "@popcorn/shared/v1/types";
@@ -282,7 +283,21 @@ async function createAndMaybeRunGeneration(args: {
 
   const shouldRun =
     isRecord(args.body) && args.body.runNow === false ? false : true;
-  const job = shouldRun ? await runGenerationJob(store, generationJob.id) : generationJob;
+  if (!shouldRun) {
+    return { status: 202, body: { job: generationJob } };
+  }
+  const runExecution = await createGenerationRunExecution({
+    projectId: args.projectId,
+    briefVersionId: args.briefVersionId,
+    body: args.body,
+  });
+  const job = await runGenerationJob(
+    store,
+    generationJob.id,
+    undefined,
+    runExecution.progress,
+    runExecution.execution
+  );
   return { status: 202, body: { job } };
 }
 
