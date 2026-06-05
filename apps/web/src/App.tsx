@@ -9,6 +9,7 @@ import { AdminEvalsPage } from "./routes/AdminEvalsPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
+import { NewProjectPage } from "./routes/NewProjectPage";
 import { SignupPage } from "./routes/SignupPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
@@ -19,6 +20,7 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
+        <Route path="/projects/new" element={<NewProjectPage />} />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
