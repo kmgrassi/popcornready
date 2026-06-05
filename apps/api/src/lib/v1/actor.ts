@@ -3,7 +3,7 @@
 // resolveActorFromRequest so hosted mode goes through Supabase auth.
 
 import type { ApiRequestView } from "@/lib/api/v1/handler";
-import { resolveAuth } from "@/lib/api/v1/auth";
+import { LOCAL_ACTOR_ID, LOCAL_WORKSPACE_ID, resolveAuth } from "@/lib/api/v1/auth";
 import { ApiError as SharedApiError } from "@/lib/api/v1/errors";
 import { ApiError } from "./errors";
 
@@ -15,8 +15,8 @@ export interface Actor {
 }
 
 const LOCAL_ACTOR: Actor = {
-  actorId: "local_dev",
-  workspaceId: "dev_workspace",
+  actorId: LOCAL_ACTOR_ID,
+  workspaceId: LOCAL_WORKSPACE_ID,
   isLocal: true,
 };
 
