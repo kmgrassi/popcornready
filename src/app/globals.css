@@ -2674,6 +2674,25 @@ button:disabled {
   font-size: 13px;
 }
 
+.lp-footer-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.lp-footer-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lp-footer-theme-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+}
+
 .lp-footer a {
   color: var(--muted);
   text-decoration: none;
@@ -2722,10 +2741,6 @@ button:disabled {
   .lp-nav-cta {
     grid-column: 2;
     align-self: center;
-  }
-  .theme-switcher {
-    grid-column: 1 / -1;
-    justify-self: end;
   }
   .lp-steps,
   .lp-grid,
