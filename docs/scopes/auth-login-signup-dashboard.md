@@ -25,26 +25,27 @@ the monorepo split and overlaps that in-progress work).
 
 ## What already exists (reuse, don't rebuild)
 
-popcornready already has **working but uncommitted** Supabase auth scaffolding in
-the Next monolith (on the `feat/movie-dream-*` working tree, not yet on `main`).
-It is close to what we need; this scope mostly **refactors it into a portable
-core + commits it**:
+popcornready already has committed Supabase auth scaffolding in both the current
+Next monolith and the emerging `apps/web` host. It is close to what we need; this
+scope mostly **refactors the committed implementation into a portable core**:
 
-| File (in main repo working tree) | What it is | Disposition |
+| File | What it is | Disposition |
 |---|---|---|
 | `src/components/auth/AuthProvider.tsx` | React context: `{status, user, error, configured}`, `signIn/signUp/signOut`, `onAuthStateChange` + `getSession` hydrate | → fold into the portable auth **store** (drop navigation) |
 | `src/components/auth/AuthForm.tsx` | login+signup form, password auth; **redirects to `/studio`** post-login | → split: portable form logic/UI in core; **redirect moves to host guard** |
 | `src/components/auth/AuthNavButton.tsx` | sign-in link / sign-out button | → core presentational component |
 | `src/lib/supabase/browser.ts` | client singleton, env (`NEXT_PUBLIC_SUPABASE_*`), storage-key namespacing, clear-stale helpers | → core `createSupabaseClient(config)` with **injected** config |
 | `src/lib/supabase/fetch.ts` | `authenticatedFetch` — injects `Authorization: Bearer <token>` | → core; add 401 stale-session cleanup (openmacaw `maybeClearStaleSession`) |
+| `apps/web/src/components/auth/*` | Vite host auth components already following the target host shape | → use as target-host reference while extracting shared core |
+| `apps/web/src/lib/supabase/*` | Vite Supabase browser/fetch helpers | → reconcile with the shared core instead of duplicating client/session logic |
 | `src/lib/supabase/{server,admin,storage}.ts` | **server-side** clients (user-scoped, service-role, storage) | **not** part of the browser auth core — stay server-side, move to Express in the split |
 | `src/lib/api/v1/auth.ts` | `resolveAuth()` — verifies bearer token, dual `local`/`supabase` mode | unchanged; the login UI only matters in `supabase` mode |
 | `src/app/api/v1/me/route.ts` | returns `{actor, workspaceId, authMode, isLocal}` | the dashboard's identity/bootstrap call |
 
-> **Practical note for PR 1:** because this scaffolding is uncommitted on another
-> branch, the first task is to bring it onto this branch (copy/cherry-pick from
-> the `feat/movie-dream-*` working tree) as the refactor's starting point — a
-> fresh worktree off `main` does not contain it.
+> **Practical note for PR 1:** start from the committed files above. Do not copy
+> or cherry-pick auth code from an external worktree; that risks overwriting the
+> current monorepo implementation instead of extracting the shared core from the
+> code that is already in this branch.
 
 ## Identity alignment (read first)
 
@@ -242,11 +243,12 @@ local email testing via Inbucket (`:54324`).
 
 ## 6. PR breakdown
 
-1. **Extract `auth-core` + commit scaffolding.** Bring the uncommitted scaffolding
-   onto this branch; refactor: inject config into the Supabase client, fold
-   `AuthProvider` into the portable store, extract pure form logic/validation +
-   presentational forms, add guard predicates + `authedFetch` (with 401 cleanup).
-   Remove navigation from forms.
+1. **Extract `auth-core` from committed scaffolding.** Refactor the existing
+   `src/components/auth/*`, `src/lib/supabase/*`, and matching `apps/web` auth
+   helpers: inject config into the Supabase client, fold `AuthProvider` into the
+   portable store, extract pure form logic/validation + presentational forms, add
+   guard predicates + `authedFetch` (with 401 cleanup). Remove navigation from
+   forms.
 2. **Next host wiring.** `src/app/{login,signup}/page.tsx` render core forms;
    `AuthGate` / `UnauthenticatedOnly` guards via `next/navigation`; mount the
    store provider/hook at the app root.
