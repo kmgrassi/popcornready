@@ -101,9 +101,10 @@ mega-parameterized call.
 4. **Asset pool + active selection** (NORTH_STAR §5): every generate **adds an
    immutable asset to the project pool**; regeneration adds a new one and may
    flip a slot's active selection. Granular endpoints return the pooled asset id.
-5. **Sync vs async by cost.** Cheap stages (plan, critique, assemble) can return
-   synchronously; expensive media (image/video/audio) follow the existing
-   `generated-assets` job-and-poll pattern.
+5. **Uniform async (job + poll).** *Every* endpoint — plan/critique/assemble
+   included — returns a `Job` and is polled for completion, reusing the same
+   idempotent job abstraction `generated-assets` already uses. One client pattern
+   for every stage, cheap or expensive (decided §6.2).
 6. **Re-entrant & order-free.** Any endpoint callable standalone, repeatedly, in
    any order — the contracts (principle 2) enforce what each needs.
 
@@ -120,25 +121,32 @@ mega-parameterized call.
   `generation-runs`-vs-`generations` drift into one executor that all endpoints
   enter.
 
-## 6. Open decisions
+## 6. Decisions (resolved 2026-06-05)
 
-1. **Dedicated endpoints vs one parameterized run.** The request is for dedicated
-   per-capability endpoints (this doc's default). The alternative — a single
-   `…/generation-runs` with `stopAfter`/a stage list — is leaner but less
-   discoverable. **Lean: thin dedicated endpoints over the one engine** (best of
-   both — clean URLs, shared executor).
-2. **Sync vs async granularity.** Confirm which stages return inline vs as a
-   job+poll. (Lean: media async; plan/critique/assemble sync.)
-3. **Self-heal vs strict preconditions.** When a granular call's prerequisite is
-   missing (e.g. clip needs an anchor), does the endpoint **auto-generate** it or
-   **return a typed error** for the caller/agent to satisfy? (Lean: typed error
-   by default; an `autocreate=true` opt-in.)
-4. **Plan persistence.** Does `POST …/plan` always persist a `composition`, or can
-   it be a pure/throwaway compute? (Lean: persist to the pool — NORTH_STAR
-   "nothing is throwaway"; add a `persist=false` escape hatch.)
-5. **Relationship to the eval framework.** These endpoints are exactly what the
-   eval workbench's `prompts_only`/step-through needs
-   (`docs/scopes/stage-eval-framework.md` §6C) — build once, share.
+1. **Dedicated endpoints + one engine.** Thin per-capability endpoints (the
+   request), implemented as single-stage entries into **one shared engine**; the
+   orchestrated `…/generation-runs` endpoint **stays** for full/bounded runs.
+   Both ride the same executor — which also resolves the
+   `generation-runs`↔`generations`/`entrypoints` drift. Not either/or.
+2. **Uniform async (job + poll).** *Every* endpoint returns a `Job` and is polled
+   — plan/critique/assemble included — reusing the idempotent job abstraction
+   `generated-assets` already uses. One client pattern for every stage; no
+   special-casing the cheap ones (also keeps every generation a first-class,
+   pollable, idempotent record).
+3. **Strict typed precondition errors; `autocreate` opt-in.** A missing
+   prerequisite (e.g. a clip with no anchor) returns a **structured, actionable
+   error** naming what's needed — NORTH_STAR principle 7 self-heal: the agent
+   reacts and satisfies it. An explicit `autocreate=true` opts into generating
+   the prereqs for callers that want convenience over cost-transparency.
+4. **Plan persists by default.** `POST …/plan` saves the generated beats as a
+   `composition` in the pool (addressable, reusable, audit trail — NORTH_STAR
+   principle 9), with a `persist=false` escape hatch for throwaway / preview /
+   eval-draft plans.
+5. **Dedicated endpoints first; run-level stop deferred.** Ship the dedicated
+   endpoints in P1 (`POST …/plan` unblocks "just the story"). Run-level
+   `stopAfter` / `promptsOnly` + step-through land in **P3** with the eval
+   workbench (`docs/scopes/stage-eval-framework.md` §6C) — same engine, no rework,
+   shared contracts (build once).
 
 ## 7. Related reading
 
