@@ -112,6 +112,7 @@ as $$
     select 1
     from public.projects p
     where p.id = proj_id
+      and p.status = 'active'
       and p.visibility = 'public'
   );
 $$;
@@ -160,7 +161,7 @@ grant execute on function public.generation_stage_project_is_public(text) to ano
 -- ---------------------------------------------------------------------------
 create policy projects_public_read on public.projects
   for select to anon, authenticated
-  using (visibility = 'public');
+  using (status = 'active' and visibility = 'public');
 
 create policy assets_public_read on public.assets
   for select to anon, authenticated
