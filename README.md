@@ -97,12 +97,22 @@ also the agent guide [`CLAUDE.md`](CLAUDE.md) and the identity model in
 ## Setup
 
 ```bash
-cp .env.local.example .env.local   # add provider keys as needed
-npm install
-npm run dev
+pnpm install
+cp .env.local.example .env.local   # add provider keys (Supabase, ANTHROPIC_API_KEY, …)
+pnpm dev                            # runs both apps via Turborepo
+# or individually:
+pnpm dev:api                        # Express API → http://localhost:4000
+pnpm dev:web                        # Vite SPA    → http://localhost:3000
 ```
 
-Open http://localhost:3000
+Open the web app at http://localhost:3000 (it calls the API on :4000).
+
+**Env loading:** the `.env*` files live at the **repo root** and load
+automatically — the API reads `.env.local` (authoritative, your local secrets),
+then `.env.<NODE_ENV>`, then `.env`, **regardless of which start script you
+use** (`pnpm dev`, `pnpm dev:api`, or `pnpm --filter @popcorn/api start`).
+Production injects env vars directly (Railway service variables), so no `.env`
+files are needed there.
 
 The home page (`/`) is the marketing landing page: it explains the product, lets
 you create a 30-second video from a single prompt (with template chips to start
@@ -161,8 +171,9 @@ Railway configuration is in `railway.toml`; healthcheck is `/api/v1/health`.
 
 Railway deployment notes live in
 [`docs/railway-deployment.md`](docs/railway-deployment.md). The repo includes a
-`railway.toml` that uses Railpack, runs `npm run build`, starts the service with
-`npm run start`, and healthchecks `/api/v1/health`.
+`railway.toml` that uses Railpack, builds with
+`pnpm --filter @popcorn/api... build`, starts the service with
+`pnpm --filter @popcorn/api start`, and healthchecks `/api/v1/health`.
 
 Set the provider keys from `.env.local.example` as Railway service variables.
 For a hosted demo, be aware that the current MVP stores project state and media
@@ -186,8 +197,8 @@ NVIDIA_VIDEO_GENERATION_MODEL=nvidia/cosmos3-nano
 Manual local smoke:
 
 ```bash
-npm run dev
-NVIDIA_API_KEY=... npm run video:smoke
+pnpm dev:api
+NVIDIA_API_KEY=... pnpm video:smoke
 ```
 
 The smoke uses the existing v1 generated-assets adapter:
