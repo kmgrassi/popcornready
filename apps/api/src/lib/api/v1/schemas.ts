@@ -1246,3 +1246,38 @@ export function parsePagination(searchParams: URLSearchParams): {
   }
   return { limit, cursor: searchParams.get("cursor") };
 }
+
+export function parseDiscoverAssetsQuery(searchParams: URLSearchParams): {
+  limit: number;
+  cursor: string | null;
+  kind?: AssetKind;
+} {
+  const { limit, cursor } = parsePagination(searchParams);
+  const rawKind = searchParams.get("kind");
+  if (rawKind !== null && !ASSET_KINDS.includes(rawKind as AssetKind)) {
+    throw new ApiError("validation_failed", "kind must be one of: video, image, audio.", {
+      fields: [{ path: "kind", message: "Must be one of: video, image, audio." }],
+    });
+  }
+  return { limit, cursor, ...(rawKind ? { kind: rawKind as AssetKind } : {}) };
+}
+
+export function parseDiscoverSearchQuery(searchParams: URLSearchParams): {
+  q: string;
+  limit: number;
+  cursor: string | null;
+  kind?: AssetKind;
+} {
+  const q = searchParams.get("q")?.trim();
+  if (!q) {
+    throw new ApiError("validation_failed", "q is required.", {
+      fields: [{ path: "q", message: "Must be a non-empty search query." }],
+    });
+  }
+  if (q.length > 200) {
+    throw new ApiError("validation_failed", "q must be 200 characters or fewer.", {
+      fields: [{ path: "q", message: "Must be 200 characters or fewer." }],
+    });
+  }
+  return { q, ...parseDiscoverAssetsQuery(searchParams) };
+}

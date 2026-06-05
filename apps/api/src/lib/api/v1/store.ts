@@ -254,6 +254,15 @@ function throwOnError(error: { message?: string } | null, context: string): void
   }
 }
 
+async function defaultVisibilityForWorkspace(
+  db: SupabaseClient,
+  workspaceId: string
+): Promise<"public" | "private"> {
+  const { data, error } = await db.rpc("owner_tier", { ws_id: workspaceId });
+  throwOnError(error, "defaultVisibilityForWorkspace");
+  return data === "paid" ? "private" : "public";
+}
+
 // --- workspaces ------------------------------------------------------------
 interface WorkspaceRow {
   id: string;
@@ -283,6 +292,7 @@ interface ProjectRow {
   status: "active" | "deleted";
   brief: VideoBrief | null;
   current_brief_version_id: string | null;
+  visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
 }
@@ -346,9 +356,11 @@ interface AssetRow {
   storage_key: string | null;
   source: AgentAssetSource;
   duration_sec: number | null;
+  description: string | null;
   context: AssetContextEnvelope | null;
   semantic_analysis: AssetSemanticAnalysis | null;
   provenance: GeneratedAssetProvenance | null;
+  visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
 }
@@ -379,6 +391,7 @@ function assetToRow(asset: V1Asset): AssetRow {
     storage_key: asset.storageKey ?? null,
     source: asset.source,
     duration_sec: asset.durationSec ?? null,
+    description: asset.userContext?.description ?? asset.context?.summary ?? null,
     context: assetContextEnvelope(asset),
     semantic_analysis: asset.semanticAnalysis ?? null,
     provenance: asset.provenance ?? null,
@@ -528,6 +541,7 @@ export async function createProject(input: {
 }): Promise<{ project: V1Project; briefVersion: V1BriefVersion | null }> {
   const db = getServiceSupabase();
   const now = new Date().toISOString();
+  const visibility = await defaultVisibilityForWorkspace(db, input.workspaceId);
 
   // FK ordering: brief_versions.project_id -> projects.id (NOT NULL), and
   // projects.current_brief_version_id -> brief_versions.id. So insert the project
@@ -542,6 +556,7 @@ export async function createProject(input: {
       name: input.name,
       status: "active",
       brief: input.brief ?? null,
+      visibility,
       current_brief_version_id: null,
       created_at: now,
       updated_at: now,
@@ -612,6 +627,20 @@ export async function listProjects(
   throwOnError(error, "listProjects");
   const all = (data as ProjectRow[]).map(mapProject);
   return paginate(all, limit, cursor);
+}
+
+export async function listPublicProjects(
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<V1Project>> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("visibility", "public")
+    .neq("status", "deleted");
+  throwOnError(error, "listPublicProjects");
+  return paginate((data as ProjectRow[]).map(mapProject), limit, cursor);
 }
 
 export async function setBrief(
@@ -701,6 +730,7 @@ export async function addAsset(asset: V1Asset): Promise<V1Asset> {
   // object is a placeholder and is read back from the inserted row.
   const { id: _omit, ...row } = assetToRow(asset);
   void _omit;
+  row.visibility = await defaultVisibilityForWorkspace(db, asset.workspaceId);
   const { data, error } = await db
     .from("assets")
     .insert(row)
@@ -789,6 +819,72 @@ export async function listAssets(
   throwOnError(error, "listAssets");
   const all = (data as AssetRow[]).map(mapAsset);
   return paginate(all, limit, cursor);
+}
+
+interface AssetWithProjectRow extends AssetRow {
+  projects?: { id: string; visibility: "public" | "private"; status: "active" | "deleted" };
+}
+
+export async function listPublicAssets(
+  limit: number,
+  cursor: string | null,
+  kind?: AssetKind
+): Promise<PageResult<V1Asset>> {
+  const db = getServiceSupabase();
+  let query = db
+    .from("assets")
+    .select("*, projects!inner(id, visibility, status)")
+    .eq("visibility", "public")
+    .eq("projects.visibility", "public")
+    .neq("projects.status", "deleted");
+
+  if (kind) {
+    query = query.eq("kind", kind);
+  }
+
+  const { data, error } = await query;
+  throwOnError(error, "listPublicAssets");
+  return paginate((data as AssetWithProjectRow[]).map(mapAsset), limit, cursor);
+}
+
+export type DiscoverSearchItem =
+  | { type: "project"; item: V1Project; id: string; createdAt: string }
+  | { type: "asset"; item: V1Asset; id: string; createdAt: string };
+
+export async function searchPublicContent(
+  searchQuery: string,
+  limit: number,
+  cursor: string | null,
+  kind?: AssetKind
+): Promise<PageResult<DiscoverSearchItem>> {
+  const db = getServiceSupabase();
+  const normalized = searchQuery.trim();
+  if (!normalized) return { items: [], nextCursor: null };
+
+  const [projectsResult, assetsResult] = await Promise.all([
+    db.rpc("search_public_projects", { search_query: normalized }),
+    db.rpc("search_public_assets", {
+      search_query: normalized,
+      asset_kind_filter: kind ?? null,
+    }),
+  ]);
+
+  throwOnError(projectsResult.error, "searchPublicContent projects");
+  throwOnError(assetsResult.error, "searchPublicContent assets");
+
+  const projectItems: DiscoverSearchItem[] = (projectsResult.data as ProjectRow[])
+    .map((project) => {
+      const item = mapProject(project);
+      return { type: "project", item, id: `project:${item.id}`, createdAt: item.createdAt };
+    });
+  const assetItems: DiscoverSearchItem[] = (assetsResult.data as AssetRow[]).map(
+    (asset) => {
+      const item = mapAsset(asset);
+      return { type: "asset", item, id: `asset:${item.id}`, createdAt: item.createdAt };
+    }
+  );
+
+  return paginate([...projectItems, ...assetItems], limit, cursor);
 }
 
 function isCharacterAnchorAsset(asset: V1Asset): boolean {
