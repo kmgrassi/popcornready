@@ -8,7 +8,7 @@ import {
   addAsset,
   createBriefVersion,
   createProject,
-  ensureWorkspace,
+  ensureLocalWorkspace,
   findIdempotencyRecord,
   getProject,
   listAssets,
@@ -62,9 +62,9 @@ function asset(id: string, projectId: string, workspaceId: string): V1Asset {
 }
 
 dbTest("createProject without brief persists and is readable", async () => {
-  await ensureWorkspace("ws_a", "A");
+  const ws = await ensureLocalWorkspace("A");
   const { project, briefVersion } = await createProject({
-    workspaceId: "ws_a",
+    workspaceId: ws.id,
     name: "Teaser",
   });
   assert.equal(briefVersion, null);

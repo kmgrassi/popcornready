@@ -11,8 +11,12 @@ process.env.POPCORN_READY_LOCAL_DIR = path.join(
 );
 delete process.env.AUTH_MODE;
 
-import { LOCAL_WORKSPACE_ID, AuthContext } from "../auth";
+import { AuthContext } from "../auth";
 import { ApiError } from "../errors";
+
+// DB-generated workspace uuid stand-in for these Supabase-gated tests (skipped
+// unless SUPABASE_* env is set).
+const LOCAL_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 import {
   createGeneratedAsset,
   getGeneratedAssetJob,

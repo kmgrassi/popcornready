@@ -28,7 +28,6 @@ import {
 import { isGateableGenerationStageType } from "../v1/generation-runs/payload";
 import { RunReviewGatePaused } from "../v1/generation-runs/progress-emitter";
 import { GenerationRunsStore } from "../v1/generation-runs/store";
-import { newId } from "../v1/ids";
 import { JudgmentStore } from "./judgment-store";
 
 // Inline judging hook (Stage Eval Framework §3 "One hook point").
@@ -74,7 +73,6 @@ export interface InlineEvalConfig {
   // Observational sampling policy (§9.5). Blocking gates always run at 100%.
   samplingPolicy?: SamplingPolicy;
   now?: () => Date;
-  id?: () => string;
 }
 
 const MODALITY_BY_KIND: Record<string, EvalModality> = {
@@ -114,7 +112,6 @@ export function createInlineEvalEmitter(
   config: InlineEvalConfig
 ): RunProgressEmitter {
   const now = config.now ?? (() => new Date());
-  const id = config.id ?? (() => newId("judg"));
   const samplingPolicy = config.samplingPolicy;
 
   // Run one evaluator against a target, persisting the Judgment. Returns the
@@ -151,7 +148,8 @@ export function createInlineEvalEmitter(
     const verdict = computeVerdict(draft.grades, evaluator.thresholds);
 
     const judgment: Judgment = {
-      id: id(),
+      // Placeholder; the judgment store assigns the DB-generated id on save.
+      id: "",
       evaluatorId: evaluator.id,
       rubricVersion: evaluator.rubricVersion,
       judgeModel: evaluator.judgeModel,
@@ -170,8 +168,9 @@ export function createInlineEvalEmitter(
       latencyMs,
       createdAt: now().toISOString(),
     };
-    await config.judgmentStore.saveJudgment(judgment);
-    return judgment;
+    // saveJudgment assigns the DB-generated id; return the persisted judgment so
+    // the summary + gate logic act on the real id.
+    return config.judgmentStore.saveJudgment(judgment);
   }
 
   // Fire all registered evaluators for a target. Persists each Judgment and the

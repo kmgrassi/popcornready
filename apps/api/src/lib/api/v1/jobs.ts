@@ -8,7 +8,7 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import { newId } from "./ids";
+import { randomUUID } from "crypto";
 import { localDir } from "./store";
 
 export const JOB_SCHEMA_VERSION = "job.v1" as const;
@@ -95,7 +95,9 @@ export function createJob(
     const now = new Date().toISOString();
     const job: V1Job = {
       ...input,
-      id: newId("job"),
+      // This is the JSON-file job store (agent-jobs.json), not Postgres; the id
+      // is a file-store key (in-document), so it is generated here as a uuid.
+      id: randomUUID(),
       schemaVersion: JOB_SCHEMA_VERSION,
       createdAt: now,
       updatedAt: now,

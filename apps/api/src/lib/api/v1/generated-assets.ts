@@ -27,9 +27,9 @@ import {
   stageItemKindForAssetKind,
   toErrorSummary,
 } from "@/lib/v1/generation-progress";
+import { randomUUID } from "crypto";
 import { AuthContext } from "./auth";
 import { ApiError, FieldError, validationError } from "./errors";
-import { newId } from "./ids";
 import { createJob, getJob, updateJob, V1Job } from "./jobs";
 import {
   GeneratedAssetProvenance,
@@ -42,6 +42,7 @@ import {
   getProject,
   localDir,
   mediaGeneratedDir,
+  updateAsset,
   V1Asset,
 } from "./store";
 
@@ -429,8 +430,13 @@ async function runGeneration(
     throw new Error(`${parsed.provider} provider does not support ${parsed.kind}.`);
   }
 
-  const assetId = newId("asset");
-  const filename = `${assetId}.${result.extension}`;
+  // The byte filename is a storage key (its own namespace), NOT the DB asset id —
+  // Postgres assigns the asset id. Use a random storage name so the bytes can be
+  // written before the row exists; self-referential fields (source.generatedAssetId,
+  // characterBinding.assetId, semanticAnalysis.id) are patched with the real id
+  // after the row is inserted below.
+  const storageName = randomUUID();
+  const filename = `${storageName}.${result.extension}`;
   const dir = mediaGeneratedDir(auth.workspaceId, projectId);
   await fs.mkdir(dir, { recursive: true });
   const destPath = path.join(dir, filename);
@@ -446,10 +452,12 @@ async function runGeneration(
       ? actualDurationSec ?? parsed.durationSec
       : parsed.durationSec;
 
+  // assetId is filled in after the DB assigns it (see below); the binding's
+  // assetId is patched onto the persisted row.
   const characterBinding: GeneratedAssetCharacterBinding | undefined =
     parsed.characterProfileIds.length > 0
       ? {
-          assetId,
+          assetId: "",
           characterProfileIds: parsed.characterProfileIds,
           referenceIds: parsed.characterReferenceIds,
           consistencyMode: parsed.consistencyMode,
@@ -498,19 +506,23 @@ async function runGeneration(
   const now = new Date().toISOString();
   const context = parsed.description ? { summary: parsed.description } : undefined;
   const asset: V1Asset = {
-    id: assetId,
+    // Placeholder; addAsset omits it on insert and the DB assigns the real id,
+    // which is then stamped onto the self-referential fields below.
+    id: "",
     schemaVersion: SCHEMA_VERSIONS.asset,
     workspaceId: auth.workspaceId,
     projectId,
     kind: result.kind as AssetKind,
     filename,
     status: "ready",
-    source: { type: "generated", generatedAssetId: assetId },
+    source: { type: "generated", generatedAssetId: "" },
     storageKey,
     durationSec,
     context,
     semanticAnalysis: buildSemanticAnalysis({
-      id: assetId,
+      // Seed for the in-JSON segment/word ids (exempt in-document keys). The
+      // top-level assetId pointer is patched to the DB row id after insert.
+      id: storageName,
       kind: result.kind as AssetKind,
       durationSec,
       filename,
@@ -523,7 +535,17 @@ async function runGeneration(
     updatedAt: now,
   };
 
-  return addAsset(withDerivedAssetKnowledge(asset, now));
+  const created = await addAsset(withDerivedAssetKnowledge(asset, now));
+
+  // Stamp the DB-generated id onto the asset's self-referential fields (these
+  // could not be known before the row existed).
+  return updateAsset(auth.workspaceId, projectId, created.id, (a) => {
+    a.source = { type: "generated", generatedAssetId: created.id };
+    if (a.semanticAnalysis) a.semanticAnalysis.assetId = created.id;
+    if (a.provenance?.characterBinding) {
+      a.provenance.characterBinding.assetId = created.id;
+    }
+  });
 }
 
 export interface CreateGeneratedAssetArgs {

@@ -18,6 +18,11 @@ import {
   requireRun,
 } from "../generation-runs";
 
+// Ids are DB-generated (uuid). The file store stands in for Postgres and assigns
+// the uuid on insert.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 let tmpDir: string;
 let store: GenerationRunsStore;
 
@@ -36,7 +41,7 @@ test("createRun persists with assigned runId and timestamps", async () => {
     status: "queued",
   });
 
-  assert.match(run.runId, /^genrun_/);
+  assert.match(run.runId, UUID_RE);
   assert.equal(run.projectId, "proj_a");
   assert.equal(run.status, "queued");
   assert.equal(run.createdAt, run.updatedAt);
@@ -290,7 +295,7 @@ test("stages are scoped by runId and listed in order", async () => {
   assert.equal(stages[1].order, 2);
   assert.equal(stages[1].type, "asset_generation");
   for (const s of stages) {
-    assert.match(s.stageId, /^genstage_/);
+    assert.match(s.stageId, UUID_RE);
   }
 });
 
@@ -354,7 +359,7 @@ test("stage items are scoped by stageId and updatable", async () => {
     promptPreview: "cinematic still of...",
   });
 
-  assert.match(item.itemId, /^genitem_/);
+  assert.match(item.itemId, UUID_RE);
   assert.equal(item.createdAt, item.updatedAt);
   await new Promise((r) => setTimeout(r, 5));
 
@@ -474,7 +479,7 @@ test("createRunWithSeedStages returns a queued run with all seed stages in order
   assert.equal(payload.run.projectId, "proj_seed_a");
   assert.equal(payload.run.status, "queued");
   assert.equal(payload.run.currentStageType, "brief_intake");
-  assert.match(payload.run.runId, /^genrun_/);
+  assert.match(payload.run.runId, UUID_RE);
 
   const types = payload.stages.map((s) => s.type);
   assert.deepEqual(types, [

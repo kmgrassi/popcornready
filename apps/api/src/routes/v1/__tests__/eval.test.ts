@@ -73,9 +73,8 @@ after(async () => {
 });
 
 async function seedSuiteWithCase(): Promise<{ suiteId: string; artifactId: string }> {
-  const suite = await store.createSuite({ id: "evalsuite_route", name: "Route suite" });
+  const suite = await store.createSuite({ name: "Route suite" });
   await store.saveCase({
-    id: "evalcase_route",
     suiteId: suite.id,
     label: "Launch arc",
     stimulus: {
@@ -98,11 +97,11 @@ async function seedSuiteWithCase(): Promise<{ suiteId: string; artifactId: strin
 }
 
 httpTest("GET /api/v1/eval/suites returns the suite list", async () => {
-  await seedSuiteWithCase();
+  const { suiteId } = await seedSuiteWithCase();
   const res = await fetch(`${baseUrl}/api/v1/eval/suites`);
   assert.equal(res.status, 200);
   const body = (await res.json()) as { suites: Array<{ id: string }> };
-  assert.ok(body.suites.some((s) => s.id === "evalsuite_route"));
+  assert.ok(body.suites.some((s) => s.id === suiteId));
 });
 
 httpTest("GET /api/v1/eval/suites/:suiteId returns suite + cases", async () => {

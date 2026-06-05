@@ -14,7 +14,7 @@ import {
   toErrorSummary,
 } from "./generation-progress";
 import { isRunReviewGatePaused } from "./generation-runs";
-import * as ids from "./ids";
+import { randomUUID } from "crypto";
 import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
 import { V1Store } from "./store";
@@ -445,8 +445,11 @@ export async function runGenerationJob(
       input.showCaptions === undefined
         ? timeline
         : { ...timeline, showCaptions: input.showCaptions };
+    // The edit-graph DOCUMENT's id seeds its internal node ids (an in-JSON key,
+    // exempt from the DB-generated-uuid rule). The DB assigns the row id, read
+    // back from saveEditGraph; entity .id reflects that row id thereafter.
     const editGraph = buildEditGraphFromTimeline({
-      id: ids.editGraphId(),
+      id: randomUUID(),
       projectId: job.projectId,
       briefVersionId: input.briefVersionId,
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
@@ -459,8 +462,14 @@ export async function runGenerationJob(
       createdAt: now,
     });
     const compiledTimeline = compileEditGraphToTimeline(editGraph);
+
+    // Persist the edit graph first so it has a DB-generated id to reference, then
+    // build + persist the timeline that derives from it, then re-save the graph
+    // with the timeline projection pointing at the timeline's DB id.
+    const savedGraph = await store.saveEditGraph(editGraph);
     const versioned: VersionedTimeline = {
-      id: ids.timelineId(),
+      // Placeholder; saveTimeline assigns the DB id and returns it.
+      id: "",
       schemaVersion: SCHEMA.timeline,
       projectId: job.projectId,
       briefVersionId: input.briefVersionId,
@@ -478,15 +487,17 @@ export async function runGenerationJob(
         appliedPatchCount: patches.length,
       },
       derivedFrom: {
-        editGraphId: editGraph.id,
+        editGraphId: savedGraph.id,
         compilerVersion: EDIT_GRAPH_COMPILER_VERSION,
         compiledAt: now,
       },
       createdBy: { jobId: job.id },
       createdAt: now,
     };
-    await store.saveEditGraph(markGraphTimelineProjection(editGraph, versioned.id, now));
-    await store.saveTimeline(versioned);
+    const savedTimeline = await store.saveTimeline(versioned);
+    await store.saveEditGraph(
+      markGraphTimelineProjection(savedGraph, savedTimeline.id, now)
+    );
 
     const finished = await saveJobUpdate(
       store,
@@ -494,7 +505,7 @@ export async function runGenerationJob(
       {
         status: "succeeded",
         progress: { currentStep: "saving_artifact", percent: 100 },
-        result: { timelineIds: [versioned.id], editGraphIds: [editGraph.id] },
+        result: { timelineIds: [savedTimeline.id], editGraphIds: [savedGraph.id] },
       },
       logger
     );
@@ -502,7 +513,7 @@ export async function runGenerationJob(
     const totalMs = Date.parse(finished.updatedAt) - Date.parse(finished.createdAt);
     logger.info("job.succeeded", {
       durationMs: totalMs,
-      timelineId: versioned.id,
+      timelineId: savedTimeline.id,
     });
     return finished;
   } catch (err) {
