@@ -80,7 +80,7 @@ mega-parameterized call.
 | **Audio (music/narration)** | `POST …/generated-assets {kind:audio}` + `…/audio-alignments` | **EXISTS.** Optional `…/audio` convenience wrapper. |
 | **Assemble / stitch** | `POST …/timelines` | `selectClips`/assemble selected assets → timeline. **NEW (selectClips not exposed).** |
 | **Critique (timeline)** | `POST …/timelines/:id/critique` | `critique` → scores + patches. **NEW.** |
-| Revise | `POST …/generation-entrypoints/revisions` | **EXISTS.** |
+| Revise | `POST …/timelines/:id/revisions` | **EXISTS** (in `timelines.ts`). Note `…/generation-entrypoints/revisions` is a `not_implemented` redirect to this. |
 | **Export** | `POST …/exports`, `…/timelines/:id/exports` | **EXISTS.** |
 | **Full / bounded run** | `POST …/generation-runs` `{ stopAfter?, promptsOnly?, reviewGates? }` | the orchestrated run; granular endpoints are single-stage entries into the same engine. **Expose `stopAfter`/`promptsOnly`; unify with `…/generations`.** |
 
