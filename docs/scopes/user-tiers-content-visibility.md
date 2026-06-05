@@ -295,8 +295,10 @@ workspaces can only ever trigger the →public direction.
 anyone holding its URL, the `effective_public` rule means **a project going
 private must move its public assets into `assets-private`** — otherwise bytes
 stay reachable though the DB says private. So `storage_bucket` tracks
-`effective_public(asset)`. Eager cascade-on-toggle vs. lazy move-on-next-read is
-an implementation choice (§7).
+`effective_public(asset)`. **Decided: eager cascade** — project→private moves its
+public assets to `assets-private` as part of the toggle (a bounded burst of
+server-side S3 copies; project-privatize is rare, so correctness beats saving the
+copies). Lazy move-on-next-read was rejected as more moving parts for a rare op.
 
 > Not a hard AWS lock-in: R2 speaks the S3 API, so `s3Client.ts`/`s3Signing.ts`
 > port later if egress ever bites; only CloudFront-signing is AWS-specific.
@@ -496,23 +498,28 @@ target. Existing rows backfill to `visibility = 'public'` (column default) and
 backfilled to `storage_bucket = 'assets-private'` (today's private bucket) and
 move to public on first publish.
 
-## 7. Open decisions (need a call before implementation)
+## 7. Decisions & remaining scope
 
-- **Attribution/licensing**: what (if anything) a creator is owed when their
-  public content is copied, + any opt-out — rides on `provenance.sourceAssetId`
-  (§5.3; productization scope).
-- **Effective-visibility cascade**: when a project goes private, eager
-  cascade-move its public assets to `assets-private`, vs. lazy move-on-next-read
-  (§3.4).
-- **Downgrade grace**: immediate freeze (default here) vs. N-day grace via
-  `tier_changed_at` (§4.1).
-- **Anonymous discovery**: public content browsable by logged-out visitors
-  (`anon`, as written) vs. login-required (drop `anon` from `*_public_read`)
-  (§3.3).
-- **Tier billing storage**: inline columns on `public.users` (assumed) vs. a
-  `public.user_billing` 1:1 table (§1).
+One genuinely open item remains, deferred (not blocking the data model):
 
-_Resolved during scoping:_ tier lives on `public.users` (not a `profiles`
-mirror); storage = S3 + CloudFront, two buckets, reusing the `harper-medical`
-layer; visibility toggle = cross-bucket copy + delete; consumption =
-copy-on-add-to-project + a thin `saved_assets` bookmark.
+- **Attribution/licensing** *(productization scope)*: what (if anything) a
+  creator is owed when their public content is copied, + any opt-out — rides on
+  `provenance.sourceAssetId` (§5.3).
+
+_Resolved during scoping:_
+
+- **Identity/tier** — tier on `public.users` via inline `tier` / `tier_source` /
+  `tier_changed_at` columns (not a `profiles` mirror, not a separate billing
+  table); visibility rights follow the **workspace owner's** tier (§1).
+- **Storage/delivery** — S3 + CloudFront, two buckets
+  (`assets-public` / `assets-private`), reusing the `harper-medical` layer;
+  visibility toggle = cross-bucket copy + delete (§3.4).
+- **Effective-visibility cascade** — **eager**: project→private moves its public
+  assets to `assets-private` as part of the toggle (§3.4).
+- **Consumption** — copy-on-add-to-project + a thin `saved_assets` bookmark
+  (§5.3).
+- **Downgrade** — **immediate freeze** (retain-private-but-frozen); an N-day
+  grace is a later `tier_changed_at` tweak, no schema change (§4.1).
+- **Anonymous discovery** — **allowed**: the public feed is readable by `anon`
+  (the growth surface for a free-public product); `*_public_read` grants to
+  `anon, authenticated` (§3.3).
