@@ -418,16 +418,52 @@ create index assets_search_idx on public.assets
 (Exact tsvector weighting is an impl detail; a generated `search_tsv` column is a
 reasonable refinement.)
 
-### 5.3 Consumption semantics (flag for later scope)
+### 5.3 Consumption — copy-on-add-to-project (+ thin bookmark)
 
-"Available for other users to consume" raises questions beyond this data model:
-does consuming a public asset **copy it into the consumer's project pool** (new
-`asset` row, `provenance.sourceAssetId` → source) or **reference it in place**?
-The asset-pool/provenance model favors **copy-with-provenance** (assets immutable,
-relationships by id), and it survives the source later privatizing/deleting. The
-attribution/licensing rules ride on top and are out of scope here. Noted so the
-model doesn't foreclose it: a cross-workspace `provenance.sourceAssetId` is
-compatible with everything above.
+Decided: **consuming a public asset copies it, lazily, at the moment B adds it to
+one of B's projects** — not while browsing. Discovery is the browse surface;
+"add to project" is the single trigger that copies.
+
+**Consume operation** (B adds public asset `X` to B's project `P`):
+
+1. **Stale guard** — re-validate `effective_public(X)` and that `X` still exists.
+   If A privatized or deleted it since the feed was rendered, reject ("no longer
+   available") and create nothing — no dangling copy.
+2. **Server-side S3 copy** — `CopyObject` `X`'s object → B's bucket (no
+   download/re-upload; fast even for video; a `pending` status covers large files).
+3. **New pooled asset** in `P` — `provenance.sourceAssetId = X` (+ source
+   workspace/user for attribution). Visibility follows **B's** tier default (free
+   B → public, paid B → private); A's visibility does not constrain B's copy.
+4. **Selection** in `P` points at the new asset id.
+
+The copy is durable — it survives A later privatizing or deleting `X`.
+
+**Bookmark (save-for-later) — a thin, decoupled pointer that does NOT copy.** A
+personal shortlist, orthogonal to the copy path:
+
+```sql
+create table public.saved_assets (
+  user_id         uuid not null references public.users (id)  on delete cascade,
+  source_asset_id text not null references public.assets (id) on delete cascade,
+  created_at      timestamptz not null default now(),
+  primary key (user_id, source_asset_id)
+);
+alter table public.saved_assets enable row level security;
+create policy saved_assets_own on public.saved_assets
+  for all to authenticated
+  using (user_id = public.current_app_user_id())
+  with check (user_id = public.current_app_user_id());
+```
+
+Rendering a bookmark reuses `X`'s public CDN URL (read-only, same as the feed);
+adding a bookmarked asset to a project runs the exact consume operation above.
+**Staleness is handled in two layers, no background sweep:** the `on delete
+cascade` FK drops bookmarks when A **deletes** `X`, and a render-time
+`effective_public` filter hides/flags bookmarks when A **privatizes** `X`.
+
+**Still open:** attribution/licensing policy — what (if anything) a creator is
+owed when their public content is copied, and any opt-out — rides on
+`provenance.sourceAssetId` and is left to a productization scope.
 
 ---
 
@@ -447,6 +483,7 @@ adds, in order:
    the existing owner policies — permissive OR-combine; owner writes untouched).
 5. `enforce_visibility_tier()` + triggers on `projects` and `assets`.
 6. Discovery feed + search indexes.
+7. `saved_assets` bookmark table + own-row RLS.
 
 **Infra, handled in the implementation PR (not this migration):** create the
 `assets-public` / `assets-private` buckets + CloudFront distributions, port the
@@ -461,8 +498,9 @@ move to public on first publish.
 
 ## 7. Open decisions (need a call before implementation)
 
-- **Consumption**: copy-into-pool-with-provenance vs. reference-in-place, +
-  attribution/licensing (§5.3).
+- **Attribution/licensing**: what (if anything) a creator is owed when their
+  public content is copied, + any opt-out — rides on `provenance.sourceAssetId`
+  (§5.3; productization scope).
 - **Effective-visibility cascade**: when a project goes private, eager
   cascade-move its public assets to `assets-private`, vs. lazy move-on-next-read
   (§3.4).
@@ -476,4 +514,5 @@ move to public on first publish.
 
 _Resolved during scoping:_ tier lives on `public.users` (not a `profiles`
 mirror); storage = S3 + CloudFront, two buckets, reusing the `harper-medical`
-layer; visibility toggle = cross-bucket copy + delete.
+layer; visibility toggle = cross-bucket copy + delete; consumption =
+copy-on-add-to-project + a thin `saved_assets` bookmark.
