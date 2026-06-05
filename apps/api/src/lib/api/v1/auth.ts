@@ -14,7 +14,7 @@
 
 import type { ApiRequestView } from "./handler";
 import { ApiError } from "./errors";
-import { ensureWorkspace } from "./store";
+import { ensureLocalWorkspace, ensureUserWorkspace } from "./store";
 import {
   buildUserScopedSupabase,
   resolveAppUserId,
@@ -22,7 +22,9 @@ import {
 } from "@/lib/supabase/clients";
 import { requestContext } from "@/lib/supabase/request-context";
 
-export const LOCAL_WORKSPACE_ID = "ws_local_dev";
+// Natural key for the local dev workspace (find-or-create); its id is
+// DB-generated, not a hardcoded string. The local actor id is a non-persisted
+// label (it is never written as a DB primary key).
 export const LOCAL_WORKSPACE_NAME = "dev_workspace";
 export const LOCAL_ACTOR_ID = "local_dev";
 
@@ -56,35 +58,32 @@ export function bearerToken(req: ApiRequestView): string | null {
   return value.slice("bearer ".length).trim() || null;
 }
 
-// Workspace key derived from the DOMAIN user id (public.users.id), not the auth
-// id. The local JSON store is still keyed by a single workspace per user until
-// the project data model moves to Postgres with real workspace_members. See the
-// PR notes / spec §6.6 — multi-workspace selection is a follow-up.
-function workspaceIdForUser(publicUserId: string) {
-  return `ws_user_${publicUserId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-}
-
+// One workspace per DOMAIN user (public.users.id), resolved find-or-create by
+// owner_id — the workspace's own id is DB-generated (gen_random_uuid), never an
+// app-minted `ws_user_<id>` string. Multi-workspace selection is a follow-up.
 async function supabaseAuthContext(
   publicUserId: string,
   email: string | null
 ): Promise<AuthContext> {
-  const workspaceId = workspaceIdForUser(publicUserId);
-  await ensureWorkspace(workspaceId, email ?? "Supabase workspace", publicUserId);
+  const workspace = await ensureUserWorkspace(
+    publicUserId,
+    email ?? "Supabase workspace"
+  );
   return {
     mode: "supabase",
     actor: { id: publicUserId, type: "user", email: email ?? null },
-    workspaceId,
+    workspaceId: workspace.id,
     isLocal: false,
   };
 }
 
 export async function resolveAuth(req?: ApiRequestView): Promise<AuthContext> {
   if (authMode() === "local") {
-    await ensureWorkspace(LOCAL_WORKSPACE_ID, LOCAL_WORKSPACE_NAME);
+    const workspace = await ensureLocalWorkspace(LOCAL_WORKSPACE_NAME);
     return {
       mode: "local",
       actor: { id: LOCAL_ACTOR_ID, type: "local" },
-      workspaceId: LOCAL_WORKSPACE_ID,
+      workspaceId: workspace.id,
       isLocal: true,
     };
   }

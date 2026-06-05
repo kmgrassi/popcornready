@@ -10,10 +10,10 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import { AuthContext } from "./auth";
 import { buildSemanticAnalysis } from "../../edit-graph/semantic-analysis";
 import { ApiError } from "./errors";
-import { newId } from "./ids";
 import {
   AgentAssetContext,
   AssetInventoryInput,
@@ -297,13 +297,13 @@ export async function registerAsset(
   await getProject(auth.workspaceId, projectId);
 
   const now = new Date().toISOString();
-  const id = newId("asset");
 
   if (input.source.type === "remote_url") {
     const filename = input.filename || basename(input.source.url);
     const kind = resolveKind(input.kind, filename);
     const asset: V1Asset = {
-      id,
+      // Placeholder; addAsset omits it on insert and the DB assigns the real id.
+      id: "",
       schemaVersion: SCHEMA_VERSIONS.asset,
       workspaceId: auth.workspaceId,
       projectId,
@@ -346,12 +346,16 @@ export async function registerAsset(
     const ext = path.extname(srcPath);
     const destDir = mediaUploadDir(auth.workspaceId, projectId);
     await fs.mkdir(destDir, { recursive: true });
-    const destPath = path.join(destDir, `${id}${ext}`);
+    // The on-disk byte name is a storage key (its own namespace), NOT the DB row
+    // id — the DB assigns the asset id. Use a random key so the bytes can land
+    // before the row exists.
+    const destPath = path.join(destDir, `${randomUUID()}${ext}`);
     await fs.copyFile(srcPath, destPath);
     const storageKey = path.relative(localDir(), destPath);
 
     const asset: V1Asset = {
-      id,
+      // Placeholder; addAsset omits it on insert and the DB assigns the real id.
+      id: "",
       schemaVersion: SCHEMA_VERSIONS.asset,
       workspaceId: auth.workspaceId,
       projectId,

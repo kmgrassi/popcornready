@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Judgment } from "@popcorn/eval";
@@ -115,9 +116,17 @@ export function createSupabaseJudgmentStore(
 ): JudgmentStore {
   return {
     async saveJudgment(judgment) {
-      const { error } = await db.from("judgments").insert(judgmentToRow(judgment));
+      // Append-only; id is DB-generated (gen_random_uuid). Omit it and read the
+      // assigned id back so the caller acts on the persisted judgment.
+      const { id: _omit, ...row } = judgmentToRow({ ...judgment, id: "" });
+      void _omit;
+      const { data, error } = await db
+        .from("judgments")
+        .insert(row)
+        .select("*")
+        .single();
       if (error) fail("save judgment", error);
-      return judgment;
+      return rowToJudgment(data as JudgmentRow);
     },
 
     async listJudgmentsForRun(generationRunId) {
@@ -171,13 +180,15 @@ export function createFileJudgmentStore(rootDir: string): JudgmentStore {
 
   return {
     async saveJudgment(judgment) {
+      // File store stands in for the DB: assign the id (uuid) on insert.
+      const persisted: Judgment = { ...judgment, id: randomUUID() };
       await fs.mkdir(dir(), { recursive: true });
       await fs.writeFile(
-        path.join(dir(), `${safeKey(judgment.id)}.json`),
-        JSON.stringify(judgment, null, 2),
+        path.join(dir(), `${safeKey(persisted.id)}.json`),
+        JSON.stringify(persisted, null, 2),
         "utf8"
       );
-      return judgment;
+      return persisted;
     },
 
     async listJudgmentsForRun(generationRunId) {

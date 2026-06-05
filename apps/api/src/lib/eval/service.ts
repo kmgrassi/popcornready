@@ -10,7 +10,6 @@
 // lives here.
 
 import { ApiError } from "@/core/errors";
-import { newId } from "@/core/ids";
 import {
   EvaluatorRegistry,
   computeVerdict,
@@ -121,29 +120,42 @@ export async function startSuiteRun(
   const cases = await store.listCasesForSuite(input.suiteId);
 
   const fixture: EvalSuiteFixture = { suite, cases };
+  // The runner builds the result graph in memory with its OWN ephemeral
+  // correlation ids (judgments reference the run, expectation results reference
+  // judgments). Those ids are never persisted as PKs: on persist below the DB
+  // assigns the real uuids and we remap the cross-references to them.
   const result = await runEvalSuite({
     registry,
     fixture,
-    evalRunId: newId("evalrun"),
     gitSha: input.gitSha?.trim() || gitSha(),
     branch: input.branch?.trim() || gitBranch(),
   });
 
-  // Persist run first (FK target), then its judgments + expectation results.
+  // Persist run first (FK target), then its judgments (re-pointed at the run's DB
+  // id), then expectation results (re-pointed at each judgment's DB id).
   const run = await store.saveRun(result.evalRun);
+  const judgmentIdByTemp = new Map<string, string>();
+  const judgments: Judgment[] = [];
   for (const judgment of result.judgments) {
-    await store.saveJudgment(judgment);
-  }
-  for (const expectationResult of result.expectationResults) {
-    await store.saveExpectationResult(expectationResult);
+    const persisted = await store.saveJudgment({ ...judgment, evalRunId: run.id });
+    judgmentIdByTemp.set(judgment.id, persisted.id);
+    judgments.push(persisted);
   }
 
-  return {
-    run,
-    cases,
-    judgments: result.judgments,
-    expectationResults: result.expectationResults,
-  };
+  const expectationResults: ExpectationResult[] = [];
+  for (const expectationResult of result.expectationResults) {
+    const judgmentId =
+      judgmentIdByTemp.get(expectationResult.judgmentId) ?? expectationResult.judgmentId;
+    expectationResults.push(
+      await store.saveExpectationResult({
+        ...expectationResult,
+        evalRunId: run.id,
+        judgmentId,
+      })
+    );
+  }
+
+  return { run, cases, judgments, expectationResults };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +298,8 @@ export async function judgeArtifact(
   // The verdict is recomputed deterministically from grades, never trusted from
   // the model (scope §3 design principle).
   const judgment: Judgment = {
-    id: newId("judgment"),
+    // Placeholder; store.saveJudgment assigns the DB-generated id and returns it.
+    id: "",
     evaluatorId: evaluator.id,
     rubricVersion: evaluator.rubricVersion,
     judgeModel: evaluator.judgeModel,

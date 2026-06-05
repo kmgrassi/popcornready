@@ -25,7 +25,6 @@ import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "./errors";
-import { newId } from "./ids";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
@@ -457,41 +456,32 @@ function paginate<T extends { id: string; createdAt: string }>(
 // ---------------------------------------------------------------------------
 // Workspaces
 // ---------------------------------------------------------------------------
-export async function ensureWorkspace(
-  id: string,
-  name: string,
-  ownerId?: string | null
+// Find-or-create a workspace by a stable NATURAL KEY (not an app-minted id).
+// Workspace ids are DB-generated (gen_random_uuid); identity singletons are
+// resolved by querying the natural key and inserting (omitting `id`) only when
+// absent. Two natural keys are supported, backed by partial unique indexes:
+//   * the local dev workspace: owner_id IS NULL, matched by name.
+//   * a per-user workspace: matched by owner_id (one workspace per domain user).
+async function ensureWorkspaceByNaturalKey(
+  match: { ownerId: string } | { localName: string },
+  name: string
 ): Promise<V1Workspace> {
   const db = getServiceSupabase();
-  const existing = await db
-    .from("workspaces")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+  const query = db.from("workspaces").select("*");
+  const scoped =
+    "ownerId" in match
+      ? query.eq("owner_id", match.ownerId)
+      : query.is("owner_id", null).eq("name", match.localName);
+  const existing = await scoped.maybeSingle();
   throwOnError(existing.error, "ensureWorkspace select");
-  if (existing.data) {
-    const row = existing.data as WorkspaceRow;
-    if (ownerId && !row.owner_id) {
-      const updated = await db
-        .from("workspaces")
-        .update({ owner_id: ownerId, updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .is("owner_id", null)
-        .select("*")
-        .maybeSingle();
-      throwOnError(updated.error, "ensureWorkspace owner update");
-      if (updated.data) return mapWorkspace(updated.data as WorkspaceRow);
-    }
-    return mapWorkspace(existing.data as WorkspaceRow);
-  }
+  if (existing.data) return mapWorkspace(existing.data as WorkspaceRow);
 
   const now = new Date().toISOString();
   const inserted = await db
     .from("workspaces")
     .insert({
-      id,
       schema_version: SCHEMA_VERSIONS.workspace,
-      owner_id: ownerId ?? null,
+      owner_id: "ownerId" in match ? match.ownerId : null,
       name,
       created_at: now,
       updated_at: now,
@@ -499,19 +489,33 @@ export async function ensureWorkspace(
     .select("*")
     .single();
 
-  // Tolerate the race where a concurrent caller inserted the same workspace
-  // between our select and insert: re-read and return the winner.
+  // Tolerate the race where a concurrent caller inserted first: the natural-key
+  // unique index rejects the duplicate, so re-read and return the winner.
   if (inserted.error) {
-    const reread = await db
-      .from("workspaces")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
+    const rereadQuery = db.from("workspaces").select("*");
+    const rescoped =
+      "ownerId" in match
+        ? rereadQuery.eq("owner_id", match.ownerId)
+        : rereadQuery.is("owner_id", null).eq("name", match.localName);
+    const reread = await rescoped.maybeSingle();
     throwOnError(reread.error, "ensureWorkspace reread");
     if (reread.data) return mapWorkspace(reread.data as WorkspaceRow);
     throwOnError(inserted.error, "ensureWorkspace insert");
   }
   return mapWorkspace(inserted.data as WorkspaceRow);
+}
+
+// The single unowned local dev workspace, matched by name.
+export function ensureLocalWorkspace(name: string): Promise<V1Workspace> {
+  return ensureWorkspaceByNaturalKey({ localName: name }, name);
+}
+
+// The workspace owned by a given domain user (public.users.id), one per user.
+export function ensureUserWorkspace(
+  ownerId: string,
+  name: string
+): Promise<V1Workspace> {
+  return ensureWorkspaceByNaturalKey({ ownerId }, name);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,16 +528,15 @@ export async function createProject(input: {
 }): Promise<{ project: V1Project; briefVersion: V1BriefVersion | null }> {
   const db = getServiceSupabase();
   const now = new Date().toISOString();
-  const projectId = newId("proj");
 
   // FK ordering: brief_versions.project_id -> projects.id (NOT NULL), and
   // projects.current_brief_version_id -> brief_versions.id. So insert the project
   // first (with a null current_brief_version_id), then the brief version, then
-  // point the project at it.
+  // point the project at it. Ids are DB-generated (gen_random_uuid); omit `id`
+  // and read the generated value back via .select().
   const insertedProject = await db
     .from("projects")
     .insert({
-      id: projectId,
       schema_version: SCHEMA_VERSIONS.project,
       workspace_id: input.workspaceId,
       name: input.name,
@@ -547,14 +550,13 @@ export async function createProject(input: {
     .single();
   throwOnError(insertedProject.error, "createProject insert project");
   let projectRow = insertedProject.data as ProjectRow;
+  const projectId = projectRow.id;
 
   let briefVersion: V1BriefVersion | null = null;
   if (input.brief) {
-    const briefVersionId = newId("briefv");
     const insertedBrief = await db
       .from("brief_versions")
       .insert({
-        id: briefVersionId,
         schema_version: SCHEMA_VERSIONS.briefVersion,
         project_id: projectId,
         brief: input.brief,
@@ -643,11 +645,9 @@ export async function createBriefVersion(
 
   const db = getServiceSupabase();
   const now = new Date().toISOString();
-  const briefVersionId = newId("briefv");
   const insertedBrief = await db
     .from("brief_versions")
     .insert({
-      id: briefVersionId,
       schema_version: SCHEMA_VERSIONS.briefVersion,
       project_id: projectId,
       brief,
@@ -697,9 +697,13 @@ export async function listBriefVersions(
 // ---------------------------------------------------------------------------
 export async function addAsset(asset: V1Asset): Promise<V1Asset> {
   const db = getServiceSupabase();
+  // Omit `id` so Postgres assigns it (gen_random_uuid); any id on the incoming
+  // object is a placeholder and is read back from the inserted row.
+  const { id: _omit, ...row } = assetToRow(asset);
+  void _omit;
   const { data, error } = await db
     .from("assets")
-    .insert(assetToRow(asset))
+    .insert(row)
     .select("*")
     .single();
   throwOnError(error, "addAsset");
@@ -926,9 +930,12 @@ export async function saveCompositionPlan(
 ): Promise<ContractCompositionPlan> {
   await getProject(workspaceId, composition.projectId);
   const db = getServiceSupabase();
+  // Omit `id` so Postgres assigns it; the caller's composition.id is a placeholder.
+  const { id: _omit, ...row } = compositionToRow(composition);
+  void _omit;
   const { data, error } = await db
     .from("compositions")
-    .insert(compositionToRow(composition))
+    .insert(row)
     .select("*")
     .single();
   throwOnError(error, "saveCompositionPlan");
@@ -983,7 +990,9 @@ export async function createJob(input: {
   await getProject(input.workspaceId, input.projectId);
   const now = new Date().toISOString();
   const job: Job = {
-    id: newId("job"),
+    // Placeholder id; the row is inserted without it and the DB-generated id is
+    // read back below.
+    id: "",
     schemaVersion: CONTRACT_SCHEMA.job,
     workspaceId: input.workspaceId,
     projectId: input.projectId,
@@ -1001,9 +1010,11 @@ export async function createJob(input: {
     updatedAt: now,
   };
   const db = getServiceSupabase();
+  const { id: _omit, ...row } = jobToRow(job);
+  void _omit;
   const { data, error } = await db
     .from("jobs")
-    .insert(jobToRow(job))
+    .insert(row)
     .select("*")
     .single();
   throwOnError(error, "createJob");

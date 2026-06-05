@@ -22,6 +22,10 @@ import {
   startSuiteRun,
 } from "../service";
 
+// Ids are DB-generated (uuid); the file store assigns them on insert.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 let tmpDir: string;
 let store: EvalStore;
 
@@ -62,9 +66,8 @@ function registryWith(evaluator: Evaluator): EvaluatorRegistry {
 }
 
 async function seedSuiteWithCase(): Promise<{ suiteId: string; artifactId: string }> {
-  const suite = await store.createSuite({ id: "evalsuite_1", name: "Core" });
+  const suite = await store.createSuite({ name: "Core" });
   await store.saveCase({
-    id: "evalcase_1",
     suiteId: suite.id,
     label: "Launch arc",
     stimulus: {
@@ -88,7 +91,7 @@ async function seedSuiteWithCase(): Promise<{ suiteId: string; artifactId: strin
 }
 
 test("listSuites returns saved suites", async () => {
-  await store.createSuite({ id: "evalsuite_1", name: "Core" });
+  await store.createSuite({ name: "Core" });
   const suites = await listSuites(store);
   assert.equal(suites.length, 1);
   assert.equal(suites[0].name, "Core");
@@ -113,7 +116,7 @@ test("startSuiteRun persists a run + judgments and returns the detail", async ()
   const { suiteId } = await seedSuiteWithCase();
   const detail = await startSuiteRun({ suiteId }, store, registryWith(stubEvaluator(9)));
 
-  assert.match(detail.run.id, /^evalrun_/);
+  assert.match(detail.run.id, UUID_RE);
   assert.equal(detail.run.status, "succeeded");
   assert.equal(detail.run.suiteId, suiteId);
   assert.equal(detail.judgments.length, 1);
@@ -156,10 +159,8 @@ test("diffRuns reports verdict flips between two runs of the same suite", async 
 });
 
 test("diffRuns keeps same-stage item judgments distinct when artifactId is absent", async () => {
-  await store.saveRun({
-    id: "evalrun_before",
+  const before = await store.saveRun({
     source: "suite",
-    suiteId: "evalsuite_1",
     generationMode: "prompts_only",
     gitSha: "abc123",
     branch: "feat/eval-http-api",
@@ -167,10 +168,8 @@ test("diffRuns keeps same-stage item judgments distinct when artifactId is absen
     status: "succeeded",
     createdAt: "2026-06-04T10:00:00.000Z",
   });
-  await store.saveRun({
-    id: "evalrun_after",
+  const after = await store.saveRun({
     source: "suite",
-    suiteId: "evalsuite_1",
     generationMode: "prompts_only",
     gitSha: "abc124",
     branch: "feat/eval-http-api",
@@ -181,11 +180,11 @@ test("diffRuns keeps same-stage item judgments distinct when artifactId is absen
 
   for (const itemId of ["item_a", "item_b"]) {
     await store.saveJudgment({
-      id: `judgment_before_${itemId}`,
+      id: "",
       evaluatorId: "story_arc.v1",
       rubricVersion: "v1",
       judgeModel: "test-judge",
-      evalRunId: "evalrun_before",
+      evalRunId: before.id,
       caseId: "evalcase_1",
       stageId: "stage_shared",
       itemId,
@@ -198,11 +197,11 @@ test("diffRuns keeps same-stage item judgments distinct when artifactId is absen
       createdAt: "2026-06-04T10:00:01.000Z",
     });
     await store.saveJudgment({
-      id: `judgment_after_${itemId}`,
+      id: "",
       evaluatorId: "story_arc.v1",
       rubricVersion: "v1",
       judgeModel: "test-judge",
-      evalRunId: "evalrun_after",
+      evalRunId: after.id,
       caseId: "evalcase_1",
       stageId: "stage_shared",
       itemId,
@@ -216,7 +215,7 @@ test("diffRuns keeps same-stage item judgments distinct when artifactId is absen
     });
   }
 
-  const diff = await diffRuns("evalrun_before", "evalrun_after", store);
+  const diff = await diffRuns(before.id, after.id, store);
   assert.deepEqual(
     diff.flips.map((flip) => flip.itemId).sort(),
     ["item_a", "item_b"]
@@ -241,7 +240,7 @@ test("judgeArtifact runs one evaluator on demand and persists a manual Judgment"
     registryWith(stubEvaluator(7, captured))
   );
 
-  assert.match(judgment.id, /^judgment_/);
+  assert.match(judgment.id, UUID_RE);
   assert.equal(judgment.trigger, "manual");
   assert.equal(judgment.verdict, "needs_review"); // grade 7 in [floor 7, floor+1)
   assert.equal(judgment.artifactId, artifactId);

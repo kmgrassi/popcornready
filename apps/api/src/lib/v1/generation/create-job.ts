@@ -2,7 +2,6 @@ import { createHash } from "crypto";
 
 import { Actor } from "../actor";
 import { ApiError } from "../errors";
-import * as ids from "../ids";
 import { Logger, createLogger } from "../logger";
 import { V1Store } from "../store";
 import { GenerationJob, GenerationJobInput, GenerationRequest, SCHEMA } from "@popcorn/shared/v1/types";
@@ -49,7 +48,8 @@ function buildJob(
 ): GenerationJob {
   const now = new Date().toISOString();
   return {
-    id: ids.jobId(),
+    // Placeholder; store.saveJob assigns the DB-generated id and returns it.
+    id: "",
     schemaVersion: SCHEMA.job,
     workspaceId: actor.workspaceId,
     projectId,
@@ -107,8 +107,9 @@ export async function createGenerationJob(args: {
       // Record exists but the job is gone — fall through and recreate it.
     }
     const input = await prepareGeneration(store, actor.workspaceId, projectId, body);
-    const job = buildJob(actor, projectId, input, { idempotencyKey, requestId });
-    await store.saveJob(job);
+    const built = buildJob(actor, projectId, input, { idempotencyKey, requestId });
+    const saved = await store.saveJob(built);
+    const job: GenerationJob = { ...built, id: saved.id };
     await store.saveIdempotency(scope, {
       requestHash,
       jobId: job.id,
@@ -119,8 +120,9 @@ export async function createGenerationJob(args: {
   }
 
   const input = await prepareGeneration(store, actor.workspaceId, projectId, body);
-  const job = buildJob(actor, projectId, input, { requestId });
-  await store.saveJob(job);
+  const built = buildJob(actor, projectId, input, { requestId });
+  const saved = await store.saveJob(built);
+  const job: GenerationJob = { ...built, id: saved.id };
   logger.info("job.created", { jobId: job.id, idempotent: false });
   return job;
 }

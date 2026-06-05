@@ -8,10 +8,15 @@ import {
   getAssetAnalysisJob,
   videoSampleTimes,
 } from "../asset-analysis";
-import { AuthContext, LOCAL_WORKSPACE_ID } from "../auth";
+import { AuthContext } from "../auth";
 import { registerAsset } from "../assets";
 import { parseAnalyzeBatch } from "../schemas";
 import { createProject, getAsset, localDir, V1Project } from "../store";
+
+// DB-generated workspace uuid stand-in for these Supabase-gated tests (skipped
+// unless SUPABASE_* env is set). Workspaces are find-or-created at runtime, so a
+// fixed placeholder uuid is sufficient for the skipped-path imports below.
+const LOCAL_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 
 const SUPABASE_CONFIGURED = Boolean(
   process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
