@@ -288,6 +288,21 @@ export function withDerivedAssetKnowledge(asset: V1Asset, now?: string): V1Asset
   return derived;
 }
 
+async function addAssetWithDerivedKnowledge(
+  auth: AuthContext,
+  projectId: string,
+  asset: V1Asset,
+  now: string
+): Promise<V1Asset> {
+  const created = await addAsset(asset);
+  return updateStoredAsset(auth.workspaceId, projectId, created.id, (stored) => {
+    const derived = withDerivedAssetKnowledge(stored, now);
+    stored.assetKnowledge = derived.assetKnowledge;
+    stored.clipUnderstanding = derived.clipUnderstanding;
+    stored.semanticAnalysis = derived.semanticAnalysis;
+  });
+}
+
 export async function registerAsset(
   auth: AuthContext,
   projectId: string,
@@ -319,7 +334,7 @@ export async function registerAsset(
       createdAt: now,
       updatedAt: now,
     };
-    return addAsset(withDerivedAssetKnowledge(asset, now));
+    return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
   }
 
   if (input.source.type === "local_path") {
@@ -371,7 +386,7 @@ export async function registerAsset(
       createdAt: now,
       updatedAt: now,
     };
-    return addAsset(withDerivedAssetKnowledge(asset, now));
+    return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
   }
 
   throw new ApiError(
