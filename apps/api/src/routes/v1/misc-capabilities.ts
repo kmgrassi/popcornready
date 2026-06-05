@@ -7,6 +7,7 @@ import {
   parseUpdateAssetContext,
 } from "@/lib/api/v1/schemas";
 import { registerAsset, updateAssetContext } from "@/lib/api/v1/assets";
+import { generateCharacterAnchor } from "@/lib/api/v1/character-anchors";
 import {
   createJob,
   getAsset,
@@ -323,6 +324,20 @@ miscCapabilitiesRouter.post(
       },
     });
     return { status: 201, body: { reference: { characterId, assetId, asset } } };
+  })
+);
+
+// P2 (granular generation API §3): generate / regenerate the character's
+// reference likeness image (the "anchor"). Thin wrapper over the generic
+// generated-assets image path with character binding + provenance; returns the
+// same pollable Job envelope. Poll via GET …/generation-entrypoints/assets/:jobId.
+// Idempotency-Key is honored by the shared mutation wrapper.
+miscCapabilitiesRouter.post(
+  "/projects/:projectId/characters/:characterId/anchors",
+  mutation(async ({ auth, body }, params) => {
+    const projectId = requiredParam(params, "projectId");
+    const characterId = requiredParam(params, "characterId");
+    return generateCharacterAnchor({ auth, projectId, characterId, body });
   })
 );
 
