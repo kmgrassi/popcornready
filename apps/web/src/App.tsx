@@ -6,10 +6,13 @@ import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
+import { BrandKitPage } from "./routes/BrandKitPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
+import { TemplatesPage } from "./routes/TemplatesPage";
+import { UploadsPage } from "./routes/UploadsPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
 // apps/web/src/routes/* and adds exactly one child <Route> here.
@@ -19,6 +22,9 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
+        <Route path="/uploads" element={<UploadsPage />} />
+        <Route path="/templates" element={<TemplatesPage />} />
+        <Route path="/brand" element={<BrandKitPage />} />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
