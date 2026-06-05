@@ -7,6 +7,7 @@ import { generationRunsRouter } from "./generation-runs.js";
 import { generationsRouter } from "./generations.js";
 import { meRouter } from "./me.js";
 import { miscCapabilitiesRouter } from "./misc-capabilities.js";
+import { planRouter } from "./plan.js";
 import { projectsRouter } from "./projects.js";
 import { timelinesRouter } from "./timelines.js";
 
@@ -16,6 +17,7 @@ export function mountProtectedV1Routes(v1: Router) {
   v1.use(assetsRouter);
   v1.use(briefRouter);
   v1.use(miscCapabilitiesRouter);
+  v1.use(planRouter);
   v1.use(generationEntrypointsRouter);
   v1.use(generationRunsRouter);
   v1.use(timelinesRouter);
