@@ -1,7 +1,8 @@
 name: Apply Supabase migrations
 
 # Applies pending supabase/migrations/** to the linked Supabase project.
-# Runs on merge to main (when migrations change) and can be triggered manually.
+# Runs on merge to main (when migrations change) and can be triggered manually
+# from the main branch.
 #
 # Required GitHub repo config (Settings -> Secrets and variables -> Actions):
 #   Secrets:
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   db-push:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
