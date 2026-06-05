@@ -86,12 +86,12 @@ set storage_bucket = 'assets-private'
 where storage_bucket is null;
 
 create index projects_visibility_idx on public.projects (visibility)
-  where visibility = 'public';
+  where visibility = 'public' and status = 'active';
 create index assets_visibility_idx on public.assets (visibility)
   where visibility = 'public';
 
 create index projects_public_feed_idx on public.projects (created_at desc)
-  where visibility = 'public';
+  where visibility = 'public' and status = 'active';
 create index assets_public_feed_idx on public.assets (created_at desc)
   where visibility = 'public';
 
@@ -102,7 +102,7 @@ create index projects_search_idx on public.projects
       coalesce(name, '') || ' ' || coalesce(brief ->> 'summary', '')
     )
   )
-  where visibility = 'public';
+  where visibility = 'public' and status = 'active';
 
 create index assets_search_idx on public.assets
   using gin (
@@ -128,6 +128,7 @@ as $$
     from public.projects p
     where p.id = proj_id
       and p.visibility = 'public'
+      and p.status = 'active'
   );
 $$;
 
@@ -172,7 +173,7 @@ grant execute on function public.generation_stage_project_is_public(text) to ano
 
 create policy projects_public_read on public.projects
   for select to anon, authenticated
-  using (visibility = 'public');
+  using (visibility = 'public' and status = 'active');
 
 create policy assets_public_read on public.assets
   for select to anon, authenticated
