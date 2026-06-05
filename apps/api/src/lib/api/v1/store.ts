@@ -255,6 +255,15 @@ function throwOnError(error: { message?: string } | null, context: string): void
   }
 }
 
+async function defaultVisibilityForWorkspace(
+  db: SupabaseClient,
+  workspaceId: string
+): Promise<"public" | "private"> {
+  const { data, error } = await db.rpc("owner_tier", { ws_id: workspaceId });
+  throwOnError(error, "defaultVisibilityForWorkspace");
+  return data === "paid" ? "private" : "public";
+}
+
 // --- workspaces ------------------------------------------------------------
 interface WorkspaceRow {
   id: string;
@@ -529,6 +538,7 @@ export async function createProject(input: {
   const db = getServiceSupabase();
   const now = new Date().toISOString();
   const projectId = newId("proj");
+  const visibility = await defaultVisibilityForWorkspace(db, input.workspaceId);
 
   // FK ordering: brief_versions.project_id -> projects.id (NOT NULL), and
   // projects.current_brief_version_id -> brief_versions.id. So insert the project
@@ -543,6 +553,7 @@ export async function createProject(input: {
       name: input.name,
       status: "active",
       brief: input.brief ?? null,
+      visibility,
       current_brief_version_id: null,
       created_at: now,
       updated_at: now,
@@ -715,9 +726,11 @@ export async function listBriefVersions(
 // ---------------------------------------------------------------------------
 export async function addAsset(asset: V1Asset): Promise<V1Asset> {
   const db = getServiceSupabase();
+  const row = assetToRow(asset);
+  row.visibility = await defaultVisibilityForWorkspace(db, asset.workspaceId);
   const { data, error } = await db
     .from("assets")
-    .insert(assetToRow(asset))
+    .insert(row)
     .select("*")
     .single();
   throwOnError(error, "addAsset");
