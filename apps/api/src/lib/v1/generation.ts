@@ -30,6 +30,10 @@ import { assetToClip, briefToStoryContext } from "./generation/prepare";
 import { EditPlan, planBeats } from "@popcorn/shared/types";
 import { Asset } from "@popcorn/shared/assets/types";
 import { generateStoryboardTilesForPlan } from "./generation/storyboard";
+import {
+  buildStoryFlowToolPlan,
+  shouldUseStoryFlowToolLoop,
+} from "./generation/story-flow-tools";
 
 // PR4 — timeline generation from agent inputs.
 //
@@ -276,6 +280,18 @@ export async function runGenerationJob(
         null,
         logger
       );
+    }
+    if (shouldUseStoryFlowToolLoop()) {
+      const storyToolPlan = buildStoryFlowToolPlan({
+        projectId: job.projectId,
+        jobInput: input,
+        brief: brief.brief,
+      });
+      logger.info("story_tool_loop.planned", {
+        fallback: storyToolPlan.fallback,
+        toolCount: storyToolPlan.invocations.length,
+        tools: storyToolPlan.invocations.map((invocation) => invocation.toolName),
+      });
     }
 
     const assets: V1Asset[] = [];
