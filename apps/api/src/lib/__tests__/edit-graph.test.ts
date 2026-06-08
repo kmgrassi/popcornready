@@ -10,16 +10,24 @@ import {
   synthesizeEditGraph,
 } from "@popcorn/shared/edit-graph";
 import { applyPatchesDirectly, applyPatchesViaEditGraph } from "@popcorn/timeline/timeline";
-import { Clip, EditPlan, Patch, Timeline } from "@popcorn/shared/types";
+import {
+  Beat,
+  Clip,
+  EditPlan,
+  Patch,
+  planBeats,
+  singleSceneFromBeats,
+  Timeline,
+} from "@popcorn/shared/types";
 
 const plan: EditPlan = {
   targetLengthSec: 7,
   style: "punchy",
   aspectRatio: "9:16",
-  beats: [
-    { name: "hook", durationSec: 3, intent: "open on the strongest moment" },
-    { name: "proof", durationSec: 4, intent: "show the product working" },
-  ],
+  scenes: singleSceneFromBeats([
+    { id: "beat_1_hook", name: "hook", durationSec: 3, intent: "open on the strongest moment" },
+    { id: "beat_2_proof", name: "proof", durationSec: 4, intent: "show the product working" },
+  ]),
 };
 
 const clips: Clip[] = [
@@ -271,13 +279,13 @@ test("same-name beats get distinct ids and the graph links by beatId", () => {
     targetLengthSec: 6,
     style: "punchy",
     aspectRatio: "9:16",
-    beats: [
-      { name: "shot", durationSec: 3, intent: "first shot" },
-      { name: "shot", durationSec: 3, intent: "second shot" },
-    ],
+    scenes: singleSceneFromBeats([
+      { name: "shot", durationSec: 3, intent: "first shot" } as Beat,
+      { name: "shot", durationSec: 3, intent: "second shot" } as Beat,
+    ]),
   };
   ensureBeatIds(dupPlan);
-  const [b0, b1] = dupPlan.beats;
+  const [b0, b1] = planBeats(dupPlan);
   assert.ok(b0.id && b1.id && b0.id !== b1.id, "duplicate-name beats get distinct ids");
 
   const timeline: Timeline = {
@@ -302,10 +310,10 @@ test("legacy plans/segments without ids fall back to role-derived ids", () => {
     targetLengthSec: 6,
     style: "p",
     aspectRatio: "9:16",
-    beats: [
-      { name: "hook", durationSec: 3, intent: "a" },
-      { name: "proof", durationSec: 3, intent: "b" },
-    ],
+    scenes: singleSceneFromBeats([
+      { name: "hook", durationSec: 3, intent: "a" } as Beat,
+      { name: "proof", durationSec: 3, intent: "b" } as Beat,
+    ]),
   };
   const timeline: Timeline = {
     aspectRatio: "9:16",
@@ -326,13 +334,13 @@ test("compileTimelineViaEditGraph preserves per-segment beatId (no duplicate-nam
     targetLengthSec: 6,
     style: "punchy",
     aspectRatio: "9:16",
-    beats: [
-      { name: "shot", durationSec: 3, intent: "first shot" },
-      { name: "shot", durationSec: 3, intent: "second shot" },
-    ],
+    scenes: singleSceneFromBeats([
+      { name: "shot", durationSec: 3, intent: "first shot" } as Beat,
+      { name: "shot", durationSec: 3, intent: "second shot" } as Beat,
+    ]),
   };
   ensureBeatIds(dupPlan);
-  const [b0, b1] = dupPlan.beats;
+  const [b0, b1] = planBeats(dupPlan);
   const timeline: Timeline = {
     aspectRatio: "9:16",
     fps: 30,
