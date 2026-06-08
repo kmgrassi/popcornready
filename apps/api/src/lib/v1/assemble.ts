@@ -167,6 +167,10 @@ export interface ResolvedAssembleInput {
   goal: string;
   clips: Clip[];
   assetIds: string[];
+  // Job ids of the generated-asset jobs that produced the stitched assets, so
+  // the assembled timeline keeps the dependency edge for audit / selective
+  // regeneration (mirrors generation.ts provenance).
+  generatedAssetJobIds: string[];
   storyContext: StoryContext | null;
   showCaptions?: boolean;
 }
@@ -243,8 +247,16 @@ export async function resolveAssemble(
     storyContext = briefToStoryContext(synthesizedBrief.brief);
   }
 
-  const { clips } = await resolveClips(store, projectId, body.assetIds);
+  const { clips, assets } = await resolveClips(store, projectId, body.assetIds);
   const assetIds = clips.map((c) => c.id);
+  // Preserve provenance for assets that came from generated-asset jobs.
+  const generatedAssetJobIds = [
+    ...new Set(
+      assets
+        .map((asset) => asset.generatedAssetJobId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
 
   const goal =
     typeof body.goal === "string" && body.goal.trim()
@@ -261,6 +273,7 @@ export async function resolveAssemble(
     goal,
     clips,
     assetIds,
+    generatedAssetJobIds,
     storyContext,
     ...(showCaptions === undefined ? {} : { showCaptions }),
   };
@@ -339,7 +352,7 @@ export async function runAssemble(args: {
       briefVersionId: input.briefVersionId,
       ...(input.compositionId ? { compositionId: input.compositionId } : {}),
       sourceAssetIds: input.assetIds,
-      generatedAssetJobIds: [],
+      generatedAssetJobIds: input.generatedAssetJobIds,
       criticReport: null,
       appliedPatchCount: 0,
     },
