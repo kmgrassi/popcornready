@@ -592,3 +592,92 @@ right downstream work:
   can start.
 - `story_blueprints` and `script_drafts` are canonical tables; generation stage
   artifacts only reference or snapshot them.
+
+## Appendix: Landing-page flow image prompt
+
+Use this only after the product flow is backed by the scoped implementation. The
+image should not overstate current behavior before the story/script stages and
+approval policy exist.
+
+Approval gates should be shown as recurring checkpoint markers. Conceptually, a
+future orchestrator can pause at any artifact, but this scope makes the
+pre-asset gates mandatory for videos over 120 seconds: story blueprint, script
+draft, shot/beat plan, and storyboard/pre-viz.
+
+### Detailed prompt
+
+```text
+Create a polished 16:9 landing-page explainer image for Popcorn Ready, an AI-native video studio. Show the end-to-end workflow from a user concept to a finished video. The image should look like a premium modern SaaS product diagram: dark neutral interface, warm popcorn-yellow accents, clean arrows, subtle film-strip and timeline details, structured UI panels, and readable short labels.
+
+Overall composition:
+A left-to-right workflow made of connected product UI panels. Each panel should show a different artifact being created and passed forward. Use small approval-check icons as recurring checkpoint markers on the panels where review can happen. Make the flow feel agent-driven, inspectable, and structured.
+
+Stage 1: Prompt / Concept
+Visual: a clean prompt composer UI with a typed idea, for example "Comedy in space where explorers keep cloning themselves." Include small controls for duration, aspect ratio, audience, and style. The duration selector should show options like "30s", "2m", "5m" to imply that length changes the workflow.
+Label: Prompt / Concept
+Tiny description: User gives the idea, length, format, and constraints.
+
+Stage 2: Story Blueprint
+Visual: a structured document panel with sections for premise, logline, characters, story arc, acts, tone, and ending. Show it as a neat outline, not paragraphs of unreadable text. Include a small agent badge or artifact ID like "story_blueprint.v1".
+Label: Story Blueprint
+Tiny description: Agent develops the narrative structure.
+
+Stage 3: Script Draft
+Visual: a screenplay-like scene document with scene headings, short dialogue lines, narration blocks, and emotional/comedic beats. Show a few stacked scene cards, each with character names and dialogue lines. Include artifact ID "script_draft.v1".
+Label: Script Draft
+Tiny description: Scenes, dialogue, narration, and turns.
+
+Stage 4: Shot + Beat Plan
+Visual: a production planning board. Show scenes grouped into rows, each containing beat/shot cards with duration badges like "4s", "6s", "8s". Include fields like setting, mood, character IDs, and asset needs using compact chips/icons. This should feel like structured data, not a freeform storyboard yet.
+Label: Shot + Beat Plan
+Tiny description: Script becomes timed scenes and shots.
+
+Stage 5: Storyboard / Pre-viz
+Visual: rough pencil/marker storyboard sketch panels, one panel per beat, grouped by scene. The panels should look intentionally sketchy, with camera arrows and framing marks, not final photoreal images. Add small approval-check markers above some panels.
+Label: Storyboard Sketches
+Tiny description: Cheap visual preview before final generation.
+
+Stage 6: Final Media Generation
+Visual: a grid of generated asset cards: photoreal keyframes, short video clip thumbnails, character reference images, voice/audio waveform, captions, and visual assets. Show arrows from storyboard sketches to polished keyframes, then to video clips. Make it clear these are final media assets generated after approval.
+Label: Media Generation
+Tiny description: Keyframes, clips, audio, captions, references.
+
+Stage 7: Timeline Assembly + Critic Loop
+Visual: a structured video timeline UI with tracks, clips arranged in order, captions, audio waveform, and a critic/review panel showing checks like pacing, continuity, story fit, and quality. Include a curved loop arrow back to earlier artifact panels to show targeted revisions.
+Label: Timeline + Critic
+Tiny description: Agent assembles, reviews, and fixes the cut.
+
+Stage 8: Deterministic Render
+Visual: a finished video player showing a polished frame from the final video, with an "MP4 Ready" badge, download icon, and render metadata like "1080p" or "Remotion render". It should clearly look like the final exported video.
+Label: Final Render
+Tiny description: Structured timeline becomes finished MP4.
+
+Approval gate treatment:
+Show approval as small recurring checkpoint markers, not as a separate standalone stage. Use check icons, review badges, or small "Approve" chips near Story Blueprint, Script Draft, Shot + Beat Plan, and Storyboard Sketches. For longer videos, imply these are required before Media Generation. For shorter videos, imply they are optional. Do not make approval look like the entire workflow stops forever; make it feel like controlled human-in-the-loop review.
+
+Important conceptual constraints:
+- The AI does not directly edit raw video.
+- The workflow passes durable structured artifacts forward: Brief, Blueprint, Script, Plan, Storyboard, Assets, Timeline, MP4.
+- The user directs and approves; the agent plans, generates, assembles, critiques, and renders.
+- Video length changes the depth of planning.
+- Longer videos require approval before expensive asset generation.
+- Revisions can target affected artifacts instead of regenerating everything.
+
+Visual style:
+Premium, clear, modern, cinematic SaaS diagram. Dark graphite background, warm popcorn-yellow highlights, restrained white and gray text, crisp product UI panels, thin arrows, clean iconography, subtle film-strip/timeline motifs. Make labels readable. Avoid clutter.
+
+Avoid:
+No robot mascot.
+No generic stock-photo people.
+No chaotic sci-fi holograms.
+No manual editing workstation as the main metaphor.
+No tiny unreadable paragraphs.
+No implying that storyboard sketches become the literal first frame of the final video.
+No implying the AI edits raw video directly.
+```
+
+### Short prompt
+
+```text
+Create a premium 16:9 SaaS explainer graphic for Popcorn Ready showing prompt-to-video workflow as connected product UI panels. Include: Prompt/Concept with duration selector; Story Blueprint document with premise, characters, arc, ending; Script Draft with scene cards and dialogue; Shot + Beat Plan with timed shot cards; Storyboard Sketches as rough pencil panels grouped by scene; Media Generation grid with photoreal keyframes, clips, audio waveform, captions, references; Timeline + Critic panel with tracks and targeted revision loop; Final Render video player marked MP4 Ready. Show small recurring approval-check markers near Story Blueprint, Script Draft, Shot + Beat Plan, and Storyboard, especially for videos over 2 minutes before media generation. Use dark modern UI, warm popcorn-yellow accents, artifact IDs, arrows, clean readable labels. Emphasize structured artifacts and agent handoff, not raw video editing. No robot mascot, no clutter, no manual editor metaphor.
+```
