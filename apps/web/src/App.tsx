@@ -12,6 +12,7 @@ import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
 import { BrandKitPage } from "./routes/BrandKitPage";
+import { AssetsPage, OutputsPage, RunsPage } from "./routes/DashboardCollectionsPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
@@ -44,15 +45,9 @@ export function App() {
             element={<DashboardPlaceholderPage kind="projects" />}
           />
           <Route path="/projects/new" element={<NewProjectPage />} />
-          <Route path="/runs" element={<DashboardPlaceholderPage kind="runs" />} />
-          <Route
-            path="/assets"
-            element={<DashboardPlaceholderPage kind="assets" />}
-          />
-          <Route
-            path="/outputs"
-            element={<DashboardPlaceholderPage kind="outputs" />}
-          />
+          <Route path="/runs" element={<RunsPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/outputs" element={<OutputsPage />} />
           <Route path="/studio" element={<StudioPage />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
