@@ -21,7 +21,12 @@ export type AssetKind = "image" | "video" | "audio";
 export type AssetRole =
   | "character_anchor"
   | "scene_anchor"
+  // Rough sketch storyboard tile for a beat (`depicts.beatId`) — the cheap
+  // pre-viz panel (Storyboard & Scenes, Part B). A composition seed only; it is
+  // NEVER used as a clip's first frame (the photoreal `beat_keyframe` is).
   | "beat_storyboard"
+  // Photoreal first frame for a beat. The ONLY image role allowed to seed a
+  // clip's image-to-video first frame (`firstFrameAssetId`).
   | "beat_keyframe"
   | "beat_clip"
   | "soundtrack"
@@ -42,6 +47,11 @@ export interface AssetInputs {
   anchorIds?: string[];
   referenceAssetIds?: string[];
   firstFrameAssetId?: string;
+  // The `beat_storyboard` sketch tile that seeded this asset's composition
+  // (Storyboard & Scenes, Part C). Set on a `beat_keyframe` re-rendered photoreal
+  // from an approved sketch. The sketch conditions framing/blocking ONLY — it is
+  // never the literal first frame of a clip.
+  storyboardAssetId?: string;
   audioId?: string;
   upstreamAssetIds?: string[];
 }

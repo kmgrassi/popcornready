@@ -9,6 +9,10 @@
 
 import type { Clip, Project } from "@popcorn/shared/types";
 import { Asset, clipToAsset } from "@popcorn/shared/assets/types";
+import {
+  assertPhotorealFirstFrame,
+  FirstFrameGuardrailError,
+} from "../generative/keyframe";
 
 export const DEFAULT_PROJECT_ID = "default";
 
@@ -81,4 +85,29 @@ export function resolveActiveAsset(
 ): Asset | undefined {
   const activeAssetId = getSelection(project, slotKind, slotKey);
   return activeAssetId ? findAsset(project, activeAssetId) : undefined;
+}
+
+// Resolve the PHOTOREAL first frame for a beat's clip — the single point where a
+// clip's image-to-video first frame is chosen. Reads the beat's active
+// `beat_keyframe` selection and runs it through the first-frame guardrail
+// (Storyboard & Scenes, Part C): a `beat_storyboard` sketch can NEVER be returned
+// here. Returns undefined when the beat has no keyframe yet (caller falls back to
+// the character/hero frame). Throws `FirstFrameGuardrailError` if the active
+// selection is a sketch or otherwise non-photoreal role.
+export function resolveBeatFirstFrameAsset(
+  project: Project,
+  beatId: string
+): Asset | undefined {
+  const asset = resolveActiveAsset(project, "beat_keyframe", beatId);
+  if (!asset) return undefined;
+  // The beat_keyframe slot must hold an actual photoreal `beat_keyframe`. A
+  // selection corrupted to a `scene_anchor` / `character_anchor` / `upload`
+  // would pass the generic first-frame guard (those are valid first frames
+  // elsewhere) but is the wrong upstream asset for this beat. Fail fast here so
+  // a bad selection never seeds/records the wrong frame; hero/scene fallback is
+  // the caller's job when this returns undefined.
+  if (asset.role !== "beat_keyframe") {
+    throw new FirstFrameGuardrailError(asset);
+  }
+  return assertPhotorealFirstFrame(asset);
 }
