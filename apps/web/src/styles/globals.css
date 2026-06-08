@@ -71,9 +71,32 @@
 }
 
 .web-shell {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
+}
+
+.web-shell-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.web-shell-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.web-shell-footer-brand {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
 }
 
 .web-shell-header {
@@ -81,7 +104,7 @@
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 12px 20px;
@@ -214,6 +237,16 @@
 .dashboard-sidebar-footer {
   margin-top: auto;
   padding-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The theme switcher lives in the sidebar footer; let its pill wrap so the
+   full labels fit the narrow (248px) sidebar instead of overflowing. */
+.dashboard-sidebar-footer .theme-switcher {
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .dashboard-primary-action {
