@@ -26,6 +26,7 @@ import {
 } from "../generation-runs";
 import { createFileJudgmentStore } from "../../eval/judgment-store";
 import { V1Store, createStore } from "../store";
+import { planBeats } from "@popcorn/shared/types";
 import {
   AspectRatio,
   BriefVersion,
@@ -145,7 +146,13 @@ const fakeDeps: GenerationDeps = {
       targetLengthSec: input.targetLengthSec,
       style: input.style,
       aspectRatio: input.aspectRatio as AspectRatio,
-      beats: [{ name: "hook", durationSec: 3, intent: "grab attention" }],
+      scenes: [
+        {
+          id: "scene_main",
+          name: "Main",
+          beats: [{ id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" }],
+        },
+      ],
     };
   },
   async selectClips({ plan, clips }) {
@@ -179,6 +186,28 @@ const fakeDeps: GenerationDeps = {
       },
       patches: [],
     };
+  },
+  // Deterministic, offline storyboard tiles: one beat_storyboard asset per beat.
+  async generateStoryboardTiles({ projectId, plan }) {
+    return planBeats(plan).map((beat) => ({
+      id: `tile_${beat.id ?? beat.name}`,
+      schemaVersion: "asset.v1" as const,
+      projectId,
+      kind: "image" as const,
+      role: "beat_storyboard" as const,
+      depicts: { beatId: beat.id ?? beat.name },
+      media: {
+        url: `/generated/tile_${beat.id ?? beat.name}.png`,
+        filename: `tile_${beat.id ?? beat.name}.png`,
+        durationSec: beat.durationSec,
+      },
+      source: "generated" as const,
+      provenance: {
+        provider: "mock",
+        prompt: `sketch: ${beat.intent}`,
+        inputs: { beatId: beat.id ?? beat.name },
+      },
+    }));
   },
 };
 
@@ -292,6 +321,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
       .map((e) => (e as Extract<EventRecord, { kind: "stage_begin" }>).type);
     assert.deepEqual(stageBeginOrder, [
       "creative_plan",
+      "storyboard",
       "timeline_assembly",
       "quality_review",
     ]);
@@ -302,9 +332,20 @@ test("runGenerationJob emits stages in the documented order on success", async (
       .map((e) => (e as Extract<EventRecord, { kind: "stage_succeed" }>).type);
     assert.deepEqual(stageSucceeds, [
       "creative_plan",
+      "storyboard",
       "timeline_assembly",
       "quality_review",
     ]);
+
+    // The storyboard stage emits exactly one `image` (beat_storyboard) item per
+    // beat — the fakeDeps plan has a single beat, so one tile.
+    const storyboardItems = events.filter(
+      (e) =>
+        e.kind === "item_start" &&
+        e.stageType === "storyboard" &&
+        e.itemKind === "image"
+    );
+    assert.equal(storyboardItems.length, 1, "one storyboard tile per beat");
 
     // Stages attach the underlying generation job so the run can aggregate.
     const attached = events
@@ -504,7 +545,7 @@ test("runGenerationJob fails the active stage when critique yields an empty time
         { kind: "stage_succeed" }
       >[]
     ).map((e) => e.type);
-    assert.deepEqual(succeeded, ["creative_plan", "timeline_assembly"]);
+    assert.deepEqual(succeeded, ["creative_plan", "storyboard", "timeline_assembly"]);
   });
 });
 

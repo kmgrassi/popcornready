@@ -3,11 +3,12 @@ import { promises as fs } from "fs";
 import path from "path";
 import { promisify } from "util";
 import { MODEL, structuredVisionCall } from "@/lib/anthropic";
-import type {
-  Beat,
-  CharacterProfile,
-  EditPlan,
-  VideoSnapshotReview,
+import {
+  type Beat,
+  type CharacterProfile,
+  type EditPlan,
+  planBeats,
+  type VideoSnapshotReview,
 } from "@popcorn/shared/types";
 
 const execFileAsync = promisify(execFile);
@@ -86,7 +87,7 @@ export async function extractVideoSnapshots(input: {
 }
 
 function beatMap(plan: EditPlan): string {
-  return plan.beats
+  return planBeats(plan)
     .map((beat, index) => `${index + 1}. ${beat.name}: ${beat.intent}`)
     .join("\n");
 }

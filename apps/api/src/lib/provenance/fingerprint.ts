@@ -14,7 +14,7 @@
 
 import { createHash } from "crypto";
 import type { Asset, AssetFingerprint, AssetInputs } from "@popcorn/shared/assets/types";
-import type { EditPlan } from "@popcorn/shared/types";
+import { type EditPlan, planBeats } from "@popcorn/shared/types";
 
 // Bump when the hashed payload shape below changes, so fingerprints frozen by an
 // older build are recognised as a different version rather than silently
@@ -97,7 +97,7 @@ function planContent(asset: Asset, plan: EditPlan | null): unknown {
       style: plan.style,
       aspectRatio: plan.aspectRatio,
       // The full arc — every shot's prompt is built from the whole beat map.
-      beats: plan.beats.map((b) => ({
+      beats: planBeats(plan).map((b) => ({
         name: b.name,
         intent: b.intent,
         durationSec: b.durationSec,

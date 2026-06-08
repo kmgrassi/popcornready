@@ -28,6 +28,7 @@ import {
   runGenerationJob,
 } from "../generation";
 import { V1Store, createStore } from "../store";
+import { planBeats } from "@popcorn/shared/types";
 import {
   AspectRatio,
   BriefVersion,
@@ -47,7 +48,13 @@ const fakeDeps: GenerationDeps = {
       targetLengthSec: input.targetLengthSec,
       style: input.style,
       aspectRatio: input.aspectRatio as AspectRatio,
-      beats: [{ name: "hook", durationSec: 3, intent: "grab attention" }],
+      scenes: [
+        {
+          id: "scene_main",
+          name: "Main",
+          beats: [{ id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" }],
+        },
+      ],
     };
   },
   async selectClips({ plan, clips }) {
@@ -81,6 +88,28 @@ const fakeDeps: GenerationDeps = {
       },
       patches: [],
     };
+  },
+  // Deterministic, offline storyboard tiles: one beat_storyboard asset per beat.
+  async generateStoryboardTiles({ projectId, plan }) {
+    return planBeats(plan).map((beat) => ({
+      id: `tile_${beat.id ?? beat.name}`,
+      schemaVersion: "asset.v1" as const,
+      projectId,
+      kind: "image" as const,
+      role: "beat_storyboard" as const,
+      depicts: { beatId: beat.id ?? beat.name },
+      media: {
+        url: `/generated/tile_${beat.id ?? beat.name}.png`,
+        filename: `tile_${beat.id ?? beat.name}.png`,
+        durationSec: beat.durationSec,
+      },
+      source: "generated" as const,
+      provenance: {
+        provider: "mock",
+        prompt: `sketch: ${beat.intent}`,
+        inputs: { beatId: beat.id ?? beat.name },
+      },
+    }));
   },
 };
 

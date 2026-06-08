@@ -1,12 +1,15 @@
 import {
   AspectRatio,
+  Beat,
   Clip,
   EditPlan,
   Patch,
+  planBeats,
   StoryContext,
   Timeline,
   TimelineSegment,
 } from "./types";
+import { randomUUID } from "crypto";
 
 export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
 export const EDIT_GRAPH_COMPILER_VERSION = "edit-graph-compiler.v1" as const;
@@ -151,8 +154,8 @@ export function editGraphBeatId(index: number, name: string): string {
 // derived scheme, which keeps behaviour identical to today while making the id
 // an explicit, persisted field (a later change can swap in fully rename/reorder-
 // stable ids without touching the threading).
-export function ensureBeatIds(plan: { beats: { id?: string; name: string }[] }): void {
-  plan.beats.forEach((beat, index) => {
+export function ensureBeatIds(plan: EditPlan): void {
+  planBeats(plan).forEach((beat, index) => {
     if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
   });
 }
@@ -168,7 +171,7 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     beatsByRole.set(segment.role, (beatsByRole.get(segment.role) ?? 0) + durationSec);
   }
 
-  const beats = [...beatsByRole.entries()].map(([role, durationSec]) => ({
+  const beats: Beat[] = [...beatsByRole.entries()].map(([role, durationSec]) => ({
     name: role || "timeline",
     durationSec,
     intent: role || "Preserve the current edit.",
@@ -178,7 +181,7 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
     style: "current",
     aspectRatio: timeline.aspectRatio,
-    beats,
+    scenes: [{ id: randomUUID(), name: "Main", beats }],
   };
 }
 
@@ -317,7 +320,7 @@ export function synthesizeEditGraph(input: {
   storyContext?: StoryContext | null;
 }): EditGraph {
   const beatIdsByRole = new Map<string, string>();
-  const beats = input.plan.beats.map((beat, index) => {
+  const beats = planBeats(input.plan).map((beat, index) => {
     // Prefer the persisted stable beat id; fall back to the derived id for
     // legacy plans that predate Beat.id.
     const id = beat.id || editGraphBeatId(index, beat.name);

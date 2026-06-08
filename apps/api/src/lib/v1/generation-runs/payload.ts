@@ -49,6 +49,7 @@ type StageSeed = {
 const STAGE_SEEDS: StageSeed[] = [
   { type: "brief_intake" },
   { type: "creative_plan" },
+  { type: "storyboard" },
   { type: "asset_generation" },
   { type: "audio_generation" },
   { type: "timeline_assembly" },

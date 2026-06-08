@@ -488,6 +488,9 @@ export type GenerationRunStatus = JobStatus;
 export type GenerationStageType =
   | "brief_intake"
   | "creative_plan"
+  // Cheap sketch storyboard tiles per beat (Storyboard & Scenes scope), a
+  // review gate before the expensive asset stage.
+  | "storyboard"
   | "asset_generation"
   | "audio_generation"
   | "timeline_assembly"
@@ -500,6 +503,7 @@ export type GenerationStageType =
 export const GATEABLE_GENERATION_STAGE_TYPES = [
   "brief_intake",
   "creative_plan",
+  "storyboard",
   "asset_generation",
   "audio_generation",
   "timeline_assembly",
@@ -620,17 +624,19 @@ export interface GenerationStageItem {
 export const GENERATION_STAGE_ORDER: Record<GenerationStageType, number> = {
   brief_intake: 0,
   creative_plan: 1,
-  asset_generation: 2,
-  audio_generation: 3,
-  timeline_assembly: 4,
-  quality_review: 5,
-  export: 6,
-  ready: 7,
+  storyboard: 2,
+  asset_generation: 3,
+  audio_generation: 4,
+  timeline_assembly: 5,
+  quality_review: 6,
+  export: 7,
+  ready: 8,
 };
 
 export const GENERATION_STAGE_LABELS: Record<GenerationStageType, string> = {
   brief_intake: "Brief",
   creative_plan: "Plan",
+  storyboard: "Storyboard",
   asset_generation: "Visuals",
   audio_generation: "Audio",
   timeline_assembly: "Timeline",

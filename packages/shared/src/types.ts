@@ -178,11 +178,35 @@ export interface Beat {
   intent: string;
 }
 
+// A scene is the continuity unit above a beat (Storyboard & Scenes scope, Part
+// A): a shared setting, cast, and look that its beats inherit. Beats (≈ shots)
+// nest under scenes so panels in a scene share a world instead of each
+// re-rolling its own.
+export interface Scene {
+  id: string;
+  name: string;
+  setting?: string;
+  mood?: string;
+  characterIds?: string[];
+  // The scene_anchor image (establishing look) in the project asset pool.
+  anchorAssetId?: string;
+  beats: Beat[];
+}
+
 export interface EditPlan {
   targetLengthSec: number;
   style: string;
   aspectRatio: AspectRatio;
-  beats: Beat[];
+  // The storyboard as ordered Scenes → Beats (Storyboard & Scenes scope, Part
+  // A). Replaces the former flat `beats: Beat[]`.
+  scenes: Scene[];
+}
+
+// Flatten a plan's scenes into their ordered beats. Consumers that operate at
+// the shot level (asset/storyboard generation, timeline assembly, critique)
+// iterate beats through this helper rather than reaching into `scenes` directly.
+export function planBeats(plan: EditPlan): Beat[] {
+  return plan.scenes.flatMap((scene) => scene.beats);
 }
 
 export interface StoryContext {

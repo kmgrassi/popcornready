@@ -1,15 +1,18 @@
 import { structuredCall } from "../anthropic";
 import {
+  Beat,
   Clip,
   CriticReport,
   EditPlan,
   Patch,
   PlanCritiqueReport,
+  planBeats,
   StoryContext,
   Timeline,
   TimelineSegment,
   UploadedFootagePlanReview,
 } from "@popcorn/shared/types";
+import { randomUUID } from "crypto";
 import { clipCatalog, timelineForPrompt } from "@popcorn/timeline/timeline";
 import {
   compileTimelineViaEditGraph,
@@ -66,7 +69,7 @@ function planText(p: EditPlan): string {
     `style: ${p.style}`,
     `aspect ratio: ${p.aspectRatio}`,
     "beats:",
-    ...p.beats.map(
+    ...planBeats(p).map(
       (b) => `  - ${b.name} (~${b.durationSec}s): ${b.intent}`
     ),
   ].join("\n");
@@ -76,7 +79,7 @@ function storyPlanText(p: EditPlan): string {
   return [
     planText(p),
     "story beat ids:",
-    ...p.beats.map(
+    ...planBeats(p).map(
       (beat, index) =>
         `  - ${beat.id || editGraphBeatId(index, beat.name)}: ${beat.name}`
     ),
@@ -107,14 +110,34 @@ ${storyContextForPrompt(input.storyContext)}
 
 Produce the edit plan.`;
 
-  const plan = await structuredCall<EditPlan>({
+  // The planner emits a flat beat list; we wrap it into a single implicit scene
+  // (Storyboard & Scenes scope, Part A — short clips get one scene rather than
+  // forced hierarchy). PR3 conditions tiles on per-scene anchors when the
+  // planner emits multiple scenes.
+  const raw = await structuredCall<{
+    targetLengthSec: number;
+    style: string;
+    aspectRatio: string;
+    beats: Beat[];
+  }>({
     cachedSystem: sys,
     user,
     schema: planSchema,
     maxTokens: 2000,
   });
-  // Honor the user's explicit aspect ratio choice.
-  plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
+  const plan: EditPlan = {
+    targetLengthSec: raw.targetLengthSec,
+    style: raw.style,
+    // Honor the user's explicit aspect ratio choice.
+    aspectRatio: input.aspectRatio as EditPlan["aspectRatio"],
+    scenes: [
+      {
+        id: randomUUID(),
+        name: "Main",
+        beats: raw.beats ?? [],
+      },
+    ],
+  };
   // Mint stable beat ids at creation so the whole chain links by id, not role.
   ensureBeatIds(plan);
   return plan;
@@ -266,7 +289,7 @@ Produce the edit decisions now.`;
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
   const beatsById = new Map(
-    input.plan.beats.map((beat, index) => [
+    planBeats(input.plan).map((beat, index) => [
       beat.id || editGraphBeatId(index, beat.name),
       beat,
     ])
@@ -292,7 +315,7 @@ Produce the edit decisions now.`;
 
   return compileTimelineViaEditGraph({
     id: "rough_cut",
-    goal: input.goal || input.plan.beats.map((beat) => beat.intent).join(" "),
+    goal: input.goal || planBeats(input.plan).map((beat) => beat.intent).join(" "),
     plan: input.plan,
     timeline,
     clips: input.clips,
