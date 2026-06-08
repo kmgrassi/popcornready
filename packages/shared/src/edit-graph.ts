@@ -156,12 +156,12 @@ export function editGraphBeatId(index: number, name: string): string {
 // stable ids without touching the threading). Ids are minted across the flat,
 // scene-flattened beat order so they stay globally unique within a plan.
 export function ensureBeatIds(plan: {
-  scenes: { id?: string; beats: { id?: string; name: string }[] }[];
+  scenes?: { id?: string; beats?: { id?: string; name: string }[] }[];
 }): void {
   let index = 0;
-  plan.scenes.forEach((scene, sceneIndex) => {
+  (plan.scenes ?? []).forEach((scene, sceneIndex) => {
     if (!scene.id) scene.id = `scene_${sceneIndex + 1}`;
-    scene.beats.forEach((beat) => {
+    (scene.beats ?? []).forEach((beat) => {
       if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
       index += 1;
     });
@@ -192,7 +192,7 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
     style: "current",
     aspectRatio: timeline.aspectRatio,
-    scenes: singleSceneFromBeats(beats, "current"),
+    scenes: singleSceneFromBeats(beats, "Timeline"),
   };
 }
 

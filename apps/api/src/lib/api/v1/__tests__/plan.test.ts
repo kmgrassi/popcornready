@@ -20,9 +20,15 @@ const SAMPLE_PLAN: EditPlan = {
   targetLengthSec: 30,
   style: "fast-paced social ad",
   aspectRatio: "9:16",
-  beats: [
-    { id: "b1", name: "hook", durationSec: 6, intent: "grab attention" },
-    { id: "b2", name: "payoff", durationSec: 8, intent: "deliver the idea" },
+  scenes: [
+    {
+      id: "scene_1",
+      name: "Scene 1",
+      beats: [
+        { id: "b1", name: "hook", durationSec: 6, intent: "grab attention" },
+        { id: "b2", name: "payoff", durationSec: 8, intent: "deliver the idea" },
+      ],
+    },
   ],
 };
 

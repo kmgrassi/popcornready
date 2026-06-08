@@ -63,6 +63,7 @@ export function AppLayout() {
           <a href="/#how">How it works</a>
           <a href="/#pricing">Pricing</a>
           <Link to="/studio">Studio</Link>
+          <Link to="/storyboard">Storyboard</Link>
           <AuthNavButton />
         </nav>
         <ThemeToggle />
@@ -194,6 +195,7 @@ export function AuthenticatedAppLayout() {
         <header className="dashboard-topbar">
           <nav className="dashboard-topnav" aria-label="Utilities">
             <Link to="/studio">Studio</Link>
+            <Link to="/storyboard">Storyboard</Link>
             <Link to="/evals">Evals</Link>
             <Link to="/admin">Admin</Link>
           </nav>

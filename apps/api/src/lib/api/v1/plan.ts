@@ -30,6 +30,7 @@ import type {
   PlanCritiqueReport,
   StoryContext,
 } from "@popcorn/shared/types";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import type {
   CompositionPlan,
   PlannedBeat,
@@ -118,7 +119,7 @@ function parseTargetLength(value: unknown, fields: FieldError[]): number {
 // yet (no media generated — §3), so every beat starts at generate_video; the
 // beat-scoped media tools (P2) flip these as assets land.
 function beatsToPlannedBeats(plan: EditPlan): PlannedBeat[] {
-  return plan.beats.map((beat) => ({
+  return planBeats(plan).map((beat) => ({
     name: beat.name,
     intent: beat.intent,
     durationSec: beat.durationSec,
@@ -324,7 +325,7 @@ function composeGoal(
   if (priorPlan) {
     parts.push(
       "\nPrevious plan beats:",
-      ...priorPlan.beats.map(
+      ...planBeats(priorPlan).map(
         (b) => `  - ${b.name} (~${b.durationSec}s): ${b.intent}`
       )
     );
@@ -486,7 +487,7 @@ export async function createPlanCritique(
   const goal =
     typeof body.goal === "string" && body.goal.trim()
       ? body.goal.trim()
-      : plan.beats.map((b) => b.intent).join(" ");
+      : planBeats(plan).map((b) => b.intent).join(" ");
 
   const report: PlanCritiqueReport = await deps.critiquePlan({
     goal,
@@ -519,11 +520,12 @@ function compositionToEditPlan(
     ),
     style,
     aspectRatio,
-    beats: composition.plannedBeats.map((b) => ({
+    scenes: singleSceneFromBeats(composition.plannedBeats.map((b, index) => ({
+      id: `beat_${index + 1}_${b.name || "untitled"}`,
       name: b.name,
       intent: b.intent,
       durationSec: b.durationSec,
-    })),
+    }))),
   };
 }
 

@@ -198,10 +198,11 @@ export interface EditPlan {
   scenes: Scene[];
 }
 
-// Flatten a plan's scenes into the ordered beat list. Use wherever code needs a
-// flat beat list (asset loops, prompt building, segment mapping).
-export function planBeats(plan: EditPlan): Beat[] {
-  return plan.scenes.flatMap((scene) => scene.beats);
+// Read-helper: flatten a plan's scenes into their ordered beats. Consumers that
+// only care about the beat sequence (timeline, edit-graph, storyboard tiles)
+// use this rather than reaching into `scene.beats` directly.
+export function planBeats(plan: Pick<EditPlan, "scenes">): Beat[] {
+  return (plan.scenes ?? []).flatMap((scene) => scene.beats ?? []);
 }
 
 // Wrap a flat list of beats in a single implicit scene. Use when constructing a

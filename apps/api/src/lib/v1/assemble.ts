@@ -21,7 +21,13 @@ import {
 } from "@popcorn/shared/edit-graph";
 import { sanitizeTimeline } from "@popcorn/timeline/timeline";
 import { randomUUID } from "crypto";
-import { Clip, EditPlan, StoryContext } from "@popcorn/shared/types";
+import {
+  Clip,
+  EditPlan,
+  planBeats,
+  singleSceneFromBeats,
+  StoryContext,
+} from "@popcorn/shared/types";
 import { ApiError } from "./errors";
 import { V1Store } from "./store";
 import { assetToClip, briefToStoryContext } from "./generation/prepare";
@@ -111,11 +117,12 @@ function planFromComposition(
     targetLengthSec: brief.targetLengthSec,
     style: brief.style || "fast-paced social ad",
     aspectRatio: brief.aspectRatio,
-    beats: composition.plannedBeats.map((b) => ({
+    scenes: singleSceneFromBeats(composition.plannedBeats.map((b, index) => ({
+      id: `beat_${index + 1}_${b.name || "untitled"}`,
       name: b.name,
       durationSec: b.durationSec,
       intent: b.intent,
-    })),
+    }))),
   };
   ensureBeatIds(plan);
   return plan;
@@ -136,15 +143,15 @@ function parsePlan(value: unknown): EditPlan {
     aspectRatio: (typeof raw.aspectRatio === "string"
       ? raw.aspectRatio
       : "9:16") as EditPlan["aspectRatio"],
-    beats: beats.map((b) => {
+    scenes: singleSceneFromBeats(beats.map((b) => {
       const beat = b && typeof b === "object" ? (b as Record<string, unknown>) : {};
       return {
-        ...(typeof beat.id === "string" ? { id: beat.id } : {}),
+        id: typeof beat.id === "string" ? beat.id : "",
         name: typeof beat.name === "string" ? beat.name : "beat",
         durationSec: typeof beat.durationSec === "number" ? beat.durationSec : 3,
         intent: typeof beat.intent === "string" ? beat.intent : "",
       };
-    }),
+    })),
   };
   ensureBeatIds(plan);
   return plan;
@@ -261,7 +268,8 @@ export async function resolveAssemble(
   const goal =
     typeof body.goal === "string" && body.goal.trim()
       ? body.goal.trim()
-      : plan.beats.map((b) => b.intent).filter(Boolean).join(" ") || "Assemble a timeline.";
+      : planBeats(plan).map((b) => b.intent).filter(Boolean).join(" ") ||
+        "Assemble a timeline.";
 
   const showCaptions =
     body.showCaptions === undefined ? undefined : Boolean(body.showCaptions);
@@ -424,7 +432,14 @@ export async function runTimelineCritique(args: {
     targetLengthSec: 0,
     style: "",
     aspectRatio: timeline.aspectRatio,
-    beats: [...beatsByName.values()].map((b) => ({ ...b, durationSec: 0 })),
+    scenes: singleSceneFromBeats(
+      [...beatsByName.values()].map((b, index) => ({
+        id: b.id ?? `beat_${index + 1}_${b.name || "untitled"}`,
+        name: b.name,
+        intent: b.intent,
+        durationSec: 0,
+      }))
+    ),
   };
 
   const referencedClipIds = new Set(timeline.segments.map((s) => s.clipId));

@@ -22,6 +22,7 @@ import {
   runTimelineCritique,
 } from "../assemble";
 import { V1Store, createStore } from "../store";
+import { planBeats } from "@popcorn/shared/types";
 import {
   AspectRatio,
   SCHEMA,
@@ -37,6 +38,7 @@ const NOW = "2026-06-05T12:00:00.000Z";
 const fakeAssembleDeps: AssembleDeps = {
   async selectClips({ plan, clips }) {
     const visual = clips.filter((c) => (c.kind || "video") !== "audio");
+    const beats = planBeats(plan);
     return {
       aspectRatio: plan.aspectRatio,
       fps: 30,
@@ -45,8 +47,8 @@ const fakeAssembleDeps: AssembleDeps = {
         clipId: c.id,
         sourceInSec: 0,
         sourceOutSec: Math.min(2, c.durationSec),
-        role: plan.beats[0]?.name || "hook",
-        beatId: plan.beats[0]?.id,
+        role: beats[0]?.name || "hook",
+        beatId: beats[0]?.id,
         reason: `select ${c.id}`,
       })),
     };

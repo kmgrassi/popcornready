@@ -8,6 +8,7 @@ import { AdminRoute } from "./components/auth/AdminRoute";
 import { useAuth } from "./components/auth/AuthProvider";
 import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
+import { StoryboardPage } from "./routes/StoryboardPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
@@ -52,6 +53,7 @@ export function App() {
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/brand" element={<BrandKitPage />} />
+          <Route path="/storyboard" element={<StoryboardPage />} />
           <Route
             path="/settings"
             element={
