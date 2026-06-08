@@ -27,13 +27,22 @@ styling work must **not** add to it. The direction (see
 components, on top of a small global token layer.** Vite supports `*.module.css`
 natively — no CSS-in-JS runtime or new dependency.
 
-The **only** global stylesheets (imported once in `apps/web/src/main.tsx`):
+The **target** global layer — the only place *new* global styles belong — is
+three files imported once in `apps/web/src/main.tsx`:
 
 - `styles/tokens.css` — design tokens as CSS variables (colors, spacing, radii,
   type scale, z-index) **and** the theme variants (`:root`,
   `:root[data-theme="…"]`). This is the single source of truth for theming.
 - `styles/base.css` — resets, `box-sizing`, `html/body`, base element defaults.
 - `styles/utilities.css` — a *tiny* set of truly app-wide helpers (e.g. `.muted`).
+
+**Legacy globals still exist and must stay until migrated.** `main.tsx` also
+imports `styles/globals.css` (the monolith) and `styles/studio-secondary.css`,
+and some routes import their own global sheet (e.g. `DashboardCollectionsPage`
+imports `styles/dashboard-collections.css`). These still back live pages — do
+**not** delete, empty, or stop importing them until the components that depend
+on them have been moved to modules. The rule is *don't add to them*, not *remove
+them now*.
 
 Everything else is **component/route-scoped**: co-locate a `Foo.module.css` next
 to `Foo.tsx`, import it as `import styles from "./Foo.module.css"`, and reference
@@ -50,8 +59,10 @@ variant), then use `var(--token)` — never inline a hex.
 
 Rules for agents:
 
-- Do **not** add component or page rules to `globals.css`. Treat it as read-only
-  legacy that is being retired.
+- Do **not** add component or page rules to `globals.css` (or the other legacy
+  global sheets). They're being retired, but they still style live pages — leave
+  the existing rules in place until their components are migrated; just stop
+  growing them.
 - New component/route → new co-located `*.module.css`. Use `var(--token)` for
   every color/spacing value where a token exists; no magic hex/px.
 - Don't introduce a second theming mechanism (CSS-in-JS, inline style themes,
