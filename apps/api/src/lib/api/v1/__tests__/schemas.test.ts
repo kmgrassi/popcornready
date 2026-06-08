@@ -9,6 +9,7 @@ import {
   parsePagination,
   parseRegisterAsset,
   parseUpdateAssetContext,
+  parseUpdateProjectPlan,
 } from "../schemas";
 
 function expectApiError(fn: () => unknown, code: string): ApiError {
@@ -200,6 +201,73 @@ test("parsePagination enforces limit bounds", () => {
 
   expectApiError(
     () => parsePagination(new URLSearchParams("limit=500")),
+    "validation_failed"
+  );
+});
+
+test("parseUpdateProjectPlan accepts scenes -> beats with stable ids", () => {
+  const plan = parseUpdateProjectPlan({
+    targetLengthSec: 30,
+    style: "punchy",
+    aspectRatio: "9:16",
+    scenes: [
+      {
+        id: "scene_1",
+        name: "Setup",
+        setting: "kitchen, morning",
+        characterIds: ["char_a"],
+        beats: [
+          { id: "beat_1", name: "hook", intent: "open strong", durationSec: 3 },
+          { id: "beat_2", name: "problem", intent: "show pain", durationSec: 4 },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(plan.scenes?.length, 1);
+  assert.equal(plan.scenes?.[0].id, "scene_1");
+  assert.deepEqual(
+    plan.scenes?.[0].beats.map((b) => b.id),
+    ["beat_1", "beat_2"]
+  );
+  // The flattened `beats` view is derived from scenes and preserves ids/order.
+  assert.deepEqual(plan.beats.map((b) => b.id), ["beat_1", "beat_2"]);
+});
+
+test("parseUpdateProjectPlan rejects a beat with no id", () => {
+  expectApiError(
+    () =>
+      parseUpdateProjectPlan({
+        targetLengthSec: 30,
+        style: "x",
+        aspectRatio: "9:16",
+        scenes: [
+          { id: "scene_1", name: "S", beats: [{ name: "b", intent: "i", durationSec: 2 }] },
+        ],
+      }),
+    "validation_failed"
+  );
+});
+
+test("parseUpdateProjectPlan rejects duplicate beat ids across scenes", () => {
+  expectApiError(
+    () =>
+      parseUpdateProjectPlan({
+        targetLengthSec: 30,
+        style: "x",
+        aspectRatio: "9:16",
+        scenes: [
+          { id: "s1", name: "S1", beats: [{ id: "dup", name: "a", intent: "i", durationSec: 2 }] },
+          { id: "s2", name: "S2", beats: [{ id: "dup", name: "b", intent: "i", durationSec: 2 }] },
+        ],
+      }),
+    "validation_failed"
+  );
+});
+
+test("parseUpdateProjectPlan rejects a missing scenes array", () => {
+  expectApiError(
+    () => parseUpdateProjectPlan({ targetLengthSec: 30, style: "x", aspectRatio: "9:16" }),
     "validation_failed"
   );
 });

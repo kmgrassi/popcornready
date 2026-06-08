@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { RunProgressPage } from "./routes/RunProgressPage";
+import { StoryboardPage } from "./routes/StoryboardPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
@@ -31,6 +32,7 @@ export function App() {
           }
         />
         <Route path="/projects/:projectId/runs/:runId" element={<RunProgressPage />} />
+        <Route path="/projects/:projectId/storyboard" element={<StoryboardPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="*" element={<Placeholder name="Not found" />} />

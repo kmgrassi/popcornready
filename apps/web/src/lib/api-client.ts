@@ -4,7 +4,7 @@ import type {
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
-import type { Project } from "@popcorn/shared/types";
+import type { EditPlan, Project } from "@popcorn/shared/types";
 import type { GenerationRunDetail } from "./v1/generation-runs/status";
 import {
   authenticatedFetch,
@@ -149,6 +149,14 @@ export interface StudioProjectResponse {
   project: Project | null;
 }
 
+export interface RegenerateBeatTileResponse {
+  projectId: string;
+  beatId: string;
+  sceneId: string;
+  storyboardAssetId: string | null;
+  status: "regenerated" | "queued" | "pending_generator";
+}
+
 function studioProjectFromV1(project: V1Project): Project {
   return {
     id: project.id,
@@ -176,6 +184,20 @@ export const v1Api = {
   getProject: (projectId: string) =>
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
+    ),
+  // Persist an edited storyboard plan (Scenes -> Beats). Scene/beat ids must be
+  // stable across edits; the API validates them as unique + non-empty.
+  updateProjectPlan: (projectId: string, plan: EditPlan) =>
+    apiRequest<ProjectResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/plan`,
+      { method: "PUT", body: plan }
+    ),
+  // Regenerate the storyboard sketch tile for a single beat (recompute-affected
+  // only — triggers generation for just this beat).
+  regenerateBeatTile: (projectId: string, beatId: string) =>
+    apiRequest<RegenerateBeatTileResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard/beats/${encodeURIComponent(beatId)}/regenerate`,
+      { method: "POST", body: {} }
     ),
   getGenerationRun: (
     projectId: string,

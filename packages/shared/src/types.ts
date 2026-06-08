@@ -178,11 +178,31 @@ export interface Beat {
   intent: string;
 }
 
+// A Scene is the continuity tier above beats (Storyboard & Scenes — Part A): a
+// shared setting/cast/look its beats inherit. Owned by the Scene-tier PR (PR1 of
+// the storyboard scope); declared here as the shared contract. Ids are stable
+// like Beat.id so assets/provenance reference scenes/beats by id across edits.
+export interface Scene {
+  id: string;
+  name: string;
+  setting?: string;
+  mood?: string;
+  characterIds?: string[];
+  anchorAssetId?: string;
+  beats: Beat[];
+}
+
 export interface EditPlan {
   targetLengthSec: number;
   style: string;
   aspectRatio: AspectRatio;
   beats: Beat[];
+  // Storyboard = ordered Scenes → ordered Beats (Storyboard & Scenes scope).
+  // Owned by PR1 (Scene tier). The full pipeline migration of consumers from
+  // the flat `beats` to `scenes` is PR1's slice; this PR (PR6 — editing) reads
+  // and persists `scenes` and leaves `beats` in place for unmigrated consumers
+  // to avoid a cross-cutting break PR1 will reconcile at merge.
+  scenes?: Scene[];
 }
 
 export interface StoryContext {

@@ -22,6 +22,7 @@ export type AssetRole =
   | "character_anchor"
   | "scene_anchor"
   | "beat_keyframe"
+  | "beat_storyboard"
   | "beat_clip"
   | "soundtrack"
   | "voiceover"

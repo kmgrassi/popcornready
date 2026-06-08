@@ -2,6 +2,12 @@
 // Validation is intentionally hand-written (no schema library) to match the
 // rest of the codebase. Validators throw ApiError("validation_failed").
 
+import type {
+  AspectRatio as SharedAspectRatio,
+  Beat,
+  EditPlan,
+  Scene,
+} from "@popcorn/shared/types";
 import { ApiError, FieldError, validationError } from "./errors";
 
 export const SCHEMA_VERSIONS = {
@@ -1280,4 +1286,155 @@ export function parseDiscoverSearchQuery(searchParams: URLSearchParams): {
     });
   }
   return { q, ...parseDiscoverAssetsQuery(searchParams) };
+}
+
+// --- Storyboard plan editing (PR6) -----------------------------------------
+//
+// Validates an EditPlan posted from the storyboard editor. The plan is Scenes ->
+// Beats; every scene and beat MUST carry a stable `id` so downstream
+// assets/provenance keep referencing the same nodes across edits. We reject a
+// plan with missing/duplicate ids rather than silently re-mint them.
+
+function requireNumber(
+  value: unknown,
+  path: string,
+  fields: FieldError[],
+  opts: { min?: number; max?: number } = {}
+): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    fields.push({ path, message: "Must be a finite number." });
+    return undefined;
+  }
+  if (opts.min !== undefined && value < opts.min) {
+    fields.push({ path, message: `Must be >= ${opts.min}.` });
+    return undefined;
+  }
+  if (opts.max !== undefined && value > opts.max) {
+    fields.push({ path, message: `Must be <= ${opts.max}.` });
+    return undefined;
+  }
+  return value;
+}
+
+function parseBeat(
+  input: unknown,
+  path: string,
+  fields: FieldError[],
+  seenIds: Set<string>
+): Beat | undefined {
+  if (!isPlainObject(input)) {
+    fields.push({ path, message: "Must be an object." });
+    return undefined;
+  }
+  const id = requireString(input.id, `${path}.id`, fields);
+  const name = requireString(input.name, `${path}.name`, fields);
+  const intent = requireString(input.intent, `${path}.intent`, fields);
+  const durationSec = requireNumber(input.durationSec, `${path}.durationSec`, fields, {
+    min: 0,
+    max: 600,
+  });
+  if (id) {
+    if (seenIds.has(id)) {
+      fields.push({ path: `${path}.id`, message: `Duplicate id "${id}".` });
+    } else {
+      seenIds.add(id);
+    }
+  }
+  if (!id || !name || !intent || durationSec === undefined) return undefined;
+  return { id, name, intent, durationSec };
+}
+
+function parseScene(
+  input: unknown,
+  path: string,
+  fields: FieldError[],
+  sceneIds: Set<string>,
+  beatIds: Set<string>
+): Scene | undefined {
+  if (!isPlainObject(input)) {
+    fields.push({ path, message: "Must be an object." });
+    return undefined;
+  }
+  const id = requireString(input.id, `${path}.id`, fields);
+  const name = requireString(input.name, `${path}.name`, fields);
+  const setting = optionalString(input.setting, `${path}.setting`, fields);
+  const mood = optionalString(input.mood, `${path}.mood`, fields);
+  const anchorAssetId = optionalString(input.anchorAssetId, `${path}.anchorAssetId`, fields);
+  const characterIds = optionalStringArray(input.characterIds, `${path}.characterIds`, fields);
+
+  if (id) {
+    if (sceneIds.has(id)) {
+      fields.push({ path: `${path}.id`, message: `Duplicate scene id "${id}".` });
+    } else {
+      sceneIds.add(id);
+    }
+  }
+
+  if (!Array.isArray(input.beats)) {
+    fields.push({ path: `${path}.beats`, message: "Must be an array." });
+    return undefined;
+  }
+  const beats: Beat[] = [];
+  input.beats.forEach((b, i) => {
+    const beat = parseBeat(b, `${path}.beats[${i}]`, fields, beatIds);
+    if (beat) beats.push(beat);
+  });
+
+  if (!id || !name) return undefined;
+  return {
+    id,
+    name,
+    ...(setting ? { setting } : {}),
+    ...(mood ? { mood } : {}),
+    ...(characterIds ? { characterIds } : {}),
+    ...(anchorAssetId ? { anchorAssetId } : {}),
+    beats,
+  };
+}
+
+export function parseUpdateProjectPlan(input: unknown): EditPlan {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  const targetLengthSec = requireNumber(input.targetLengthSec, "targetLengthSec", fields, {
+    min: 1,
+    max: 3600,
+  });
+  const style = requireString(input.style, "style", fields);
+  const aspectRatio = parseEnum<SharedAspectRatio>(
+    input.aspectRatio,
+    ASPECT_RATIOS as SharedAspectRatio[],
+    "aspectRatio",
+    fields
+  );
+
+  if (!Array.isArray(input.scenes)) {
+    fields.push({ path: "scenes", message: "Must be an array of scenes." });
+    throwIfInvalid(fields);
+  }
+
+  const sceneIds = new Set<string>();
+  const beatIds = new Set<string>();
+  const scenes: Scene[] = [];
+  (input.scenes as unknown[]).forEach((s, i) => {
+    const scene = parseScene(s, `scenes[${i}]`, fields, sceneIds, beatIds);
+    if (scene) scenes.push(scene);
+  });
+
+  throwIfInvalid(fields);
+
+  // `beats` is the flattened view kept for unmigrated consumers (PR1 reconciles
+  // this at merge). Derive it from scenes so the two stay consistent.
+  const beats: Beat[] = scenes.flatMap((scene) => scene.beats);
+
+  return {
+    targetLengthSec: targetLengthSec as number,
+    style: style as string,
+    aspectRatio: aspectRatio as SharedAspectRatio,
+    scenes,
+    beats,
+  };
 }
