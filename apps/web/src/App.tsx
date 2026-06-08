@@ -10,6 +10,7 @@ import { BrandKitPage } from "./routes/BrandKitPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
+import { NewProjectPage } from "./routes/NewProjectPage";
 import { SignupPage } from "./routes/SignupPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
@@ -23,6 +24,7 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
+        <Route path="/projects/new" element={<NewProjectPage />} />
         <Route
           path="/projects"
           element={
