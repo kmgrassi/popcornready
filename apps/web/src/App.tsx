@@ -10,6 +10,7 @@ import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
+import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
 // apps/web/src/routes/* and adds exactly one child <Route> here.
@@ -19,6 +20,56 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
+        <Route
+          path="/projects"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Project library"
+              title="Projects"
+              description="Project browsing and management will land in the dashboard UI track."
+            />
+          }
+        />
+        <Route
+          path="/uploads"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Source footage"
+              title="Uploads"
+              description="Uploaded clips and source media will appear here as the library work lands."
+            />
+          }
+        />
+        <Route
+          path="/templates"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Starting points"
+              title="Templates"
+              description="Template galleries will give each new cut a focused creative starting point."
+            />
+          }
+        />
+        <Route
+          path="/brand"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Identity"
+              title="Brand Kit"
+              description="Logos, colors, fonts, and defaults will be managed here."
+            />
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Workspace controls"
+              title="Settings"
+              description="Account and workspace preferences will move into this section."
+            />
+          }
+        />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
