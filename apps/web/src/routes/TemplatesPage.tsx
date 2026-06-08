@@ -78,9 +78,7 @@ export function TemplatesPage() {
 
       <nav className="studio-secondary-pills" aria-label="Template categories">
         {TEMPLATE_GROUPS.map((group) => (
-          <span key={group}>
-            {group}
-          </span>
+          <span key={group}>{group}</span>
         ))}
       </nav>
 

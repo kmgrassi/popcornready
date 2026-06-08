@@ -47,7 +47,10 @@ export function UploadsPage() {
       <section className="studio-upload-drop">
         <div>
           <h2>Add footage</h2>
-          <p>Drag support lands with persisted uploads; select files to stage a local batch now.</p>
+          <p>
+            Drag support lands with persisted uploads; select files to stage a
+            local batch now.
+          </p>
         </div>
         <label className="studio-upload-button">
           Choose files
