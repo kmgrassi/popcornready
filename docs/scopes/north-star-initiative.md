@@ -27,6 +27,7 @@ them, records the cross-cutting findings, and lays out the build order.
 | Lane | Scope doc | Role |
 |------|-----------|------|
 | Story development & agent handoff | `docs/scopes/story-development-agent-handoff.md` | Adds the missing treatment/script layer before the existing scene/beat plan, reusing run-stage artifacts and existing project/brief/plan/composition surfaces first. |
+| Structured outputs to tool calls | `docs/scopes/structured-outputs-to-tool-calls.md` | Scopes the migration from fixed structured JSON calls to durable async tool invocations, including resume semantics and model-readable tool errors. |
 
 ## Cross-cutting findings (surfaced by the audit)
 
