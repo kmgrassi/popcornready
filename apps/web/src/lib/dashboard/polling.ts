@@ -67,10 +67,12 @@ export function useDashboardPolling<T>({
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
+      const isStalePoll = () =>
+        cancelled || controller.signal.aborted || controllerRef.current !== controller;
 
       try {
         const next = await fetcher(controller.signal);
-        if (cancelled) return;
+        if (isStalePoll()) return;
 
         setData(next);
         setError(null);
@@ -82,7 +84,7 @@ export function useDashboardPolling<T>({
           timerRef.current = setTimeout(poll, nextInterval);
         }
       } catch (err) {
-        if (cancelled || controller.signal.aborted) return;
+        if (isStalePoll()) return;
         setError(err instanceof Error ? err : new Error(String(err)));
         setLoading(false);
         timerRef.current = setTimeout(poll, errorIntervalMs);
