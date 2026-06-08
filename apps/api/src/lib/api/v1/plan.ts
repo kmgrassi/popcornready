@@ -165,6 +165,25 @@ interface PlanInputs {
   briefVersionId: string;
 }
 
+// Resolve a brief version by id, paging through every revision. `listBriefVersions`
+// is the only read path and returns a single page, so a valid older id beyond the
+// first page must not surface as a false `not_found`.
+async function findBriefVersionById(
+  deps: PlanDeps,
+  workspaceId: string,
+  projectId: string,
+  briefVersionId: string
+) {
+  let cursor: string | null = null;
+  do {
+    const page = await deps.listBriefVersions(workspaceId, projectId, 200, cursor);
+    const found = page.items.find((v) => v.id === briefVersionId);
+    if (found) return found;
+    cursor = page.nextCursor;
+  } while (cursor);
+  return undefined;
+}
+
 async function resolvePlanInputs(
   deps: PlanDeps,
   auth: AuthContext,
@@ -240,14 +259,14 @@ async function resolvePlanInputs(
   }
 
   if (briefVersionId) {
-    // listBriefVersions is the available read path; resolve the version by id.
-    const { items } = await deps.listBriefVersions(
+    // Resolve the version by id, paging through all revisions (not just the
+    // first page) so an older briefVersionId is not a false not_found.
+    const version = await findBriefVersionById(
+      deps,
       auth.workspaceId,
       projectId,
-      200,
-      null
+      briefVersionId
     );
-    const version = items.find((v) => v.id === briefVersionId);
     if (!version) {
       throw new ApiError(
         "not_found",
@@ -427,6 +446,12 @@ export async function createPlanCritique(
   }
 
   let plan: EditPlan;
+  // The metadata actually used for the critique. When critiquing a persisted
+  // composition without an explicit style/aspectRatio, recover them from the
+  // composition's brief so a 16:9 / cinematic plan is not silently re-cast as
+  // the request defaults (fast-paced social ad / 9:16) in the revised plan.
+  let effectiveStyle = style;
+  let effectiveAspectRatio = aspectRatio;
   if (inlinePlan) {
     plan = inlinePlan;
   } else {
@@ -435,7 +460,27 @@ export async function createPlanCritique(
       projectId,
       compositionId
     );
-    plan = compositionToEditPlan(composition, style, aspectRatio);
+    if (
+      (body.style === undefined || body.aspectRatio === undefined) &&
+      composition.briefVersionId
+    ) {
+      const version = await findBriefVersionById(
+        deps,
+        auth.workspaceId,
+        projectId,
+        composition.briefVersionId
+      );
+      const brief = version?.brief;
+      if (brief) {
+        if (body.style === undefined && brief.style) {
+          effectiveStyle = brief.style;
+        }
+        if (body.aspectRatio === undefined && brief.aspectRatio) {
+          effectiveAspectRatio = brief.aspectRatio as EditPlan["aspectRatio"];
+        }
+      }
+    }
+    plan = compositionToEditPlan(composition, effectiveStyle, effectiveAspectRatio);
   }
 
   const goal =
@@ -446,8 +491,8 @@ export async function createPlanCritique(
   const report: PlanCritiqueReport = await deps.critiquePlan({
     goal,
     plan,
-    style,
-    aspectRatio,
+    style: effectiveStyle,
+    aspectRatio: effectiveAspectRatio,
   });
 
   const job = await deps.createJob({
