@@ -115,8 +115,15 @@ export async function apiRequest<T>(
 }
 
 export interface MeResponse {
-  actor: string;
+  actor:
+    | string
+    | {
+        id: string;
+        type?: string;
+        email?: string | null;
+      };
   workspaceId: string;
+  workspaceName?: string;
   authMode: string;
   isLocal: boolean;
 }

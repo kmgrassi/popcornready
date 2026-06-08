@@ -1,6 +1,11 @@
-import { Route, Routes } from "react-router-dom";
-import { AppLayout } from "./components/AppLayout";
+import { Navigate, Route, Routes } from "react-router-dom";
+import {
+  AppLayout,
+  AuthenticatedAppLayout,
+  RootLayout,
+} from "./components/AppLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
+import { useAuth } from "./components/auth/AuthProvider";
 import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
@@ -12,6 +17,7 @@ import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
 import { NewProjectPage } from "./routes/NewProjectPage";
 import { SignupPage } from "./routes/SignupPage";
+import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
 import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
@@ -21,48 +27,66 @@ import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
 export function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
-        <Route index element={<HomePage />} />
-        <Route path="/studio" element={<StudioPage />} />
-        <Route path="/projects/new" element={<NewProjectPage />} />
-        <Route
-          path="/projects"
-          element={
-            <WorkspaceStubPage
-              eyebrow="Project library"
-              title="Projects"
-              description="Project browsing and management will land in the dashboard UI track."
-            />
-          }
-        />
-        <Route path="/uploads" element={<UploadsPage />} />
-        <Route path="/templates" element={<TemplatesPage />} />
-        <Route path="/brand" element={<BrandKitPage />} />
-        <Route
-          path="/settings"
-          element={
-            <WorkspaceStubPage
-              eyebrow="Workspace controls"
-              title="Settings"
-              description="Account and workspace preferences will move into this section."
-            />
-          }
-        />
-        <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
-        <Route path="/evals" element={<EvalsPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route
-          path="/admin/evals"
-          element={
-            <AdminRoute>
-              <AdminEvalsPage />
-            </AdminRoute>
-          }
-        />
-        <Route path="/projects/:projectId/runs/:runId" element={<RunProgressPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="*" element={<Placeholder name="Not found" />} />
+      <Route element={<RootLayout />}>
+        <Route element={<AppLayout />}>
+          <Route index element={<LandingRoute />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+        </Route>
+
+        <Route element={<AuthenticatedAppLayout />}>
+          <Route
+            path="/dashboard"
+            element={<DashboardPlaceholderPage kind="dashboard" />}
+          />
+          <Route
+            path="/projects"
+            element={<DashboardPlaceholderPage kind="projects" />}
+          />
+          <Route path="/projects/new" element={<NewProjectPage />} />
+          <Route path="/runs" element={<DashboardPlaceholderPage kind="runs" />} />
+          <Route
+            path="/assets"
+            element={<DashboardPlaceholderPage kind="assets" />}
+          />
+          <Route
+            path="/outputs"
+            element={<DashboardPlaceholderPage kind="outputs" />}
+          />
+          <Route path="/studio" element={<StudioPage />} />
+          <Route path="/uploads" element={<UploadsPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/brand" element={<BrandKitPage />} />
+          <Route
+            path="/settings"
+            element={
+              <WorkspaceStubPage
+                eyebrow="Workspace controls"
+                title="Settings"
+                description="Account and workspace preferences will move into this section."
+              />
+            }
+          />
+          <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
+          <Route path="/evals" element={<EvalsPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="/admin/evals"
+            element={
+              <AdminRoute>
+                <AdminEvalsPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/projects/:projectId/runs/:runId"
+            element={<RunProgressPage />}
+          />
+        </Route>
+
+        <Route element={<AppLayout />}>
+          <Route path="*" element={<Placeholder name="Not found" />} />
+        </Route>
       </Route>
     </Routes>
   );
@@ -75,4 +99,14 @@ function Placeholder({ name }: { name: string }) {
       <p className="muted">{name} is migrating from Next to Vite SPA.</p>
     </main>
   );
+}
+
+function LandingRoute() {
+  const { status } = useAuth();
+
+  if (status === "disabled" || status === "authenticated") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <HomePage />;
 }

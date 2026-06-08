@@ -1,13 +1,33 @@
-import { useLayoutEffect, type ReactNode } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import { AuthProvider } from "./auth/AuthProvider";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
-import { StudioSidebar } from "./StudioSidebar";
 import ThemeToggle from "./ThemeToggle";
+import { v1Api, type MeResponse } from "../lib/api-client";
 
 const STORAGE_KEY = "popcorn-ready-theme";
 const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
+const DASHBOARD_NAV = [
+  { label: "Home", to: "/dashboard" },
+  { label: "Projects", to: "/projects" },
+  { label: "Runs", to: "/runs" },
+  { label: "Assets", to: "/assets" },
+  { label: "Outputs", to: "/outputs" },
+];
 
 function applyStoredTheme() {
   try {
@@ -22,52 +42,15 @@ function applyStoredTheme() {
   }
 }
 
-export function AppLayout() {
+export function RootLayout() {
   return (
     <RootProviders>
-      <AppShell />
+      <Outlet />
     </RootProviders>
   );
 }
 
-function AppShell() {
-  const { pathname } = useLocation();
-  const workspaceRoutes = [
-    { path: "/studio", label: "Studio" },
-    { path: "/projects", label: "Projects" },
-    { path: "/uploads", label: "Uploads" },
-    { path: "/templates", label: "Templates" },
-    { path: "/brand", label: "Brand Kit" },
-    { path: "/settings", label: "Settings" },
-  ];
-  const activeWorkspaceRoute = workspaceRoutes.find(
-    (route) => pathname === route.path || pathname.startsWith(`${route.path}/`)
-  );
-  const isWorkspaceRoute = Boolean(activeWorkspaceRoute);
-
-  if (isWorkspaceRoute) {
-    return (
-      <div className="workspace-shell">
-        <StudioSidebar />
-        <div className="workspace-content">
-          <header className="workspace-topbar">
-            <div>
-              <p className="workspace-topbar-kicker">Workspace</p>
-              <h1>{activeWorkspaceRoute?.label ?? "Studio"}</h1>
-            </div>
-            <div className="workspace-topbar-actions">
-              <AuthNavButton />
-              <ThemeToggle />
-            </div>
-          </header>
-          <div className="workspace-main">
-            <Outlet />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+export function AppLayout() {
   return (
     <div className="web-shell">
       <header className="web-shell-header">
@@ -85,6 +68,165 @@ function AppShell() {
         <ThemeToggle />
       </header>
       <Outlet />
+    </div>
+  );
+}
+
+export function AuthenticatedAppLayout() {
+  const auth = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [meError, setMeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (auth.status === "loading" || auth.status === "unauthenticated") {
+      return;
+    }
+
+    let cancelled = false;
+
+    v1Api
+      .me()
+      .then((payload) => {
+        if (cancelled) return;
+        setMe(payload);
+        setMeError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMe(null);
+        setMeError(err instanceof Error ? err.message : String(err));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.status]);
+
+  const accountLabel = useMemo(() => {
+    if (auth.user?.email) return auth.user.email;
+    if (me?.actor && typeof me.actor === "object" && me.actor.email) {
+      return me.actor.email;
+    }
+    if (me?.isLocal || auth.status === "disabled") return "Local developer";
+    return "Account";
+  }, [auth.status, auth.user?.email, me]);
+
+  const workspaceLabel = me?.workspaceName ?? me?.workspaceId ?? "Workspace";
+  const authModeLabel =
+    me?.isLocal || auth.status === "disabled"
+      ? "Local mode"
+      : me?.authMode ?? "Hosted mode";
+  const canSignOut = auth.configured && auth.status === "authenticated";
+
+  async function signOut() {
+    if (!canSignOut) return;
+    await auth.signOut();
+    navigate("/", { replace: true });
+  }
+
+  if (auth.status === "loading") {
+    return (
+      <div className="web-shell">
+        <main className="web-shell-main">
+          <h1>Checking session</h1>
+          <p className="muted">Preparing your workspace.</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (auth.status === "unauthenticated") {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
+  }
+
+  return (
+    <div className="dashboard-shell">
+      <aside className="dashboard-sidebar">
+        <Link className="dashboard-brand" to="/dashboard">
+          <LogoMark className="dashboard-logo" />
+          <span>Popcorn Ready</span>
+        </Link>
+
+        <label className="dashboard-workspace-label" htmlFor="workspace-select">
+          Workspace
+        </label>
+        <select
+          id="workspace-select"
+          className="dashboard-workspace-select"
+          value={workspaceLabel}
+          disabled
+          aria-label="Active workspace"
+        >
+          <option value={workspaceLabel}>{workspaceLabel}</option>
+        </select>
+
+        <nav className="dashboard-nav" aria-label="Dashboard">
+          {DASHBOARD_NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/dashboard"}
+              className={({ isActive }) =>
+                isActive ? "dashboard-nav-link active" : "dashboard-nav-link"
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="dashboard-sidebar-footer">
+          <Link className="dashboard-primary-action" to="/studio">
+            New video
+          </Link>
+        </div>
+      </aside>
+
+      <div className="dashboard-content">
+        <header className="dashboard-topbar">
+          <nav className="dashboard-topnav" aria-label="Utilities">
+            <Link to="/studio">Studio</Link>
+            <Link to="/evals">Evals</Link>
+            <Link to="/admin">Admin</Link>
+          </nav>
+          <div className="dashboard-account-cluster">
+            {meError && auth.configured ? (
+              <span className="dashboard-me-error" title={meError}>
+                Account unavailable
+              </span>
+            ) : (
+              <span className="dashboard-auth-mode">{authModeLabel}</span>
+            )}
+            <details className="dashboard-account-menu">
+              <summary>{accountLabel}</summary>
+              <div className="dashboard-account-panel">
+                <span>{workspaceLabel}</span>
+                {canSignOut ? (
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    onClick={() => void signOut()}
+                  >
+                    Sign out
+                  </button>
+                ) : null}
+              </div>
+            </details>
+            <ThemeToggle />
+          </div>
+        </header>
+        <main className="dashboard-route-frame">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
