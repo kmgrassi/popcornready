@@ -4,6 +4,7 @@ import {
   CriticReport,
   EditPlan,
   Patch,
+  planBeats,
   PlanCritiqueReport,
   StoryContext,
   Timeline,
@@ -61,22 +62,32 @@ Hard rules:
   signal about content.`;
 
 function planText(p: EditPlan): string {
-  return [
+  const lines = [
     `target length: ${p.targetLengthSec}s`,
     `style: ${p.style}`,
     `aspect ratio: ${p.aspectRatio}`,
-    "beats:",
-    ...p.beats.map(
-      (b) => `  - ${b.name} (~${b.durationSec}s): ${b.intent}`
-    ),
-  ].join("\n");
+    "scenes:",
+  ];
+  for (const scene of p.scenes) {
+    const meta = [
+      scene.setting ? `setting: ${scene.setting}` : null,
+      scene.mood ? `mood: ${scene.mood}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+    lines.push(`  - scene "${scene.name}"${meta ? ` (${meta})` : ""}`);
+    for (const b of scene.beats) {
+      lines.push(`      • ${b.name} (~${b.durationSec}s): ${b.intent}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function storyPlanText(p: EditPlan): string {
   return [
     planText(p),
     "story beat ids:",
-    ...p.beats.map(
+    ...planBeats(p).map(
       (beat, index) =>
         `  - ${beat.id || editGraphBeatId(index, beat.name)}: ${beat.name}`
     ),
@@ -92,11 +103,17 @@ export async function planEdit(input: {
 }): Promise<EditPlan> {
   const sys = `${PREAMBLE}
 
-TASK: Convert the user's creative goal into a beat-by-beat edit plan. Choose
-beats appropriate to the goal and style (e.g. hook / problem / solution / proof
-/ cta for an ad). Beat durations should roughly sum to the target length.
-Make sure the plan has a clear beginning, middle, payoff, and a reason for
-each scene. Avoid random shot collections.`;
+TASK: Convert the user's creative goal into a storyboard plan organized as
+SCENES, each containing ordered BEATS. A scene is the continuity unit — a shared
+setting, cast, and look that its beats inherit; a beat is one shot (hook /
+problem / solution / proof / cta for an ad, etc.). Group beats that share a
+setting/look into the same scene, and start a new scene when the location, time,
+or look changes. Give each scene a name plus its setting and mood, and (when the
+content has recurring characters) list its characterIds. For a short, single-
+setting clip you may emit a single scene containing all the beats. Beat durations
+should roughly sum to the target length. Make sure the plan has a clear
+beginning, middle, payoff, and a reason for each scene. Avoid random shot
+collections.`;
 
   const user = `Creative goal: ${input.goal}
 Target length: ${input.targetLengthSec}s
@@ -266,7 +283,7 @@ Produce the edit decisions now.`;
     raw.showCaptions === undefined ? undefined : Boolean(raw.showCaptions);
 
   const beatsById = new Map(
-    input.plan.beats.map((beat, index) => [
+    planBeats(input.plan).map((beat, index) => [
       beat.id || editGraphBeatId(index, beat.name),
       beat,
     ])
@@ -292,7 +309,7 @@ Produce the edit decisions now.`;
 
   return compileTimelineViaEditGraph({
     id: "rough_cut",
-    goal: input.goal || input.plan.beats.map((beat) => beat.intent).join(" "),
+    goal: input.goal || planBeats(input.plan).map((beat) => beat.intent).join(" "),
     plan: input.plan,
     timeline,
     clips: input.clips,

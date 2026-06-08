@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Asset } from "@popcorn/shared/assets/types";
 import type { EditPlan, Project } from "@popcorn/shared/types";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import { poolAssets } from "../assets/pool";
 import {
   buildProvenanceGraph,
@@ -55,10 +56,10 @@ function plan(): EditPlan {
     targetLengthSec: 12,
     style: "cinematic",
     aspectRatio: "9:16",
-    beats: [
+    scenes: singleSceneFromBeats([
       { id: "beat_1", name: "hook", durationSec: 4, intent: "open strong" },
       { id: "beat_2", name: "proof", durationSec: 4, intent: "show the result" },
-    ],
+    ]),
   };
 }
 
@@ -140,7 +141,7 @@ test("recomputeFingerprints is deterministic for identical inputs", () => {
 test("editing a beat changes the hash of assets that serve it", () => {
   const before = recomputeFingerprints([keyframe1], plan());
   const edited = plan();
-  edited.beats[0].intent = "open on the strongest, most surprising moment";
+  planBeats(edited)[0].intent = "open on the strongest, most surprising moment";
   const after = recomputeFingerprints([keyframe1], edited);
   assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
 });
@@ -150,7 +151,7 @@ test("editing ANY beat changes a beat-asset's hash (prompt threads the full arc)
   // beat still changes this asset's prompt context and must change its hash.
   const before = recomputeFingerprints([keyframe1], plan());
   const edited = plan();
-  edited.beats[1].intent = "totally different proof";
+  planBeats(edited)[1].intent = "totally different proof";
   const after = recomputeFingerprints([keyframe1], edited);
   assert.notEqual(before.get("kf_1")!.inputHash, after.get("kf_1")!.inputHash);
 });
@@ -169,7 +170,7 @@ test("a beat edit does NOT change the anchor hash (anchors are style-only)", () 
   // beat flags beat assets, but the character anchor (no beat dependence) stays.
   const before = recomputeFingerprints([anchor], plan());
   const edited = plan();
-  edited.beats[0].intent = "open on the strongest moment";
+  planBeats(edited)[0].intent = "open on the strongest moment";
   const after = recomputeFingerprints([anchor], edited);
   assert.equal(before.get("anchor_1")!.inputHash, after.get("anchor_1")!.inputHash);
 });
@@ -216,7 +217,7 @@ test("no change yields an empty candidate set", () => {
 test("a beat edit flags the beat assets (not the anchor) as input_changed", () => {
   const frozen = freeze([anchor, keyframe1, clip1], plan());
   const edited = plan();
-  edited.beats[0].intent = "open on the strongest moment";
+  planBeats(edited)[0].intent = "open on the strongest moment";
   const candidates = computeCandidateStaleSet(frozen, edited);
   const ids = candidates.map((c) => c.assetId).sort();
   assert.deepEqual(ids, ["clip_1", "kf_1"]);
@@ -240,14 +241,14 @@ test("a fingerprint-version mismatch is treated as no baseline, not stale", () =
   // Even with a wildly different plan, an incomparable (old-version) hash must
   // not be reported stale — otherwise a shape bump flags the whole pool.
   const edited = plan();
-  edited.beats[0].intent = "changed";
+  planBeats(edited)[0].intent = "changed";
   assert.deepEqual(computeCandidateStaleSet(frozen, edited), []);
 });
 
 test("a beat edit ripples to a no-beat composite as upstream_stale", () => {
   const frozen = freeze([anchor, keyframe1, clip1, finalVideo], plan());
   const edited = plan();
-  edited.beats[0].intent = "open on the strongest moment";
+  planBeats(edited)[0].intent = "open on the strongest moment";
   const candidates = computeCandidateStaleSet(frozen, edited);
   const final = candidates.find((c) => c.assetId === "final_1");
   assert.ok(final, "final video should be a candidate");
@@ -270,7 +271,7 @@ test("freezeFingerprints is write-once: existing fingerprints are preserved", ()
   const first = freezeFingerprints([keyframe1], plan());
   const originalHash = first[0].provenance!.fingerprint!.inputHash;
   const edited = plan();
-  edited.beats[0].intent = "changed";
+  planBeats(edited)[0].intent = "changed";
   const second = freezeFingerprints(first, edited);
   // The already-frozen baseline must NOT be overwritten, or staleness is lost.
   assert.equal(second[0].provenance!.fingerprint!.inputHash, originalHash);
@@ -279,7 +280,7 @@ test("freezeFingerprints is write-once: existing fingerprints are preserved", ()
 test("freeze then edit then compute surfaces the candidate end-to-end", () => {
   const frozen = freezeFingerprints([anchor, keyframe1, clip1], plan());
   const edited = plan();
-  edited.beats[0].intent = "open on the strongest moment";
+  planBeats(edited)[0].intent = "open on the strongest moment";
   const ids = computeCandidateStaleSet(frozen, edited)
     .map((c) => c.assetId)
     .sort();
@@ -291,7 +292,7 @@ test("assets without a stored fingerprint are never candidates", () => {
   const frozen = freeze([anchor], plan());
   const mixed = [...frozen, keyframe1];
   const edited = plan();
-  edited.beats[0].intent = "changed";
+  planBeats(edited)[0].intent = "changed";
   const candidates = computeCandidateStaleSet(mixed, edited);
   assert.ok(!candidates.some((c) => c.assetId === "kf_1"));
 });

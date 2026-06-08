@@ -1,76 +1,79 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import type { Asset } from "@popcorn/shared/assets/types";
 import type { EditPlan } from "@popcorn/shared/types";
 import { StoryboardEditor } from "../components/storyboard/StoryboardEditor";
 import { v1Api } from "../lib/api-client";
 
-// Storyboard surface for a project (Storyboard & Scenes — PR6 editing). PR5 owns
-// the richer read-only view + tile artifacts; this page loads the project's
-// editable plan and mounts the editor so a user can restructure scenes/beats and
-// regenerate single tiles. If the project has no plan yet, it scaffolds an empty
-// single-scene plan to edit from.
+// Storyboard editing surface for a project. The project-specific route loads
+// the requested project; the dashboard route falls back to the current studio
+// project selector until the project list has first-class storyboard links.
 
 function emptyPlan(): EditPlan {
   return {
     targetLengthSec: 30,
     // The editor exposes no style field, so a scaffolded plan must carry a
-    // non-empty default or the first Save fails `requireString(style)` with no
-    // way to recover in the UI. Mirror the main Editor's default.
+    // non-empty default or the first Save fails with no way to recover in the UI.
     style: "fast-paced social ad",
     aspectRatio: "9:16",
     scenes: [],
-    beats: [],
   };
 }
 
 export function StoryboardPage() {
-  const { projectId } = useParams();
+  const { projectId: routeProjectId } = useParams();
+  const [projectId, setProjectId] = useState<string | null>(
+    routeProjectId ?? null
+  );
   const [plan, setPlan] = useState<EditPlan | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!projectId) return;
     let cancelled = false;
     setLoading(true);
-    v1Api
-      .getProject(projectId)
-      .then((res) => {
+    setProjectId(routeProjectId ?? null);
+
+    const request = routeProjectId
+      ? v1Api.getProject(routeProjectId).then((res) => ({
+          projectId: res.project.id,
+          plan: res.project.plan,
+          assets: [] as Asset[],
+        }))
+      : v1Api.getStoryboard();
+
+    request
+      .then((result) => {
         if (cancelled) return;
-        setPlan(res.project.plan ?? emptyPlan());
-        setError(null);
+        setProjectId(result.projectId);
+        setPlan(result.plan ?? emptyPlan());
+        setAssets(result.assets);
+        setError(result.projectId ? null : "No project found for storyboard editing.");
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? err.message : "Failed to load the storyboard.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
-
-  if (!projectId) {
-    return (
-      <main className="sb-shell">
-        <h1>Storyboard</h1>
-        <p className="muted">This URL is missing a project id.</p>
-      </main>
-    );
-  }
+  }, [routeProjectId]);
 
   if (loading) {
     return (
       <main className="sb-shell">
         <h1>Storyboard</h1>
-        <p className="muted">Loading plan…</p>
+        <p className="muted">Loading plan...</p>
       </main>
     );
   }
 
-  if (error || !plan) {
+  if (error || !projectId || !plan) {
     return (
       <main className="sb-shell">
         <h1>Storyboard</h1>
@@ -82,5 +85,5 @@ export function StoryboardPage() {
     );
   }
 
-  return <StoryboardEditor projectId={projectId} initialPlan={plan} />;
+  return <StoryboardEditor projectId={projectId} initialPlan={plan} assets={assets} />;
 }

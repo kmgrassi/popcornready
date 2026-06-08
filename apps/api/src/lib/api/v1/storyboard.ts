@@ -40,10 +40,6 @@ function findBeatScene(
       return { sceneId: scene.id };
     }
   }
-  // Fall back to the flat beats view for plans not yet migrated to scenes.
-  if (plan.beats?.some((beat) => beat.id === beatId)) {
-    return { sceneId: "" };
-  }
   return null;
 }
 

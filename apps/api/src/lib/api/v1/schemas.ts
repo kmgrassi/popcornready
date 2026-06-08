@@ -1426,15 +1426,10 @@ export function parseUpdateProjectPlan(input: unknown): EditPlan {
 
   throwIfInvalid(fields);
 
-  // `beats` is the flattened view kept for unmigrated consumers (PR1 reconciles
-  // this at merge). Derive it from scenes so the two stay consistent.
-  const beats: Beat[] = scenes.flatMap((scene) => scene.beats);
-
   return {
     targetLengthSec: targetLengthSec as number,
     style: style as string,
     aspectRatio: aspectRatio as SharedAspectRatio,
     scenes,
-    beats,
   };
 }

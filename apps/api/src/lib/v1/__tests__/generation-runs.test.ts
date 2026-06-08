@@ -485,6 +485,7 @@ test("createRunWithSeedStages returns a queued run with all seed stages in order
   assert.deepEqual(types, [
     "brief_intake",
     "creative_plan",
+    "storyboard",
     "asset_generation",
     "audio_generation",
     "timeline_assembly",
@@ -529,7 +530,7 @@ test("createRunWithSeedStages persists run + stages so polling sees the same dat
   assert.equal(polled!.stages.length, created.stages.length);
   assert.deepEqual(
     polled!.stages.map((s) => s.order),
-    [0, 1, 2, 3, 4, 5, 6, 7],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
     "stages should be sorted by order"
   );
 });

@@ -21,6 +21,7 @@ export type AssetKind = "image" | "video" | "audio";
 export type AssetRole =
   | "character_anchor"
   | "scene_anchor"
+  | "beat_storyboard"
   | "beat_keyframe"
   | "beat_storyboard"
   | "beat_clip"

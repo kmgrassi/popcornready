@@ -230,8 +230,6 @@ test("parseUpdateProjectPlan accepts scenes -> beats with stable ids", () => {
     plan.scenes?.[0].beats.map((b) => b.id),
     ["beat_1", "beat_2"]
   );
-  // The flattened `beats` view is derived from scenes and preserves ids/order.
-  assert.deepEqual(plan.beats.map((b) => b.id), ["beat_1", "beat_2"]);
 });
 
 test("parseUpdateProjectPlan rejects a beat with no id", () => {

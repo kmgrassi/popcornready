@@ -170,39 +170,45 @@ export interface Clip {
 
 export interface Beat {
   // Stable id minted at plan creation so assets/segments reference a beat by id
-  // rather than its (non-unique, rename-fragile) `name`. Optional for backward
-  // compatibility with plans persisted before stable ids existed.
-  id?: string;
+  // rather than its (non-unique, rename-fragile) `name`. Required: every beat is
+  // minted with an id at plan creation.
+  id: string;
   name: string; // e.g. "hook", "problem", "solution", "proof", "cta"
   durationSec: number;
   intent: string;
 }
 
-// A Scene is the continuity tier above beats (Storyboard & Scenes — Part A): a
-// shared setting/cast/look its beats inherit. Owned by the Scene-tier PR (PR1 of
-// the storyboard scope); declared here as the shared contract. Ids are stable
-// like Beat.id so assets/provenance reference scenes/beats by id across edits.
+// A Scene is the continuity tier above beats: a shared setting, cast, and look
+// that its beats inherit. The storyboard is an ordered list of scenes, each
+// containing ordered beats (≈ shots). See docs/scopes/storyboard-scenes.md.
 export interface Scene {
-  id: string;
-  name: string;
-  setting?: string;
-  mood?: string;
-  characterIds?: string[];
-  anchorAssetId?: string;
-  beats: Beat[];
+  id: string; // stable, like Beat.id
+  name: string; // "Setup", "The reveal", …
+  setting?: string; // location / time / environment
+  mood?: string; // lighting, tone
+  characterIds?: string[]; // cast present in this scene
+  anchorAssetId?: string; // the scene_anchor image (establishing look)
+  beats: Beat[]; // ≈ shots; inherit the scene's setting/cast/look
 }
 
 export interface EditPlan {
   targetLengthSec: number;
   style: string;
   aspectRatio: AspectRatio;
-  beats: Beat[];
-  // Storyboard = ordered Scenes → ordered Beats (Storyboard & Scenes scope).
-  // Owned by PR1 (Scene tier). The full pipeline migration of consumers from
-  // the flat `beats` to `scenes` is PR1's slice; this PR (PR6 — editing) reads
-  // and persists `scenes` and leaves `beats` in place for unmigrated consumers
-  // to avoid a cross-cutting break PR1 will reconcile at merge.
-  scenes?: Scene[];
+  scenes: Scene[];
+}
+
+// Read-helper: flatten a plan's scenes into their ordered beats. Consumers that
+// only care about the beat sequence (timeline, edit-graph, storyboard tiles)
+// use this rather than reaching into `scene.beats` directly.
+export function planBeats(plan: Pick<EditPlan, "scenes">): Beat[] {
+  return (plan.scenes ?? []).flatMap((scene) => scene.beats ?? []);
+}
+
+// Wrap a flat list of beats in a single implicit scene. Use when constructing a
+// plan from a flat beat list (e.g. short clips that don't need explicit scenes).
+export function singleSceneFromBeats(beats: Beat[], name = "Scene 1"): Scene[] {
+  return [{ id: "scene_1", name, beats }];
 }
 
 export interface StoryContext {

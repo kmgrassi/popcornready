@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import type { Asset } from "@popcorn/shared/assets/types";
 import type { Beat, EditPlan, Scene } from "@popcorn/shared/types";
 import { v1Api } from "../../lib/api-client";
 import "./storyboard.css";
@@ -29,23 +30,8 @@ function emptyScene(): Scene {
   return { id: newId("scene"), name: "New scene", beats: [emptyBeat()] };
 }
 
-// A plan always presents at least one scene to the editor. A plan that only has
-// the flat `beats` view (not yet migrated to scenes) is wrapped in one implicit
-// scene so it is editable here; saving persists it as scenes -> beats.
 function toEditableScenes(plan: EditPlan): Scene[] {
-  if (plan.scenes && plan.scenes.length > 0) return plan.scenes;
-  if (plan.beats && plan.beats.length > 0) {
-    return [
-      {
-        id: newId("scene"),
-        name: "Scene 1",
-        beats: plan.beats.map((b) => ({
-          ...b,
-          id: b.id ?? newId("beat"),
-        })),
-      },
-    ];
-  }
+  if (plan.scenes.length > 0) return plan.scenes;
   return [emptyScene()];
 }
 
@@ -60,15 +46,24 @@ function move<T>(list: T[], from: number, to: number): T[] {
 export interface StoryboardEditorProps {
   projectId: string;
   initialPlan: EditPlan;
-  // Optional map of beatId -> storyboard tile image URL (PR5 supplies this when
-  // present). Absent until tiles exist; the tile renders a sketch placeholder.
-  tileUrlByBeatId?: Record<string, string>;
+  assets?: Asset[];
+}
+
+function indexStoryboardTileUrlsByBeat(assets: Asset[]): Map<string, string> {
+  const byBeat = new Map<string, string>();
+  for (const asset of assets) {
+    if (asset.role !== "beat_storyboard") continue;
+    const beatId = asset.depicts?.beatId;
+    if (!beatId) continue;
+    byBeat.set(beatId, asset.media.url);
+  }
+  return byBeat;
 }
 
 export function StoryboardEditor({
   projectId,
   initialPlan,
-  tileUrlByBeatId,
+  assets = [],
 }: StoryboardEditorProps) {
   const [scenes, setScenes] = useState<Scene[]>(() =>
     toEditableScenes(initialPlan),
@@ -83,6 +78,10 @@ export function StoryboardEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [regenBeatId, setRegenBeatId] = useState<string | null>(null);
+  const tileUrlByBeatId = useMemo(
+    () => indexStoryboardTileUrlsByBeat(assets),
+    [assets]
+  );
 
   const update = useCallback((next: Scene[]) => {
     setScenes(next);
@@ -151,8 +150,6 @@ export function StoryboardEditor({
       const plan: EditPlan = {
         ...planMeta,
         scenes,
-        // Keep the flat view consistent for unmigrated consumers.
-        beats: scenes.flatMap((s) => s.beats),
       };
       await v1Api.updateProjectPlan(projectId, plan);
       setDirty(false);
@@ -304,7 +301,7 @@ export function StoryboardEditor({
           ) : (
             <div className="sb-beats">
               {scene.beats.map((beat, beatIdx) => {
-                const tileUrl = beat.id ? tileUrlByBeatId?.[beat.id] : undefined;
+                const tileUrl = beat.id ? tileUrlByBeatId.get(beat.id) : undefined;
                 return (
                   <div className="sb-beat" key={beat.id ?? beatIdx}>
                     <div className="sb-tile">
