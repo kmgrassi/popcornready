@@ -66,9 +66,14 @@ export function AppLayout() {
           <Link to="/storyboard">Storyboard</Link>
           <AuthNavButton />
         </nav>
-        <ThemeToggle />
       </header>
-      <Outlet />
+      <main className="web-shell-body">
+        <Outlet />
+      </main>
+      <footer className="web-shell-footer">
+        <span className="web-shell-footer-brand">Popcorn Ready</span>
+        <ThemeToggle />
+      </footer>
     </div>
   );
 }
@@ -222,12 +227,14 @@ export function AuthenticatedAppLayout() {
                 ) : null}
               </div>
             </details>
-            <ThemeToggle />
           </div>
         </header>
         <main className="dashboard-route-frame">
           <Outlet />
         </main>
+        <footer className="dashboard-footer">
+          <ThemeToggle />
+        </footer>
       </div>
     </div>
   );
