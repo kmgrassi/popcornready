@@ -86,10 +86,17 @@ export function NewProjectPage() {
 
   const canContinue = step === 0 || (step === 1 && goal.trim()) || step === 2 || step === 3;
   const canGenerate = goal.trim() && !submitting;
+  const effectiveSeedKind = provider === "gemini" ? "video" : seedKind;
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [step]);
+
+  useEffect(() => {
+    if (provider === "gemini" && seedKind === "image") {
+      setSeedKind("video");
+    }
+  }, [provider, seedKind]);
 
   function toggleReviewGate(stage: GateableGenerationStageType) {
     setReviewGates((current) =>
@@ -138,11 +145,11 @@ export function NewProjectPage() {
         reviewGates,
         showCaptions,
         seedAsset: {
-          kind: seedKind,
+          kind: effectiveSeedKind,
           provider,
           prompt: goal.trim(),
           description: goal.trim(),
-          durationSec: seedKind === "image" ? 4 : 8,
+          durationSec: effectiveSeedKind === "image" ? 4 : 8,
           size: seedSize,
           preflightReviewIterations: 1,
         },
@@ -414,11 +421,13 @@ export function NewProjectPage() {
                 <label>
                   Seed kind
                   <select
-                    value={seedKind}
+                    value={effectiveSeedKind}
                     onChange={(event) => setSeedKind(event.target.value as "image" | "video")}
                     disabled={submitting}
                   >
-                    <option value="image">Image</option>
+                    <option value="image" disabled={provider === "gemini"}>
+                      Image
+                    </option>
                     <option value="video">Video</option>
                   </select>
                 </label>
