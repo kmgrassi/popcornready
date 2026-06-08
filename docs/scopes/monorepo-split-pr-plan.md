@@ -5,23 +5,40 @@ discrete PRs that can be dispatched to independent agents. Read
 [`MIGRATION.md`](../../MIGRATION.md) first for the overall shape and the route/
 page parity matrix.
 
-## Where we are (all merged to `main`)
+## Where we are
 
+Both foundations and **essentially all of Tracks A and B have landed on `main`.**
+The only outstanding work is **Track C** (delete the old Next app, finalize the
+live deploy). The per-item sections below are kept as a reference for what each
+PR covered; status is summarized here.
+
+**Done — foundations:**
 - **#124** monorepo scaffold (pnpm + Turborepo; `apps/{api,web}`, `packages/*`).
 - **#126** deploy prep (dropped root Next config; API runtime prod-safe).
 - **#129** extracted `@popcorn/shared` + `@popcorn/timeline` (subpath exports).
 - **#131** relocated `src/lib/**` → `apps/api/src/lib/**`, `src/remotion` →
   `@popcorn/renderer`, browser Supabase client → `apps/web/src/lib/supabase`.
+- **A0** (#134) framework-agnostic api-core + Express adapter.
+- **B0** (#133) Vite SPA foundation (layout, providers, typed api-client).
 
-State today:
-- `apps/api` (Express) serves only `GET /api/v1/health`; **all server logic is
-  present** under `apps/api/src/lib/**` (with a `@/* → src/*` alias that works at
-  build time and under `tsx` at runtime), but the route handlers are not wired.
-- `apps/web` (Vite SPA) is a placeholder shell, **live on Netlify**
-  (popcornready.ai). `@popcorn/{shared,timeline,renderer}` are populated.
-- The **old `src/app/**` route handlers and `src/components/**`/pages still
-  exist** as the porting source. They are NOT built by any workspace (CI/Netlify
-  builds only `@popcorn/web`), so they can dangle until deleted in Track C.
+**Done — Track A** (route groups now wired in `apps/api/src/routes/v1/`, mounted
+via `mount.ts` + `public-routes.ts`/`protected-routes.ts`): `assets` (A1),
+`brief` (A2), `generations` (A3), `generation-runs` (A4), `timelines` (A5),
+`generation-entrypoints` (A6), `misc-capabilities` (A7). Plus groups added beyond
+the original plan: `beats`, `discover`, `eval`, `plan`.
+
+**Done — Track B** (pages now in `apps/web/src/routes/`, wired in `App.tsx`):
+home/landing (B2), login + signup (B1), studio (B3), run progress (B4), admin
+(B5), dev/generation-cards (B6). Plus pages added beyond the original plan:
+uploads, templates, brand kit, evals, new-project, dashboard collections.
+
+**Remaining — Track C:**
+- **C0** — the old `src/app/**` and `src/components/**` (and `src/styles/**`)
+  still exist as the porting source and need deleting; confirm nothing under
+  `apps/**`/`packages/**` references `src/**`. They are NOT built by any
+  workspace (CI/Netlify builds only `@popcorn/web`), so they currently dangle.
+- **C1** — finalize/verify live deploy wiring: Railway API service, Netlify
+  `VITE_API_URL` → Railway origin, CORS + env separation, end-to-end smoke.
 
 ## Conventions — apply to EVERY PR
 
