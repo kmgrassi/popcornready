@@ -13,6 +13,7 @@ import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
+import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
 // apps/web/src/routes/* and adds exactly one child <Route> here.
@@ -22,9 +23,29 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="/studio" element={<StudioPage />} />
+        <Route
+          path="/projects"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Project library"
+              title="Projects"
+              description="Project browsing and management will land in the dashboard UI track."
+            />
+          }
+        />
         <Route path="/uploads" element={<UploadsPage />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/brand" element={<BrandKitPage />} />
+        <Route
+          path="/settings"
+          element={
+            <WorkspaceStubPage
+              eyebrow="Workspace controls"
+              title="Settings"
+              description="Account and workspace preferences will move into this section."
+            />
+          }
+        />
         <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/admin" element={<AdminPage />} />
