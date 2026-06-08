@@ -5,10 +5,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { AuthProvider } from "./auth/AuthProvider";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { AuthNavButton } from "./auth/AuthNavButton";
-import { useAuth } from "./auth/AuthProvider";
 import { LogoMark } from "./LogoMark";
 import ThemeToggle from "./ThemeToggle";
 import { v1Api, type MeResponse } from "../lib/api-client";
@@ -68,11 +74,16 @@ export function AppLayout() {
 
 export function AuthenticatedAppLayout() {
   const auth = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [meError, setMeError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (auth.status === "loading" || auth.status === "unauthenticated") {
+      return;
+    }
+
     let cancelled = false;
 
     v1Api
@@ -91,7 +102,7 @@ export function AuthenticatedAppLayout() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [auth.status]);
 
   const accountLabel = useMemo(() => {
     if (auth.user?.email) return auth.user.email;
@@ -113,6 +124,27 @@ export function AuthenticatedAppLayout() {
     if (!canSignOut) return;
     await auth.signOut();
     navigate("/", { replace: true });
+  }
+
+  if (auth.status === "loading") {
+    return (
+      <div className="web-shell">
+        <main className="web-shell-main">
+          <h1>Checking session</h1>
+          <p className="muted">Preparing your workspace.</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (auth.status === "unauthenticated") {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
   }
 
   return (

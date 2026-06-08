@@ -46,15 +46,17 @@ const FEATURES = [
   },
 ];
 
+// Ordered by Popcorn Ready's strength: what it's best at on the left, weakest on
+// the right. Every HEATMAP_ROWS `scores` array is in this same column order.
 const HEATMAP_COLUMNS = [
-  "Manual edit",
+  "AI workflow",
+  "Gen AI",
   "Timeline model",
   "Audio",
-  "VFX",
   "Captions",
-  "Gen AI",
-  "AI workflow",
   "Versioning",
+  "VFX",
+  "Manual edit",
 ];
 
 const HEATMAP_LEVELS = ["Minimal", "Light", "Medium", "Strong"];
@@ -98,43 +100,43 @@ const POPCORN_READY_HEATMAP_EXPLANATIONS: Record<string, string> = {
 const HEATMAP_ROWS = [
   {
     app: "Popcorn Ready",
-    scores: [0, 3, 2, 1, 2, 3, 3, 2],
+    scores: [3, 3, 3, 2, 2, 2, 1, 0],
     note: "Fully AI-driven brief-to-plan-to-assets-to-timeline flow; not a manual stitching or hand-editing tool.",
     featured: true,
   },
   {
     app: "Premiere Pro",
-    scores: [3, 3, 2, 2, 3, 2, 1, 2],
+    scores: [1, 2, 3, 2, 3, 2, 2, 3],
     note: "Broad professional craft stack with Adobe ecosystem depth.",
   },
   {
     app: "DaVinci Resolve",
-    scores: [3, 3, 3, 3, 2, 1, 1, 3],
+    scores: [1, 1, 3, 3, 2, 3, 3, 3],
     note: "Deepest finishing, color, audio, VFX, and collaboration suite.",
   },
   {
     app: "CapCut",
-    scores: [2, 2, 1, 1, 3, 3, 2, 2],
+    scores: [2, 3, 2, 1, 3, 2, 1, 2],
     note: "Fast social editing with strong creator AI.",
   },
   {
     app: "VEED",
-    scores: [1, 1, 1, 0, 3, 3, 2, 2],
+    scores: [2, 3, 1, 1, 3, 2, 0, 1],
     note: "Web editing shell with captions, dubbing, and model brokerage.",
   },
   {
     app: "Descript",
-    scores: [2, 2, 2, 1, 3, 2, 2, 2],
+    scores: [2, 2, 2, 2, 3, 2, 1, 2],
     note: "Transcript-native editing for explainers, podcasts, and repurposing.",
   },
   {
     app: "Runway",
-    scores: [1, 1, 0, 2, 0, 3, 2, 1],
+    scores: [2, 3, 1, 0, 0, 1, 2, 1],
     note: "Generative studio for shot invention and manipulation.",
   },
   {
     app: "Frame.io",
-    scores: [0, 0, 0, 0, 1, 0, 0, 3],
+    scores: [0, 0, 0, 0, 1, 3, 0, 0],
     note: "Review and versioning backbone rather than an editor.",
   },
 ];
