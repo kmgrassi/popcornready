@@ -205,7 +205,15 @@ export interface EditPlan {
 // Flatten a plan's scenes into their ordered beats. Consumers that operate at
 // the shot level (asset/storyboard generation, timeline assembly, critique)
 // iterate beats through this helper rather than reaching into `scenes` directly.
+// Tolerates the historical flat `{ beats: [...] }` shape — the planSchema the
+// LLM fills still returns top-level `beats`, and projects persisted before the
+// Scene tier landed have no `scenes` — so reads never throw on a flat plan.
+// `ensureBeatIds` migrates such plans to the scene shape in place.
 export function planBeats(plan: EditPlan): Beat[] {
+  if (!plan.scenes) {
+    const flat = (plan as { beats?: Beat[] }).beats;
+    return Array.isArray(flat) ? flat : [];
+  }
   return plan.scenes.flatMap((scene) => scene.beats);
 }
 

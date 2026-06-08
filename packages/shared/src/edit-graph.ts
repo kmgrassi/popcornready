@@ -154,7 +154,23 @@ export function editGraphBeatId(index: number, name: string): string {
 // derived scheme, which keeps behaviour identical to today while making the id
 // an explicit, persisted field (a later change can swap in fully rename/reorder-
 // stable ids without touching the threading).
+// Fold a flat `{ beats: [...] }` plan into a single default scene, in place.
+// Plans still enter the system flat — the planSchema the LLM fills returns
+// top-level `beats`, and projects persisted before the Scene tier landed have
+// no `scenes` — so migrate them to the canonical scene shape before any
+// scene-aware consumer reads them.
+export function normalizePlanScenes(plan: EditPlan): void {
+  const flat = (plan as { beats?: Beat[] }).beats;
+  if (!plan.scenes) {
+    plan.scenes = Array.isArray(flat) && flat.length
+      ? [{ id: randomUUID(), name: "Main", beats: flat }]
+      : [];
+  }
+  delete (plan as { beats?: Beat[] }).beats;
+}
+
 export function ensureBeatIds(plan: EditPlan): void {
+  normalizePlanScenes(plan);
   planBeats(plan).forEach((beat, index) => {
     if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
   });
