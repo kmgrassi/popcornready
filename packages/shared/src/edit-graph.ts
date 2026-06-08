@@ -3,6 +3,7 @@ import {
   Clip,
   EditPlan,
   Patch,
+  planBeats,
   StoryContext,
   Timeline,
   TimelineSegment,
@@ -151,10 +152,16 @@ export function editGraphBeatId(index: number, name: string): string {
 // derived scheme, which keeps behaviour identical to today while making the id
 // an explicit, persisted field (a later change can swap in fully rename/reorder-
 // stable ids without touching the threading).
-export function ensureBeatIds(plan: { beats: { id?: string; name: string }[] }): void {
-  plan.beats.forEach((beat, index) => {
-    if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
-  });
+export function ensureBeatIds(plan: {
+  scenes?: { beats: { id?: string; name: string }[] }[];
+}): void {
+  let index = 0;
+  for (const scene of plan.scenes ?? []) {
+    for (const beat of scene.beats ?? []) {
+      if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
+      index += 1;
+    }
+  }
 }
 
 function sourceSegmentId(segment: TimelineSegment, index: number): string {
@@ -178,7 +185,13 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
     style: "current",
     aspectRatio: timeline.aspectRatio,
-    beats,
+    scenes: [
+      {
+        id: "scene_timeline",
+        name: "Timeline",
+        beats,
+      },
+    ],
   };
 }
 
@@ -317,7 +330,7 @@ export function synthesizeEditGraph(input: {
   storyContext?: StoryContext | null;
 }): EditGraph {
   const beatIdsByRole = new Map<string, string>();
-  const beats = input.plan.beats.map((beat, index) => {
+  const beats = planBeats(input.plan).map((beat, index) => {
     // Prefer the persisted stable beat id; fall back to the derived id for
     // legacy plans that predate Beat.id.
     const id = beat.id || editGraphBeatId(index, beat.name);

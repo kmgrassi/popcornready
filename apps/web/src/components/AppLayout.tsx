@@ -35,6 +35,7 @@ export function AppLayout() {
             <a href="/#how">How it works</a>
             <a href="/#pricing">Pricing</a>
             <Link to="/studio">Studio</Link>
+            <Link to="/storyboard">Storyboard</Link>
             <AuthNavButton />
           </nav>
           <ThemeToggle />

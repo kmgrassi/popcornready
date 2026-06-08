@@ -4,7 +4,8 @@ import type {
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
-import type { Project } from "@popcorn/shared/types";
+import type { EditPlan, Project } from "@popcorn/shared/types";
+import type { Asset } from "@popcorn/shared/assets/types";
 import type { GenerationRunDetail } from "./v1/generation-runs/status";
 import {
   authenticatedFetch,
@@ -149,6 +150,18 @@ export interface StudioProjectResponse {
   project: Project | null;
 }
 
+// Read-only projection consumed by the Storyboard view (storyboard-scenes PR5):
+// the project's plan (Scenes → Beats) plus its pooled assets. The view resolves
+// each beat's `beat_storyboard` sketch tile from `assets` by
+// `role === "beat_storyboard"` && `depicts.beatId`. Plan/assets become populated
+// once the PR1 (plan model) and PR2 (tile generation) backend wiring lands; until
+// then the projection is empty and the view shows its empty state.
+export interface StoryboardData {
+  projectId: string | null;
+  plan: EditPlan | null;
+  assets: Asset[];
+}
+
 function studioProjectFromV1(project: V1Project): Project {
   return {
     id: project.id,
@@ -203,6 +216,16 @@ export const v1Api = {
     const { projects } = await v1Api.listProjects({ limit: 1 });
     return {
       project: projects[0] ? studioProjectFromV1(projects[0]) : null,
+    };
+  },
+  // Read-only selector for the Storyboard view. Resolves the current studio
+  // project and returns its plan + pooled assets. Read-only by design (PR5).
+  getStoryboard: async (): Promise<StoryboardData> => {
+    const { project } = await v1Api.getStudioProject();
+    return {
+      projectId: project?.id ?? null,
+      plan: project?.plan ?? null,
+      assets: project?.assets ?? [],
     };
   },
   listCreatedVideos: async () => ({ videos: [] }),
