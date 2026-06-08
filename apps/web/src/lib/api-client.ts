@@ -1,6 +1,8 @@
 import type {
   BriefVersion,
+  CompositionMode,
   GateableGenerationStageType,
+  GenerationJob,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
@@ -152,6 +154,40 @@ export interface RejectGenerationRunInput {
   note?: string;
 }
 
+export interface StartGenerationRunInput {
+  brief: VideoBriefInput;
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
+  assetIds?: string[];
+  reviewGates?: GateableGenerationStageType[];
+  provider?: string;
+  seedAsset?: {
+    kind?: "image" | "video";
+    provider?: string;
+    prompt?: string;
+    description?: string;
+    durationSec?: number;
+    size?: string;
+    quality?: string;
+    preflightReviewIterations?: number;
+  };
+  showCaptions?: boolean;
+}
+
+export interface StartUploadedFootageRunInput {
+  briefVersionId: string;
+  assetIds: string[];
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
+  reviewGates?: GateableGenerationStageType[];
+  showCaptions?: boolean;
+}
+
+export interface StartGenerationRunResponse {
+  job: GenerationJob;
+  runId: string | null;
+}
+
 export interface StudioProjectResponse {
   project: Project | null;
 }
@@ -204,6 +240,28 @@ export const v1Api = {
       {
         method: "POST",
         body: body ?? {},
+      }
+    ),
+  startPromptGenerationRun: (
+    projectId: string,
+    input: StartGenerationRunInput
+  ) =>
+    apiRequest<StartGenerationRunResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-entrypoints/prompt`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
+  startUploadedFootageGenerationRun: (
+    projectId: string,
+    input: StartUploadedFootageRunInput
+  ) =>
+    apiRequest<StartGenerationRunResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-entrypoints/uploaded-footage`,
+      {
+        method: "POST",
+        body: input,
       }
     ),
   getStudioProject: async (): Promise<StudioProjectResponse> => {

@@ -120,12 +120,13 @@ export interface RunStageItemHandle {
 export const STAGE_ORDER: Record<GenerationStageType, number> = {
   brief_intake: 0,
   creative_plan: 1,
-  asset_generation: 2,
-  audio_generation: 3,
-  timeline_assembly: 4,
-  quality_review: 5,
-  export: 6,
-  ready: 7,
+  storyboard: 2,
+  asset_generation: 3,
+  audio_generation: 4,
+  timeline_assembly: 5,
+  quality_review: 6,
+  export: 7,
+  ready: 8,
 };
 
 // --- No-op default ---------------------------------------------------------

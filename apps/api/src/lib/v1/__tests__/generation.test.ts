@@ -22,6 +22,7 @@ test.after(() => {
 import { resolveActor } from "../actor";
 import { compileEditGraphToTimeline } from "@popcorn/shared/edit-graph";
 import { ApiError } from "../errors";
+import { singleSceneFromBeats } from "@popcorn/shared/types";
 import {
   GenerationDeps,
   createGenerationJob,
@@ -47,7 +48,9 @@ const fakeDeps: GenerationDeps = {
       targetLengthSec: input.targetLengthSec,
       style: input.style,
       aspectRatio: input.aspectRatio as AspectRatio,
-      beats: [{ name: "hook", durationSec: 3, intent: "grab attention" }],
+      scenes: singleSceneFromBeats([
+        { id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" },
+      ]),
     };
   },
   async selectClips({ plan, clips }) {

@@ -5,6 +5,7 @@ import {
   GenerationPreflightIssue,
   GenerationPreflightPass,
   GenerationPreflightResult,
+  planBeats,
   StoryContext,
 } from "@popcorn/shared/types";
 import { storyContextForPrompt } from "@popcorn/shared/story-context";
@@ -83,7 +84,7 @@ function planForPrompt(plan?: EditPlan | null): string {
     `style: ${plan.style}`,
     `aspect ratio: ${plan.aspectRatio}`,
     "beats:",
-    ...plan.beats.map(
+    ...planBeats(plan).map(
       (beat) => `- ${beat.name} (~${beat.durationSec}s): ${beat.intent}`
     ),
   ].join("\n");

@@ -11,11 +11,15 @@ import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
+import { BrandKitPage } from "./routes/BrandKitPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
+import { NewProjectPage } from "./routes/NewProjectPage";
 import { SignupPage } from "./routes/SignupPage";
 import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
+import { TemplatesPage } from "./routes/TemplatesPage";
+import { UploadsPage } from "./routes/UploadsPage";
 import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
@@ -39,6 +43,7 @@ export function App() {
             path="/projects"
             element={<DashboardPlaceholderPage kind="projects" />}
           />
+          <Route path="/projects/new" element={<NewProjectPage />} />
           <Route path="/runs" element={<DashboardPlaceholderPage kind="runs" />} />
           <Route
             path="/assets"
@@ -49,36 +54,9 @@ export function App() {
             element={<DashboardPlaceholderPage kind="outputs" />}
           />
           <Route path="/studio" element={<StudioPage />} />
-          <Route
-            path="/uploads"
-            element={
-              <WorkspaceStubPage
-                eyebrow="Source footage"
-                title="Uploads"
-                description="Uploaded clips and source media will appear here as the library work lands."
-              />
-            }
-          />
-          <Route
-            path="/templates"
-            element={
-              <WorkspaceStubPage
-                eyebrow="Starting points"
-                title="Templates"
-                description="Template galleries will give each new cut a focused creative starting point."
-              />
-            }
-          />
-          <Route
-            path="/brand"
-            element={
-              <WorkspaceStubPage
-                eyebrow="Identity"
-                title="Brand Kit"
-                description="Logos, colors, fonts, and defaults will be managed here."
-              />
-            }
-          />
+          <Route path="/uploads" element={<UploadsPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/brand" element={<BrandKitPage />} />
           <Route
             path="/settings"
             element={

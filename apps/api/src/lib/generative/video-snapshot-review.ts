@@ -9,6 +9,7 @@ import type {
   EditPlan,
   VideoSnapshotReview,
 } from "@popcorn/shared/types";
+import { planBeats } from "@popcorn/shared/types";
 
 const execFileAsync = promisify(execFile);
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -86,7 +87,7 @@ export async function extractVideoSnapshots(input: {
 }
 
 function beatMap(plan: EditPlan): string {
-  return plan.beats
+  return planBeats(plan)
     .map((beat, index) => `${index + 1}. ${beat.name}: ${beat.intent}`)
     .join("\n");
 }
