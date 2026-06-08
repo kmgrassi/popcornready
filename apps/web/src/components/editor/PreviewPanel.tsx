@@ -1,5 +1,11 @@
 import React from "react";
-import { Clip, EditPlan, planBeats, Timeline, timelineDurationSec } from "@popcorn/shared/types";
+import {
+  Clip,
+  EditPlan,
+  planBeats,
+  Timeline,
+  timelineDurationSec,
+} from "@popcorn/shared/types";
 import { DURATION_POLICIES, DurationPolicy } from "@popcorn/shared/audio-alignment";
 import {
   CreatedVideo,
@@ -167,7 +173,7 @@ export function PreviewPanel({
             {plan.style} · {plan.targetLengthSec}s
           </div>
           {planBeats(plan).map((beat, index) => (
-            <span className="pill" key={index}>
+            <span className="pill" key={beat.id || index}>
               {beat.name} ~{beat.durationSec}s
             </span>
           ))}

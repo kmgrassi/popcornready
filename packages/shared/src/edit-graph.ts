@@ -1,9 +1,11 @@
 import {
   AspectRatio,
+  Beat,
   Clip,
   EditPlan,
   Patch,
   planBeats,
+  singleSceneFromBeats,
   StoryContext,
   Timeline,
   TimelineSegment,
@@ -151,17 +153,19 @@ export function editGraphBeatId(index: number, name: string): string {
 // so every downstream consumer can reference beats by id. Uses the existing
 // derived scheme, which keeps behaviour identical to today while making the id
 // an explicit, persisted field (a later change can swap in fully rename/reorder-
-// stable ids without touching the threading).
+// stable ids without touching the threading). Ids are minted across the flat,
+// scene-flattened beat order so they stay globally unique within a plan.
 export function ensureBeatIds(plan: {
-  scenes?: { beats: { id?: string; name: string }[] }[];
+  scenes?: { id?: string; beats?: { id?: string; name: string }[] }[];
 }): void {
   let index = 0;
-  for (const scene of plan.scenes ?? []) {
-    for (const beat of scene.beats ?? []) {
+  (plan.scenes ?? []).forEach((scene, sceneIndex) => {
+    if (!scene.id) scene.id = `scene_${sceneIndex + 1}`;
+    (scene.beats ?? []).forEach((beat) => {
       if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
       index += 1;
-    }
-  }
+    });
+  });
 }
 
 function sourceSegmentId(segment: TimelineSegment, index: number): string {
@@ -175,23 +179,20 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     beatsByRole.set(segment.role, (beatsByRole.get(segment.role) ?? 0) + durationSec);
   }
 
-  const beats = [...beatsByRole.entries()].map(([role, durationSec]) => ({
-    name: role || "timeline",
-    durationSec,
-    intent: role || "Preserve the current edit.",
-  }));
+  const beats: Beat[] = [...beatsByRole.entries()].map(
+    ([role, durationSec], index) => ({
+      id: editGraphBeatId(index, role || "timeline"),
+      name: role || "timeline",
+      durationSec,
+      intent: role || "Preserve the current edit.",
+    })
+  );
 
   return {
     targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
     style: "current",
     aspectRatio: timeline.aspectRatio,
-    scenes: [
-      {
-        id: "scene_timeline",
-        name: "Timeline",
-        beats,
-      },
-    ],
+    scenes: singleSceneFromBeats(beats, "Timeline"),
   };
 }
 

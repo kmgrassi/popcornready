@@ -51,7 +51,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   }, [configured, status]);
 
   useEffect(() => {
-    if (status === "authenticated") navigate("/studio", { replace: true });
+    if (status === "authenticated") navigate("/dashboard", { replace: true });
   }, [navigate, status]);
 
   async function submit() {
