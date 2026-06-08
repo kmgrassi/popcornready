@@ -130,6 +130,270 @@
   padding: 56px 0;
 }
 
+.workspace-shell {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.studio-sidebar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 18px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--panel) 82%, var(--bg));
+}
+
+.studio-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.studio-sidebar-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.studio-sidebar-nav {
+  display: grid;
+  gap: 4px;
+}
+
+.studio-sidebar-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.studio-sidebar-link:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+}
+
+.studio-sidebar-link.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.studio-sidebar-link.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.studio-sidebar-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  position: relative;
+  color: currentColor;
+}
+
+.studio-sidebar-icon::before,
+.studio-sidebar-icon::after {
+  content: "";
+  position: absolute;
+  border: 2px solid currentColor;
+  border-radius: 5px;
+}
+
+.studio-sidebar-icon-studio::before {
+  inset: 3px 2px;
+  border-radius: 999px 999px 5px 5px;
+}
+
+.studio-sidebar-icon-studio::after {
+  left: 7px;
+  right: 7px;
+  bottom: 2px;
+  height: 4px;
+  border-top: 0;
+}
+
+.studio-sidebar-icon-projects::before {
+  inset: 3px 2px 2px;
+}
+
+.studio-sidebar-icon-projects::after {
+  left: 3px;
+  top: 2px;
+  width: 7px;
+  height: 4px;
+  background: var(--bg);
+}
+
+.studio-sidebar-icon-uploads::before {
+  left: 4px;
+  right: 4px;
+  bottom: 2px;
+  height: 5px;
+}
+
+.studio-sidebar-icon-uploads::after {
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 10px;
+  border-width: 2px 2px 0 0;
+  border-radius: 0;
+  transform: rotate(-45deg);
+}
+
+.studio-sidebar-icon-templates::before {
+  inset: 2px;
+}
+
+.studio-sidebar-icon-templates::after {
+  left: 5px;
+  right: 5px;
+  top: 8px;
+  border-width: 2px 0 0;
+  border-radius: 0;
+}
+
+.studio-sidebar-icon-brand::before {
+  inset: 2px;
+  border-radius: 999px;
+}
+
+.studio-sidebar-icon-brand::after {
+  left: 7px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.studio-sidebar-icon-settings::before {
+  inset: 3px;
+  border-radius: 999px;
+}
+
+.studio-sidebar-icon-settings::after {
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 18px;
+  border-width: 0 2px 0 0;
+  border-radius: 0;
+}
+
+.workspace-content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-topbar {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  background: var(--nav-bg);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-topbar-kicker {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-topbar h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.workspace-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-main {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.workspace-main > .app {
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.workspace-stub-page {
+  min-height: 100%;
+  display: grid;
+  align-items: start;
+  padding: 32px;
+}
+
+.workspace-stub-panel {
+  width: min(760px, 100%);
+  padding: 28px;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.workspace-stub-eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-stub-panel h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.workspace-stub-panel p:last-child {
+  max-width: 560px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
 .preview-player-empty {
   display: flex;
   height: 100%;
@@ -147,6 +411,50 @@
 
   .web-shell-nav {
     display: none;
+  }
+
+  .workspace-shell {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .studio-sidebar {
+    padding: 14px 8px;
+    align-items: center;
+  }
+
+  .studio-sidebar-brand {
+    padding: 0;
+  }
+
+  .studio-sidebar-brand span,
+  .studio-sidebar-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .studio-sidebar-link {
+    width: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 12px 16px;
+  }
+
+  .workspace-topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .workspace-stub-page {
+    padding: 20px;
   }
 }
 
@@ -2684,6 +2992,18 @@ button.eval-card-link[aria-pressed="true"] {
   overflow-x: auto;
 }
 
+/* Large screens: grow the comparison table past the 1080px content column and
+   center it on the viewport, so every column (incl. the Positioning notes) has
+   room and nothing is clipped. */
+@media (min-width: 1200px) {
+  .lp-heatmap-wrap {
+    --lp-heatmap-w: min(1400px, calc(100vw - 48px));
+    width: var(--lp-heatmap-w);
+    margin-left: calc((100% - var(--lp-heatmap-w)) / 2);
+    margin-right: calc((100% - var(--lp-heatmap-w)) / 2);
+  }
+}
+
 .lp-heatmap-head,
 .lp-heatmap-row {
   display: grid;
@@ -2709,6 +3029,7 @@ button.eval-card-link[aria-pressed="true"] {
 .lp-heat-cell {
   padding: 13px 12px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .lp-heatmap-row {
@@ -2731,6 +3052,7 @@ button.eval-card-link[aria-pressed="true"] {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .lp-heat-cell {

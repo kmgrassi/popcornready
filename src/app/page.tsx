@@ -291,7 +291,6 @@ export default async function LandingPage() {
             <Link className="lp-nav-cta" href="/studio">
               Open studio
             </Link>
-            <ThemeToggle />
           </nav>
         </div>
       </header>
@@ -525,10 +524,16 @@ export default async function LandingPage() {
       </main>
 
       <footer className="lp-footer">
-        <span>Popcorn Ready &mdash; AI-native video editor</span>
-        <a href={GITHUB_URL} target="_blank" rel="noreferrer">
-          {GITHUB_URL.replace("https://", "")}
-        </a>
+        <div className="lp-footer-left">
+          <span>Popcorn Ready &mdash; AI-native video editor</span>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+            {GITHUB_URL.replace("https://", "")}
+          </a>
+        </div>
+        <div className="lp-footer-theme">
+          <span className="lp-footer-theme-label">Theme</span>
+          <ThemeToggle />
+        </div>
       </footer>
     </div>
   );
