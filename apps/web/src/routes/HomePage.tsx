@@ -223,14 +223,16 @@ export function HomePage() {
     <div className="landing">
       <main>
         <section className="lp-hero">
-          <span className="lp-eyebrow">AI-native video studio</span>
+          <span className="lp-eyebrow">The agent harness for video</span>
           <h1>
-            Describe it. <span className="lp-accent">Popcorn Ready cuts it.</span>
+            Codex writes the code.{" "}
+            <span className="lp-accent">Popcorn Ready makes the video.</span>
           </h1>
           <p className="lp-lede">
-            Describe the video you want and Popcorn Ready plans the beats,
-            generates the visuals, and cuts a finished 30-second video. The AI
-            plans and patches; rendering stays deterministic.
+            Coding harnesses turned software into something you direct instead of
+            hand-build. Popcorn Ready is that harness for video: you describe what
+            you want, and the agent plans, generates, and edits a finished cut.
+            The AI-first way video gets made.
           </p>
           <PromptComposer />
         </section>
@@ -238,7 +240,8 @@ export function HomePage() {
         <section id="how" className="lp-section">
           <h2 className="lp-section-title">How it works</h2>
           <p className="lp-section-sub">
-            One loop: brief &rarr; plan &rarr; timeline &rarr; render.
+            You direct; the agent does the work: brief &rarr; plan &rarr;
+            timeline &rarr; render.
           </p>
           <div className="lp-steps">
             {STEPS.map((step) => (
@@ -266,9 +269,9 @@ export function HomePage() {
         <section className="lp-section" aria-label="Competitive feature heatmap">
           <h2 className="lp-section-title">Where it fits</h2>
           <p className="lp-section-sub">
-            Popcorn Ready sits between pro editing rigor and generative video
-            tools. Its sharpest difference is the end-to-end AI workflow: brief,
-            plan, assets, audio, timeline, and export in one loop.
+            Other tools bolt AI onto a manual editor. Popcorn Ready is the
+            opposite: an agent that drives the whole pipeline &mdash; brief, plan,
+            assets, audio, timeline, and export &mdash; in one loop.
           </p>
           <div className="lp-heatmap-wrap">
             <div className="lp-heatmap">
@@ -424,7 +427,7 @@ export function HomePage() {
       </main>
 
       <footer className="lp-footer">
-        <span>Popcorn Ready &mdash; AI-native video editor</span>
+        <span>Popcorn Ready &mdash; the agent harness for video</span>
         <a href={GITHUB_URL} target="_blank" rel="noreferrer">
           {GITHUB_URL.replace("https://", "")}
         </a>
