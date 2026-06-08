@@ -146,6 +146,10 @@ these gates may remain optional.
 - **Assets.** `assets.context` and `assets.provenance` already hold structured
   metadata, while pooled assets can represent generated storyboard tiles,
   keyframes, clips, audio, and references.
+- **Partial visual-anchor primitives.** `character_anchor` assets exist, the
+  asset role vocabulary includes `scene_anchor`, `Scene.anchorAssetId` can point
+  at an establishing image, and storyboard/keyframe generation can carry anchor
+  IDs as provenance inputs.
 - **Agent calls.** Existing `planEdit`, `critiquePlan`, `selectClips`, and
   `critique` are single-shot structured LLM calls. They can be split and reused
   as leaf tools.
@@ -155,7 +159,12 @@ these gates may remain optional.
 - No first-class **story blueprint** type.
 - No first-class **script/scene draft** type.
 - No explicit derivation chain:
-  `briefVersionId -> storyBlueprintId -> scriptDraftId -> editPlan -> storyboard assets`.
+  `briefVersionId -> storyBlueprintId -> scriptDraftId -> editPlan -> visual anchors -> storyboard assets`.
+- No first-class **visual anchors** stage that turns character/setting image
+  prompts into approved `character_anchor` / `scene_anchor` reference assets.
+  Character-anchor pieces exist, but the full "character and setting prompts ->
+  reference images -> approved inputs for storyboard/keyframes/clips" flow is not
+  implemented end to end.
 - No agent-to-agent handoff protocol where each agent consumes durable artifact
   IDs instead of hidden prompt text.
 - No orchestrator loop. Stage order is still mostly hardcoded, not chosen by an
@@ -419,6 +428,7 @@ brief_intake
   -> story_development
   -> script_planning
   -> creative_plan
+  -> visual_anchors
   -> storyboard
   -> asset_generation
   -> audio_generation
@@ -435,6 +445,7 @@ New `GenerationStageType` values:
 
 - `story_development`
 - `script_planning`
+- `visual_anchors`
 
 Both should be gateable. Reviewing the story blueprint is cheaper and more
 valuable than reviewing generated video after the wrong story has already been
@@ -445,11 +456,14 @@ For runs where `targetLengthSec > 120`, these gates are mandatory:
 - `story_development`
 - `script_planning`
 - `creative_plan`
+- `visual_anchors`
 - `storyboard`
 
 `asset_generation` must not start until all mandatory pre-asset gates are
-approved. The storyboard gate should include generated sketch panels and any
-reference/anchor images that will materially steer the final video.
+approved. The `visual_anchors` gate should include character and setting
+reference prompts plus generated or uploaded anchor images that will materially
+steer storyboard, keyframe, and clip generation. The storyboard gate should
+include generated sketch panels.
 
 ## API shape
 
@@ -490,6 +504,7 @@ BriefVersion
   -> StoryBlueprint
   -> ScriptDraft
   -> EditPlan scenes/beats
+  -> character_anchor / scene_anchor assets
   -> beat_storyboard assets
   -> beat_keyframe assets
   -> beat_clip assets
@@ -543,16 +558,23 @@ right downstream work:
    keeping the old prompt-to-plan call as a compatibility shortcut. Persist the
    resulting `EditPlan` to `projects.plan` and stage artifacts.
 
-5. **Run stages.**
-   Add `story_development` and `script_planning` to generation stage types, stage
-   order, labels, payload seeding, progress UI, and review gates. Enforce
-   mandatory pre-asset gates for `targetLengthSec > 120`.
+5. **Visual anchors.**
+   Add a `visual_anchors` stage that derives character and setting image prompts
+   from the story/script/plan, generates or attaches `character_anchor` and
+   `scene_anchor` assets, records provenance, and lets the user approve or replace
+   anchors before storyboard or final media generation. Reuse the existing
+   character-anchor primitive where possible; add the missing scene-anchor path.
 
-6. **Granular API endpoints.**
+6. **Run stages.**
+   Add `story_development`, `script_planning`, and `visual_anchors` to generation
+   stage types, stage order, labels, payload seeding, progress UI, and review
+   gates. Enforce mandatory pre-asset gates for `targetLengthSec > 120`.
+
+7. **Granular API endpoints.**
    Add story/script endpoints that mirror the plan endpoint's async job shape and
    typed precondition errors.
 
-7. **Story-aware regeneration scope.**
+8. **Story-aware regeneration scope.**
    Define regeneration actions for `change_story_blueprint`,
    `rewrite_script_scene`, and `replan_scene`, but leave actual orchestrator tool
    selection to the orchestrator-tools lane.
@@ -573,6 +595,8 @@ right downstream work:
 - How much dialogue should the script agent write before visual generation?
 - Should character profiles be auto-created from `StoryCharacter` entries, or
   remain a separate explicit user/agent action?
+- Should setting anchors be generated per scene by default, or only when the
+  scene setting materially affects continuity?
 
 ## Acceptance criteria
 
@@ -589,8 +613,11 @@ right downstream work:
 - Existing short-form prompt-to-plan flows still work.
 - The run UI can pause for review after story development or script planning.
 - For `targetLengthSec > 120`, the engine requires approval of story blueprint,
-  script draft, shot/beat plan, and storyboard/pre-viz before `asset_generation`
-  can start.
+  script draft, shot/beat plan, visual anchors, and storyboard/pre-viz before
+  `asset_generation` can start.
+- Character/setting image prompts are represented by a `visual_anchors` stage and
+  produce approved `character_anchor` / `scene_anchor` assets before they steer
+  storyboard, keyframe, or clip generation.
 - `story_blueprints` and `script_drafts` are canonical tables; generation stage
   artifacts only reference or snapshot them.
 
