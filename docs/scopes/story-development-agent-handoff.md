@@ -149,7 +149,10 @@ these gates may remain optional.
 - **Partial visual-anchor primitives.** `character_anchor` assets exist, the
   asset role vocabulary includes `scene_anchor`, `Scene.anchorAssetId` can point
   at an establishing image, and storyboard/keyframe generation can carry anchor
-  IDs as provenance inputs.
+  IDs as provenance inputs. Existing docs already point toward conditional use:
+  scenes carry `characterIds` and optional `anchorAssetId`, generated assets
+  record `anchorIds`, and tool validation can require a character anchor only
+  when a beat declares a main character.
 - **Agent calls.** Existing `planEdit`, `critiquePlan`, `selectClips`, and
   `critique` are single-shot structured LLM calls. They can be split and reused
   as leaf tools.
@@ -164,7 +167,8 @@ these gates may remain optional.
   prompts into approved `character_anchor` / `scene_anchor` reference assets.
   Character-anchor pieces exist, but the full "character and setting prompts ->
   reference images -> approved inputs for storyboard/keyframes/clips" flow is not
-  implemented end to end.
+  implemented end to end. This stage must be conditional: not every scene, beat,
+  or asset needs an anchor.
 - No agent-to-agent handoff protocol where each agent consumes durable artifact
   IDs instead of hidden prompt text.
 - No orchestrator loop. Stage order is still mostly hardcoded, not chosen by an
@@ -272,6 +276,18 @@ export interface DialogueLine {
   characterId: string;
   text: string;
   delivery?: string;
+}
+
+export interface VisualAnchorRequirement {
+  id: string;
+  kind: "character" | "scene" | "style" | "prop";
+  requiredFor:
+    | { scope: "story"; reason: string }
+    | { scope: "scene"; sceneId: string; reason: string }
+    | { scope: "beat"; beatId: string; reason: string };
+  prompt: string;
+  status: "proposed" | "approved" | "rejected" | "satisfied";
+  activeAnchorAssetId?: string;
 }
 ```
 
@@ -465,6 +481,20 @@ reference prompts plus generated or uploaded anchor images that will materially
 steer storyboard, keyframe, and clip generation. The storyboard gate should
 include generated sketch panels.
 
+Visual anchors are selective, not universal. The agent should propose anchor
+requirements only when continuity or provider constraints justify them. Examples:
+
+- A recurring main character appears in beats 1, 3, and 5 -> create or select one
+  `character_anchor` and pass that anchor ID only into those beats.
+- A scene depends on a distinctive setting -> create or select a `scene_anchor`
+  for that scene and pass it into storyboard/keyframe generation for the scene's
+  beats.
+- A one-off b-roll shot with no recurring subject or important location -> no
+  visual anchor is required.
+
+Downstream media tools should receive the active anchor IDs that apply to the
+specific scene/beat they are generating, and record those IDs in provenance.
+
 ## API shape
 
 Add granular endpoints, following the existing `/projects/:projectId/plan`
@@ -559,9 +589,10 @@ right downstream work:
    resulting `EditPlan` to `projects.plan` and stage artifacts.
 
 5. **Visual anchors.**
-   Add a `visual_anchors` stage that derives character and setting image prompts
-   from the story/script/plan, generates or attaches `character_anchor` and
-   `scene_anchor` assets, records provenance, and lets the user approve or replace
+   Add a `visual_anchors` stage that derives conditional anchor requirements
+   from the story/script/plan. The stage should generate or attach
+   `character_anchor` and `scene_anchor` assets only for the characters/scenes/
+   beats that need them, record provenance, and let the user approve or replace
    anchors before storyboard or final media generation. Reuse the existing
    character-anchor primitive where possible; add the missing scene-anchor path.
 
@@ -597,6 +628,8 @@ right downstream work:
   remain a separate explicit user/agent action?
 - Should setting anchors be generated per scene by default, or only when the
   scene setting materially affects continuity?
+- What exact plan field owns `VisualAnchorRequirement[]`: `EditPlan`, `Scene`,
+  `Beat`, or a separate `visual_anchor_requirements` table/resource?
 
 ## Acceptance criteria
 
@@ -616,8 +649,11 @@ right downstream work:
   script draft, shot/beat plan, visual anchors, and storyboard/pre-viz before
   `asset_generation` can start.
 - Character/setting image prompts are represented by a `visual_anchors` stage and
-  produce approved `character_anchor` / `scene_anchor` assets before they steer
-  storyboard, keyframe, or clip generation.
+  produce approved `character_anchor` / `scene_anchor` assets only for declared
+  anchor requirements before they steer storyboard, keyframe, or clip generation.
+- Beat/storyboard/keyframe/clip generation receives only the active anchor IDs
+  that apply to the specific scene/beat being generated, and records those IDs in
+  provenance.
 - `story_blueprints` and `script_drafts` are canonical tables; generation stage
   artifacts only reference or snapshot them.
 
