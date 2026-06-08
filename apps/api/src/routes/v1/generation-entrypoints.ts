@@ -284,7 +284,7 @@ async function createAndMaybeRunGeneration(args: {
   const shouldRun =
     isRecord(args.body) && args.body.runNow === false ? false : true;
   if (!shouldRun) {
-    return { status: 202, body: { job: generationJob } };
+    return { status: 202, body: { job: generationJob, runId: null } };
   }
   const runExecution = await createGenerationRunExecution({
     projectId: args.projectId,
@@ -298,7 +298,7 @@ async function createAndMaybeRunGeneration(args: {
     runExecution.progress,
     runExecution.execution
   );
-  return { status: 202, body: { job } };
+  return { status: 202, body: { job, runId: runExecution.runId } };
 }
 
 generationEntrypointsRouter.post(

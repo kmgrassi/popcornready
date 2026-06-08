@@ -1,22 +1,37 @@
 -- Seed data for local/dev. Applied by `supabase db reset` (local) and can be run
--- against remote manually. Ported from .local/agent-store.json so the existing
--- dev workspace + smoke-test projects exist after migrating to Postgres.
+-- against remote manually. Recreates the dev workspace + smoke-test projects.
 --
--- owner_id is left null here: the local dev workspace predates Supabase auth.
--- With RLS on, null-owner rows are invisible to end users and reachable only via
--- the service_role key. To attach this workspace to a real account, set
--- owner_id to that user's auth.users.id.
+-- IDs are DB-generated uuids now (the app no longer mints text ids), so the seed
+-- inserts by natural key and lets gen_random_uuid() fill the primary keys. The
+-- dev workspace has a null owner_id: with RLS on, null-owner rows are reachable
+-- only via the service_role key. To attach it to a real account, set owner_id to
+-- that user's public.users.id.
 
-insert into workspaces (id, schema_version, name, created_at, updated_at) values
-  ('ws_local_dev', 'workspace.v1', 'dev_workspace',
-   '2026-06-02T15:20:06.143Z', '2026-06-02T15:20:06.143Z')
-on conflict (id) do nothing;
+-- One unowned local dev workspace (matched by lower(name); see workspaces_unique_local_name).
+insert into public.workspaces (schema_version, name, created_at, updated_at)
+select 'workspace.v1', 'dev_workspace',
+       '2026-06-02T15:20:06.143Z', '2026-06-02T15:20:06.143Z'
+where not exists (
+  select 1 from public.workspaces
+  where owner_id is null and lower(name) = 'dev_workspace'
+);
 
-insert into projects (id, schema_version, workspace_id, name, status, brief, current_brief_version_id, created_at, updated_at) values
-  ('proj_rd816e29', 'project.v1', 'ws_local_dev', 'NVIDIA Cosmos smoke test', 'active', null, null,
-   '2026-06-02T15:20:15.340Z', '2026-06-02T15:20:15.340Z'),
-  ('proj_e9nmi5lm', 'project.v1', 'ws_local_dev', 'NVIDIA Cosmos smoke test', 'active', null, null,
-   '2026-06-02T15:24:34.857Z', '2026-06-02T15:24:34.857Z'),
-  ('proj_p4kuybe4', 'project.v1', 'ws_local_dev', 'NVIDIA Cosmos smoke test', 'active', null, null,
-   '2026-06-02T15:30:14.727Z', '2026-06-02T15:30:14.727Z')
-on conflict (id) do nothing;
+-- Smoke-test projects under the dev workspace.
+insert into public.projects (schema_version, workspace_id, name, status, created_at, updated_at)
+select 'project.v1', w.id, v.name, 'active', v.created_at, v.created_at
+from (
+  select id from public.workspaces
+  where owner_id is null and lower(name) = 'dev_workspace'
+  limit 1
+) w
+cross join (values
+  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:20:15.340Z'),
+  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:24:34.857Z'),
+  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:30:14.727Z')
+) as v(name, created_at)
+where not exists (
+  select 1
+  from public.projects p
+  join public.workspaces ww on ww.id = p.workspace_id
+  where ww.owner_id is null and lower(ww.name) = 'dev_workspace'
+);

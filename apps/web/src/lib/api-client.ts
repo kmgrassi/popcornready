@@ -1,10 +1,17 @@
 import type {
+  AssetKind,
+  AssetStatus,
   BriefVersion,
+  CompositionMode,
   GateableGenerationStageType,
+  GenerationJob,
+  GenerationRun,
+  GenerationRunStatus,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
-import type { Project } from "@popcorn/shared/types";
+import type { EditPlan, Project } from "@popcorn/shared/types";
+import type { Asset } from "@popcorn/shared/assets/types";
 import type { GenerationRunDetail } from "./v1/generation-runs/status";
 import {
   authenticatedFetch,
@@ -113,8 +120,15 @@ export async function apiRequest<T>(
 }
 
 export interface MeResponse {
-  actor: string;
+  actor:
+    | string
+    | {
+        id: string;
+        type?: string;
+        email?: string | null;
+      };
   workspaceId: string;
+  workspaceName?: string;
   authMode: string;
   isLocal: boolean;
 }
@@ -131,6 +145,63 @@ export interface ProjectResponse {
   project: V1Project;
 }
 
+export interface ListPagination {
+  limit: number;
+  nextCursor: string | null;
+}
+
+export interface WorkspaceGenerationRun extends GenerationRun {
+  projectName: string;
+}
+
+export type WorkspaceAssetSource = "uploaded" | "generated";
+
+export interface WorkspaceAsset {
+  id: string;
+  assetId?: string;
+  projectId: string;
+  projectName: string;
+  kind: AssetKind;
+  status: AssetStatus;
+  source: WorkspaceAssetSource | "upload" | "remote_url" | "local_path" | "imported" | "derived";
+  filename?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  thumbnailUrl?: string;
+  durationSec?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkspaceOutput {
+  artifactId: string;
+  projectId: string;
+  projectName: string;
+  timelineId?: string;
+  url?: string;
+  playbackUrl?: string;
+  thumbnailUrl?: string;
+  durationSec?: number;
+  format?: string;
+  createdAt: string;
+}
+
+export interface WorkspaceGenerationRunsResponse {
+  runs: WorkspaceGenerationRun[];
+  pagination: ListPagination;
+}
+
+export interface WorkspaceAssetsResponse {
+  assets: WorkspaceAsset[];
+  pagination: ListPagination;
+}
+
+export interface WorkspaceOutputsResponse {
+  outputs: WorkspaceOutput[];
+  pagination: ListPagination;
+}
+
 export interface CreateProjectInput {
   name: string;
   brief?: VideoBriefInput;
@@ -145,8 +216,54 @@ export interface RejectGenerationRunInput {
   note?: string;
 }
 
+export interface StartGenerationRunInput {
+  brief: VideoBriefInput;
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
+  assetIds?: string[];
+  reviewGates?: GateableGenerationStageType[];
+  provider?: string;
+  seedAsset?: {
+    kind?: "image" | "video";
+    provider?: string;
+    prompt?: string;
+    description?: string;
+    durationSec?: number;
+    size?: string;
+    quality?: string;
+    preflightReviewIterations?: number;
+  };
+  showCaptions?: boolean;
+}
+
+export interface StartUploadedFootageRunInput {
+  briefVersionId: string;
+  assetIds: string[];
+  mode?: CompositionMode;
+  allowGeneratedGapFill?: boolean;
+  reviewGates?: GateableGenerationStageType[];
+  showCaptions?: boolean;
+}
+
+export interface StartGenerationRunResponse {
+  job: GenerationJob;
+  runId: string | null;
+}
+
 export interface StudioProjectResponse {
   project: Project | null;
+}
+
+// Read-only projection consumed by the Storyboard view (storyboard-scenes PR5):
+// the project's plan (Scenes → Beats) plus its pooled assets. The view resolves
+// each beat's `beat_storyboard` sketch tile from `assets` by
+// `role === "beat_storyboard"` && `depicts.beatId`. Plan/assets become populated
+// once the PR1 (plan model) and PR2 (tile generation) backend wiring lands; until
+// then the projection is empty and the view shows its empty state.
+export interface StoryboardData {
+  projectId: string | null;
+  plan: EditPlan | null;
+  assets: Asset[];
 }
 
 function studioProjectFromV1(project: V1Project): Project {
@@ -186,6 +303,60 @@ export const v1Api = {
       `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}`,
       { signal }
     ),
+  listWorkspaceGenerationRuns: (
+    workspaceId: string,
+    params?: {
+      status?: GenerationRunStatus | "all";
+      projectId?: string;
+      limit?: number;
+      cursor?: string | null;
+    },
+    signal?: AbortSignal
+  ) =>
+    apiRequest<WorkspaceGenerationRunsResponse>(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/generation-runs`,
+      {
+        signal,
+        searchParams: {
+          ...params,
+          status: params?.status === "all" ? undefined : params?.status,
+        },
+      }
+    ),
+  listWorkspaceAssets: (
+    workspaceId: string,
+    params?: {
+      kind?: AssetKind | "all";
+      source?: WorkspaceAssetSource | "all";
+      projectId?: string;
+      limit?: number;
+      cursor?: string | null;
+    },
+    signal?: AbortSignal
+  ) =>
+    apiRequest<WorkspaceAssetsResponse>(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/assets`,
+      {
+        signal,
+        searchParams: {
+          ...params,
+          kind: params?.kind === "all" ? undefined : params?.kind,
+          source: params?.source === "all" ? undefined : params?.source,
+        },
+      }
+    ),
+  listWorkspaceOutputs: (
+    workspaceId: string,
+    params?: { projectId?: string; limit?: number; cursor?: string | null },
+    signal?: AbortSignal
+  ) =>
+    apiRequest<WorkspaceOutputsResponse>(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/outputs`,
+      {
+        signal,
+        searchParams: params,
+      }
+    ),
   updateGenerationRun: (
     projectId: string,
     runId: string,
@@ -199,10 +370,42 @@ export const v1Api = {
         body: body ?? {},
       }
     ),
+  startPromptGenerationRun: (
+    projectId: string,
+    input: StartGenerationRunInput
+  ) =>
+    apiRequest<StartGenerationRunResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-entrypoints/prompt`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
+  startUploadedFootageGenerationRun: (
+    projectId: string,
+    input: StartUploadedFootageRunInput
+  ) =>
+    apiRequest<StartGenerationRunResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-entrypoints/uploaded-footage`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
   getStudioProject: async (): Promise<StudioProjectResponse> => {
     const { projects } = await v1Api.listProjects({ limit: 1 });
     return {
       project: projects[0] ? studioProjectFromV1(projects[0]) : null,
+    };
+  },
+  // Read-only selector for the Storyboard view. Resolves the current studio
+  // project and returns its plan + pooled assets. Read-only by design (PR5).
+  getStoryboard: async (): Promise<StoryboardData> => {
+    const { project } = await v1Api.getStudioProject();
+    return {
+      projectId: project?.id ?? null,
+      plan: project?.plan ?? null,
+      assets: project?.assets ?? [],
     };
   },
   listCreatedVideos: async () => ({ videos: [] }),
