@@ -278,7 +278,11 @@ create table public.workspace_invites (
   email         text not null check (btrim(email) <> ''),
   role          text not null default 'member' check (role in ('owner', 'admin', 'member')),
   invited_by    uuid references public.users (id) on delete set null,
-  token         text not null unique default encode(gen_random_bytes(32), 'hex'),
+  -- 64-char hex token from two core gen_random_uuid()s (~244 bits of entropy).
+  -- Avoids pgcrypto's gen_random_bytes, which on Supabase lives in the
+  -- `extensions` schema and is not on the search_path at migration time.
+  token         text not null unique
+                  default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
   status        text not null default 'pending'
                   check (status in ('pending', 'accepted', 'revoked', 'expired')),
   expires_at    timestamptz not null default (now() + interval '14 days'),
