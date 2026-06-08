@@ -22,6 +22,13 @@ them, records the cross-cutting findings, and lays out the build order.
 | 6 | Orchestrator + tool contracts | `docs/scopes/north-star-orchestrator-tools.md` | #97 | Builds on 1,2,5 |
 | 7 | Inspection, gates & feedback | `docs/scopes/north-star-inspection-feedback.md` | #98 | Builds on 5,1 |
 
+## Adjacent scopes
+
+| Lane | Scope doc | Role |
+|------|-----------|------|
+| Story development & agent handoff | `docs/scopes/story-development-agent-handoff.md` | Adds the missing treatment/script layer before the existing scene/beat plan, reusing run-stage artifacts and existing project/brief/plan/composition surfaces first. |
+| Structured outputs to tool calls | `docs/scopes/structured-outputs-to-tool-calls.md` | Scopes the migration from fixed structured JSON calls to durable async tool invocations, including resume semantics and model-readable tool errors. |
+
 ## Cross-cutting findings (surfaced by the audit)
 
 These reframed the work and are encouraging — a lot is "connect / delete," not
