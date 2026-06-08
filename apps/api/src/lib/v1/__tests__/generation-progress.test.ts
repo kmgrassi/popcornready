@@ -295,6 +295,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
       .map((e) => (e as Extract<EventRecord, { kind: "stage_begin" }>).type);
     assert.deepEqual(stageBeginOrder, [
       "creative_plan",
+      "storyboard",
       "timeline_assembly",
       "quality_review",
     ]);
@@ -305,6 +306,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
       .map((e) => (e as Extract<EventRecord, { kind: "stage_succeed" }>).type);
     assert.deepEqual(stageSucceeds, [
       "creative_plan",
+      "storyboard",
       "timeline_assembly",
       "quality_review",
     ]);
@@ -313,7 +315,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
     const attached = events
       .filter((e) => e.kind === "stage_attach_job")
       .map((e) => (e as Extract<EventRecord, { kind: "stage_attach_job" }>).jobId);
-    assert.ok(attached.length >= 3 && attached.every((id) => id === job.id));
+    assert.ok(attached.length >= 4 && attached.every((id) => id === job.id));
 
     // timeline_assembly produces a `timeline` stage item that succeeds.
     const tlItemStart = events.find(
@@ -333,6 +335,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
       )
       .filter((p): p is number => typeof p === "number");
     assert.ok(runPercents.includes(20), "creative_plan run percent");
+    assert.ok(runPercents.includes(35), "storyboard run percent");
     assert.ok(runPercents.includes(50), "timeline_assembly run percent");
     assert.ok(runPercents.includes(75), "quality_review run percent");
     assert.ok(runPercents.includes(100), "completion run percent");
@@ -441,6 +444,58 @@ test("runGenerationJob pauses after a persisted gated stage instead of advancing
   });
 });
 
+test("runGenerationJob honors storyboard review gates", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-storyboard-gate-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runPayload = await createRunWithSeedStages({
+        store: runStore,
+        projectId: project.id,
+        body: {
+          briefVersionId: brief.id,
+          reviewGates: ["storyboard"],
+        },
+      });
+      const emitter = createPersistedRunProgressEmitter(runStore, runPayload.run.runId);
+
+      const paused = await runGenerationJob(store, job.id, fakeDeps, emitter);
+      assert.equal(paused.status, "queued");
+      assert.equal(paused.result, null);
+
+      const payload = await assemblePayload(runStore, runPayload.run.runId);
+      assert.ok(payload);
+      assert.equal(payload!.run.reviewGate?.state, "awaiting_review");
+      assert.equal(payload!.run.reviewGate?.stageType, "storyboard");
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "creative_plan")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "storyboard")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "timeline_assembly")?.status,
+        "queued"
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("runGenerationJob fails the active stage when critique yields an empty timeline", async () => {
   await withStore(async (store) => {
     const project = await seedProject(store);
@@ -507,7 +562,7 @@ test("runGenerationJob fails the active stage when critique yields an empty time
         { kind: "stage_succeed" }
       >[]
     ).map((e) => e.type);
-    assert.deepEqual(succeeded, ["creative_plan", "timeline_assembly"]);
+    assert.deepEqual(succeeded, ["creative_plan", "storyboard", "timeline_assembly"]);
   });
 });
 

@@ -344,6 +344,21 @@ export async function runGenerationJob(
     }
     haltAfterIfRequested("creative_plan");
 
+    // storyboard: PR1 seeds storyboard as a first-class stage, but this
+    // pipeline does not yet generate storyboard artifacts. Run a pass-through
+    // stage so the rail advances and storyboard review gates can pause.
+    activeStage = await progress.beginStage("storyboard", {
+      label: "Storyboarding",
+      message: "Preparing storyboard context.",
+    });
+    await activeStage.attachJob(job.id);
+    await progress.updateRun({ progressPercent: 35, message: "Preparing storyboard." });
+    await activeStage.succeed({
+      message: "Storyboard context ready.",
+    });
+    activeStage = null;
+    haltAfterIfRequested("storyboard");
+
     // timeline_assembly: select clips and build the timeline segments.
     job = await saveJobUpdate(
       store,
