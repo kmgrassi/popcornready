@@ -67,9 +67,11 @@ export function AppLayout() {
           <AuthNavButton />
         </nav>
       </header>
-      <main className="web-shell-body">
+      {/* Non-landmark wrapper: each route owns its own <main> (HomePage,
+          AuthForm, …), so this must not be a second <main> landmark. */}
+      <div className="web-shell-body">
         <Outlet />
-      </main>
+      </div>
       <footer className="web-shell-footer">
         <span className="web-shell-footer-brand">Popcorn Ready</span>
         <ThemeToggle />
@@ -193,6 +195,7 @@ export function AuthenticatedAppLayout() {
           <Link className="dashboard-primary-action" to="/studio">
             New video
           </Link>
+          <ThemeToggle />
         </div>
       </aside>
 
@@ -232,9 +235,6 @@ export function AuthenticatedAppLayout() {
         <main className="dashboard-route-frame">
           <Outlet />
         </main>
-        <footer className="dashboard-footer">
-          <ThemeToggle />
-        </footer>
       </div>
     </div>
   );
