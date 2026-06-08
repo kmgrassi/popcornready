@@ -435,9 +435,102 @@ still call the agents in a fixed order, as long as each stage persists the
 resource and the next stage consumes it by ID. The orchestrator-tools lane can
 later replace the fixed order with tool selection and self-healing.
 
+## Execution and stage contracts
+
+There are two layers to keep distinct:
+
+1. **Leaf agents** produce structured JSON. These are model calls like the
+   existing `planEdit()` pattern: prompt in, JSON schema out, validated and
+   persisted by the server.
+2. **The orchestrator** chooses tools. In the first implementation this can be a
+   fixed server sequence. Later, the orchestrator-tools lane can make it an
+   agent loop where the orchestrator emits tool calls such as
+   `develop_story_blueprint`, `draft_script`, `generate_anchor`, or
+   `assemble_timeline`.
+
+Do not make leaf agents directly mutate storage. They return JSON. Server-side
+tool handlers validate, persist, attach run artifacts, update project pointers,
+and advance the run.
+
+### First implementation: fixed engine, structured outputs
+
+| Stage | Caller / agent | Input loaded by server | Agent output | Server persists | Next stage receives |
+| --- | --- | --- | --- | --- | --- |
+| `brief_intake` | API / engine | request body or existing `briefVersionId` | none, deterministic validation | `brief_versions` row; run/stage status | `briefVersionId`, `VideoBriefInput` |
+| `story_development` | Story Agent (`developStoryBlueprint`) | `BriefVersion`, duration plan, project context | `StoryBlueprint` JSON | `story_blueprints` row; `projects.current_story_blueprint_id`; stage artifact snapshot/ref | `storyBlueprintId` |
+| `script_planning` | Script Agent (`draftScriptScenes`) | `BriefVersion`, `StoryBlueprint`, duration plan | `ScriptDraft` JSON | `script_drafts` row; `projects.current_script_draft_id`; stage artifact snapshot/ref | `scriptDraftId`, `storyBlueprintId` |
+| `creative_plan` | Shot Planner Agent (`planShotsFromStory`) | `BriefVersion`, `StoryBlueprint`, `ScriptDraft`, duration plan | `EditPlan` JSON with scenes/beats/durations/character IDs | `projects.plan`; stage artifact snapshot/ref; optional `compositions` seed | `EditPlan`, stable scene/beat IDs |
+| `visual_anchors` | Anchor Planner + anchor generation tools | `EditPlan`, story/script characters, existing asset pool | `VisualAnchorRequirement[]` JSON plus generated/selected anchor assets | `character_anchor` / `scene_anchor` assets and selections; stage items; provenance | active anchor IDs by scene/beat |
+| `storyboard` | Storyboard tool/agent | `EditPlan`, applicable anchor IDs | `beat_storyboard` assets | pooled assets with `depicts.beatId` and anchor provenance; stage items | approved storyboard asset IDs by beat |
+| `asset_generation` | Visual media tools | `EditPlan`, applicable anchors, approved storyboard tiles, provider policy | `beat_keyframe`, `beat_clip`, and caption/visual-support assets | pooled assets, active selections, generation jobs/items, provenance input edges | ready visual asset IDs |
+| `audio_generation` | Audio/Narration Agent + audio tools | `ScriptDraft`, timeline target, existing audio policy | narration/voice/music assets or no-op decision | audio assets, measured duration, narration strategy | ready audio asset IDs |
+| `timeline_assembly` | Editor Agent (`assembleTimeline`) | `EditPlan`, ready visual/audio assets, composition | `VersionedTimeline` / `EditGraph` JSON | `timelines`, `edit_graphs`, stage artifact | timeline ID |
+| `quality_review` | Critic Agent | timeline, edit graph, upstream story/script/plan/asset IDs | patch decisions or regeneration proposal JSON | critic report, patch ops, optional regeneration request | revised timeline or blocked proposal |
+| `export` | Render tool | approved timeline/render plan | render artifact metadata | export job/artifact row | final MP4 URL |
+
+### Stage transition rules
+
+- A stage advances only after its canonical output is persisted and its run stage
+  is marked succeeded.
+- The next stage reads by IDs from storage, not by hidden prompt context. For
+  example, `script_planning` receives `storyBlueprintId`, then the server loads
+  the `story_blueprints` row.
+- Review gates pause after a stage succeeds and before the next expensive or
+  dependent stage starts. Approval records the stage as reviewed; rejection
+  creates a revision/retry request against that stage's canonical resource.
+- For `targetLengthSec > 120`, the fixed engine must enforce approval before
+  `asset_generation`: story blueprint, script draft, shot/beat plan, visual
+  anchors, and storyboard/pre-viz.
+- Every generated asset records input edges by ID: `beatId`, applicable
+  `anchorIds`, `storyboardAssetId`, `firstFrameAssetId`, `audioId`, and
+  upstream asset IDs when relevant.
+- Tool failures should be structured and actionable. Example: if a beat uses a
+  recurring main character but no active `character_anchor` exists, the media
+  tool returns a precondition miss; the engine/orchestrator routes back through
+  `visual_anchors` to satisfy it.
+
+### Target implementation: orchestrator tool loop
+
+The target orchestrator does not ask each specialist agent to call arbitrary
+storage APIs. It calls server-owned tools with typed inputs and receives typed
+results:
+
+```ts
+type StoryToolCall =
+  | { tool: "develop_story_blueprint"; input: { briefVersionId: string } }
+  | { tool: "draft_script"; input: { briefVersionId: string; storyBlueprintId: string } }
+  | { tool: "plan_shots"; input: { briefVersionId: string; storyBlueprintId: string; scriptDraftId: string } }
+  | { tool: "plan_visual_anchors"; input: { projectId: string; planVersionId?: string } }
+  | { tool: "generate_anchor"; input: { requirementId: string; prompt: string } }
+  | { tool: "generate_storyboard"; input: { beatId: string; anchorIds?: string[] } }
+  | { tool: "generate_media"; input: { beatId: string; storyboardAssetId?: string; anchorIds?: string[] } }
+  | { tool: "assemble_timeline"; input: { projectId: string; compositionId?: string } }
+  | { tool: "critique_timeline"; input: { timelineId: string } }
+  | { tool: "export_video"; input: { timelineId: string } };
+
+type StoryToolResult =
+  | { ok: true; resourceIds: string[]; artifactIds?: string[]; costUsd?: number }
+  | { ok: false; error: ToolError };
+```
+
+Leaf agents remain structured-output calls behind those tools:
+
+- `develop_story_blueprint` calls the Story Agent and persists
+  `StoryBlueprint`.
+- `draft_script` calls the Script Agent and persists `ScriptDraft`.
+- `plan_shots` calls the Shot Planner Agent and persists `EditPlan`.
+- `plan_visual_anchors` may be deterministic plus model-assisted: it proposes
+  `VisualAnchorRequirement[]`, but only requirements that matter for continuity
+  or provider constraints.
+- `generate_anchor`, `generate_storyboard`, `generate_media`, and `export_video`
+  are provider/tool calls with deterministic precondition validation.
+
+This gives the future orchestrator latitude to re-enter any point in the flow
+without losing the artifact chain.
+
 ## Stage changes
 
-Add two stages before `creative_plan`:
+Target stage order:
 
 ```text
 brief_intake
@@ -463,9 +556,10 @@ New `GenerationStageType` values:
 - `script_planning`
 - `visual_anchors`
 
-Both should be gateable. Reviewing the story blueprint is cheaper and more
-valuable than reviewing generated video after the wrong story has already been
-made.
+All three new stages should be gateable. Reviewing the story blueprint is
+cheaper and more valuable than reviewing generated video after the wrong story
+has already been made. Visual anchors are also worth reviewing because they can
+steer many downstream storyboard, keyframe, and clip generations.
 
 For runs where `targetLengthSec > 120`, these gates are mandatory:
 
