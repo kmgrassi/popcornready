@@ -28,6 +28,7 @@ export type AssetRole =
   // Photoreal first frame for a beat. The ONLY image role allowed to seed a
   // clip's image-to-video first frame (`firstFrameAssetId`).
   | "beat_keyframe"
+  | "beat_storyboard"
   | "beat_clip"
   | "soundtrack"
   | "voiceover"

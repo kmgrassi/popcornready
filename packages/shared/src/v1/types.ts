@@ -11,7 +11,7 @@ import {
   EDIT_GRAPH_SCHEMA_VERSION,
   EditGraphDocument,
 } from "../edit-graph";
-import { AspectRatio, CriticReport, StoryContext, TimelineSegment } from "../types";
+import { AspectRatio, CriticReport, EditPlan, StoryContext, TimelineSegment } from "../types";
 
 export type { AspectRatio } from "../types";
 
@@ -35,6 +35,9 @@ export interface V1Project {
   workspaceId: string;
   name: string;
   status: ProjectStatus;
+  // The project's editable storyboard plan (Scenes -> Beats). Null until a plan
+  // exists. Edited via PUT /projects/:id/plan (Storyboard & Scenes — PR6).
+  plan?: EditPlan | null;
   createdAt: string;
   updatedAt: string;
 }

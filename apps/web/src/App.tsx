@@ -55,6 +55,10 @@ export function App() {
           <Route path="/brand" element={<BrandKitPage />} />
           <Route path="/storyboard" element={<StoryboardPage />} />
           <Route
+            path="/projects/:projectId/storyboard"
+            element={<StoryboardPage />}
+          />
+          <Route
             path="/settings"
             element={
               <WorkspaceStubPage

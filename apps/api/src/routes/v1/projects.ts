@@ -5,12 +5,19 @@ import {
   parseAnalyzeBatch,
   parseCreateProject,
   parsePagination,
+  parseUpdateProjectPlan,
 } from "@/lib/api/v1/schemas";
 import {
   analyzeAssetBatch,
   getAssetAnalysisJob,
 } from "@/lib/api/v1/asset-analysis";
-import { createProject, getProject, listProjects } from "@/lib/api/v1/store";
+import {
+  createProject,
+  getProject,
+  listProjects,
+  updateProjectPlan,
+} from "@/lib/api/v1/store";
+import { regenerateBeatTile } from "@/lib/api/v1/storyboard";
 
 export const projectsRouter = Router();
 
@@ -47,6 +54,38 @@ projectsRouter.get(
     }
     const project = await getProject(auth.workspaceId, params.projectId);
     return { status: 200, body: { project } };
+  })
+);
+
+// Persist the project's edited storyboard plan (Scenes -> Beats). Scene/beat
+// ids are preserved by the editor and validated as stable + unique here.
+projectsRouter.put(
+  "/projects/:projectId/plan",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const plan = parseUpdateProjectPlan(body);
+    const project = await updateProjectPlan(auth.workspaceId, params.projectId, plan);
+    return { status: 200, body: { project } };
+  })
+);
+
+// Regenerate the storyboard sketch tile for ONE beat (recompute-affected only).
+projectsRouter.post(
+  "/projects/:projectId/storyboard/beats/:beatId/regenerate",
+  mutation(async ({ auth }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    if (!params.beatId) {
+      throw new ApiError("validation_failed", "beatId is required.");
+    }
+    return regenerateBeatTile({
+      auth,
+      projectId: params.projectId,
+      beatId: params.beatId,
+    });
   })
 );
 

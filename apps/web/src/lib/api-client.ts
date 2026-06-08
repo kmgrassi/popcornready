@@ -254,6 +254,14 @@ export interface StudioProjectResponse {
   project: Project | null;
 }
 
+export interface RegenerateBeatTileResponse {
+  projectId: string;
+  beatId: string;
+  sceneId: string;
+  storyboardAssetId: string | null;
+  status: "regenerated" | "queued" | "pending_generator";
+}
+
 // Read-only projection consumed by the Storyboard view (storyboard-scenes PR5):
 // the project's plan (Scenes → Beats) plus its pooled assets. The view resolves
 // each beat's `beat_storyboard` sketch tile from `assets` by
@@ -270,7 +278,7 @@ function studioProjectFromV1(project: V1Project): Project {
   return {
     id: project.id,
     goal: project.name,
-    plan: null,
+    plan: project.plan ?? null,
     timeline: null,
     clips: [],
     critic: null,
@@ -293,6 +301,20 @@ export const v1Api = {
   getProject: (projectId: string) =>
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
+    ),
+  // Persist an edited storyboard plan (Scenes -> Beats). Scene/beat ids must be
+  // stable across edits; the API validates them as unique + non-empty.
+  updateProjectPlan: (projectId: string, plan: EditPlan) =>
+    apiRequest<ProjectResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/plan`,
+      { method: "PUT", body: plan }
+    ),
+  // Regenerate the storyboard sketch tile for a single beat (recompute-affected
+  // only — triggers generation for just this beat).
+  regenerateBeatTile: (projectId: string, beatId: string) =>
+    apiRequest<RegenerateBeatTileResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard/beats/${encodeURIComponent(beatId)}/regenerate`,
+      { method: "POST", body: {} }
     ),
   getGenerationRun: (
     projectId: string,

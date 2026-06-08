@@ -24,6 +24,7 @@
 import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { EditPlan } from "@popcorn/shared/types";
 import { notFound } from "./errors";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
@@ -62,6 +63,8 @@ export interface V1Project {
   status: "active" | "deleted";
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
+  // Editable storyboard plan (Scenes -> Beats). Null until a plan exists.
+  plan: EditPlan | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -292,6 +295,7 @@ interface ProjectRow {
   status: "active" | "deleted";
   brief: VideoBrief | null;
   current_brief_version_id: string | null;
+  plan: EditPlan | null;
   visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
@@ -306,6 +310,7 @@ function mapProject(row: ProjectRow): V1Project {
     status: row.status,
     brief: row.brief ?? null,
     currentBriefVersionId: row.current_brief_version_id ?? null,
+    plan: row.plan ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -609,6 +614,30 @@ export async function getProject(
     .maybeSingle();
   if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
   throwOnError(error, "getProject");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  return mapProject(data as ProjectRow);
+}
+
+// Persist the project's editable storyboard plan (Scenes -> Beats). Replaces the
+// whole plan; callers (the storyboard editor) keep scene/beat ids stable across
+// edits so downstream assets/provenance keep referencing the same nodes.
+export async function updateProjectPlan(
+  workspaceId: string,
+  projectId: string,
+  plan: EditPlan
+): Promise<V1Project> {
+  const db = getServiceSupabase();
+  const now = new Date().toISOString();
+  const { data, error } = await db
+    .from("projects")
+    .update({ plan, updated_at: now })
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .select("*")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "updateProjectPlan");
   if (!data) throw notFound(`Project not found: ${projectId}`);
   return mapProject(data as ProjectRow);
 }
