@@ -5,6 +5,26 @@
 Move Popcorn Ready's model-facing generation flow from fixed server sequencing
 with one-shot structured JSON outputs to an orchestrator-driven tool-call loop.
 
+This scope applies to the whole model-facing generation stack, not only the
+storyboard handoff. The story-development flow is the first concrete path that
+needs the new contracts, but the migration target covers every agent that
+currently returns JSON into a fixed server sequence:
+
+- Story Agent
+- Script Agent
+- Shot Planner Agent
+- Visual Anchor Planner
+- Storyboard Agent
+- Media-generation planning/review agents
+- Audio/Narration Agent
+- Editor/Timeline Agent
+- Critic/Revision Agent
+
+Provider adapters such as image, video, audio, render, and export are not
+"agents," but they should also be wrapped as server-owned tools so the
+orchestrator can call them, wait on them asynchronously, and receive structured
+errors.
+
 Today the server decides the order:
 
 ```text
