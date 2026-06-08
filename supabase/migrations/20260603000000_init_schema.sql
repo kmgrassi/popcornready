@@ -37,7 +37,7 @@ create type composition_mode      as enum ('asset_driven', 'prompt_only', 'hybri
 create type composition_status    as enum ('planning', 'generating_assets', 'ready_for_timeline', 'failed');
 create type job_type              as enum ('asset_ingest', 'asset_generation', 'composition', 'generation', 'revision', 'export', 'audio_alignment');
 create type job_status            as enum ('queued', 'running', 'succeeded', 'failed', 'canceled');
-create type generation_stage_type as enum ('brief_intake', 'creative_plan', 'asset_generation', 'audio_generation', 'timeline_assembly', 'quality_review', 'export', 'ready');
+create type generation_stage_type as enum ('brief_intake', 'creative_plan', 'storyboard', 'asset_generation', 'audio_generation', 'timeline_assembly', 'quality_review', 'export', 'ready');
 create type stage_item_kind       as enum ('image', 'video', 'audio', 'caption', 'timeline', 'export');
 
 -- eval framework.
