@@ -3,7 +3,29 @@
 > **Status:** Vision + scope. **Not implemented yet.** This is the authoritative
 > reference for how generation should evolve. New work (human or agent) should
 > align to it, and any deviation should be a conscious, documented decision.
-> Last updated 2026-06-01.
+> Last updated 2026-06-08.
+
+## 0. What Popcorn Ready is (the positioning)
+
+**Popcorn Ready is the agent harness for video.** Coding harnesses — Codex,
+Claude Code, and the like — turned software into something you *direct* instead
+of hand-build: you state intent, and an agent plans, writes, and edits the code.
+Popcorn Ready is that harness for video. You describe what you want; the agent
+plans the beats, generates the assets, edits the cut, and renders. This is the
+AI-first way video gets made.
+
+This is not a tagline bolted on after the fact — it *is* the architecture below.
+A harness is only a harness because **the agent owns the whole flow and every
+stage is a tool it calls** (§2, Principle 1). Everything in this document — the
+non-one-directional pipeline, stages-as-tools, selective regeneration, the
+provenance graph the agent reasons over — is what makes the harness framing
+true. Conversely, the model we must NOT entrench (§3, the forward-only "edit the
+timeline with patches" conveyor belt) is the *opposite* of a harness: it's a
+fixed pipeline with AI bolted on. Keep new work on the harness side of that line.
+
+This positioning is the product's public value proposition (the landing page and
+[`scopes/website-and-productization.md`](scopes/website-and-productization.md)
+lead with it); align marketing and product copy to it.
 
 ## 1. The North Star (read this first)
 

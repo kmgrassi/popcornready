@@ -9,6 +9,17 @@ presents hosted pricing, and points self-hosters to GitHub. It connects the
 landing experience to the productization phases already defined in
 [`../productionization-scope.md`](../productionization-scope.md).
 
+## Positioning (the value prop the copy leads with)
+
+**Popcorn Ready is the agent harness for video.** Coding harnesses (Codex,
+Claude Code) turned software into something you *direct* instead of hand-build;
+Popcorn Ready is that harness for video — describe what you want and the agent
+plans, generates, edits, and renders a finished cut. This is the public framing
+of the [North Star](../NORTH_STAR.md#0-what-popcorn-ready-is-the-positioning):
+the agent owns the whole flow, which is exactly what makes it a harness rather
+than an editor with AI bolted on. All landing/marketing copy should lead with
+this.
+
 ## What Ships First (in this repo today)
 
 - A marketing landing page at `/` that explains what Popcorn Ready is, how the loop
@@ -39,7 +50,8 @@ block) is the remaining Phase 3 hardening.
 
 ## Landing Page Content Model
 
-- **Hero**: one-line value prop + the one-shot prompt form with template chips.
+- **Hero**: the "agent harness for video" value prop (see Positioning above) +
+  the one-shot prompt form with template chips.
 - **How it works**: the four-step loop — brief, plan, editable timeline,
   deterministic render — mirroring the README pipeline.
 - **What it does**: bring-or-generate footage, character consistency,
