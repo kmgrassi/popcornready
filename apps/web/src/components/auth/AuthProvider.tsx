@@ -24,9 +24,27 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  clearError: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+// Turn a Supabase auth error into a user-facing message. Falls back to the raw
+// message so nothing is hidden; only the most common codes get friendlier copy.
+function describeAuthError(err: unknown): string {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code?: unknown }).code ?? "")
+      : "";
+  if (code === "email_not_confirmed") {
+    return "Your email isn't confirmed yet. Check your inbox for the verification link, then sign in.";
+  }
+  if (code === "invalid_credentials") {
+    return "Incorrect email or password.";
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
@@ -50,7 +68,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       setUser(session?.user ?? null);
       setStatus(session?.user ? "authenticated" : "unauthenticated");
-      setError(null);
+      // Only clear a surfaced error on a *successful* auth. A SIGNED_OUT event —
+      // e.g. AuthForm defensively clearing a stale local session after a failed
+      // sign-in — must not wipe the sign-in/sign-up error before the user reads it.
+      if (session?.user) setError(null);
     });
 
     void supabase.auth
@@ -65,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         setUser(null);
         setStatus("unauthenticated");
-        setError(err instanceof Error ? err.message : String(err));
+        setError(describeAuthError(err));
       });
 
     return () => {
@@ -89,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       setUser(null);
       setStatus("unauthenticated");
-      setError(err instanceof Error ? err.message : String(err));
+      setError(describeAuthError(err));
     }
   }, []);
 
@@ -116,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       setUser(null);
       setStatus("unauthenticated");
-      setError(err instanceof Error ? err.message : String(err));
+      setError(describeAuthError(err));
     }
   }, []);
 
@@ -129,9 +150,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStatus("unauthenticated");
   }, []);
 
+  // Lets a view drop a stale surfaced error without a status change — e.g. the
+  // auth form clears the previous message when the user switches login <-> signup.
+  const clearError = useCallback(() => setError(null), []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, error, configured, signIn, signUp, signOut }),
-    [status, user, error, configured, signIn, signUp, signOut]
+    () => ({ status, user, error, configured, signIn, signUp, signOut, clearError }),
+    [status, user, error, configured, signIn, signUp, signOut, clearError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

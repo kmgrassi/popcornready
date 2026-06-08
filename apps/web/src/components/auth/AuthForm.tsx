@@ -10,12 +10,18 @@ type AuthFormProps = {
 
 export function AuthForm({ mode }: AuthFormProps) {
   const navigate = useNavigate();
-  const { status, error, configured, signIn, signUp } = useAuth();
+  const { status, error, configured, signIn, signUp, clearError } = useAuth();
   const [ready, setReady] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const loading = status === "loading";
   const isSignup = mode === "signup";
+
+  // Drop any error left over from the other auth form so switching
+  // login <-> signup doesn't start with an unrelated message.
+  useEffect(() => {
+    clearError();
+  }, [mode, clearError]);
 
   useEffect(() => {
     if (!configured) {
