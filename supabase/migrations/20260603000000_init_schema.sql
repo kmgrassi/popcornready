@@ -1,89 +1,242 @@
--- Supabase-generated UUID primary keys everywhere.
+-- Popcorn Ready — consolidated initial schema (v1 model + eval + tiers/visibility).
 --
--- ===========================================================================
--- !! DESTRUCTIVE / RESET MIGRATION !!
--- ===========================================================================
--- The original v1 + eval schema minted TEXT primary keys app-side
--- (proj_*, asset_*, briefv_*, comp_*, job_*, eg_*, tl_*, genrun_*, evalrun_*,
--- judgment_*, …) and keyed workspaces on a TEXT id (ws_local_dev / ws_user_*).
--- This migration moves EVERY persisted entity to a DB-generated UUID primary key
--- (`uuid primary key default gen_random_uuid()`), and repoints every foreign-key
--- column that referenced those text ids to `uuid`.
+-- This single migration is the squashed, conflict-free replacement for the
+-- original June 3–5 migration set, which had accumulated several parallel,
+-- agent-generated drafts with COLLIDING timestamps and contradictory
+-- definitions (two `judgments` tables, a destructive uuid-PK "reset", and four
+-- overlapping tier/visibility implementations written against the pre-uuid
+-- text-PK schema). That set could not apply cleanly — `supabase db push` failed
+-- with `relation "judgments" already exists`.
 --
--- Existing text ids like 'proj_abc' are NOT valid UUIDs, so an in-place
--- `alter column ... type uuid using id::uuid` would fail. The dev tables are
--- effectively empty (e.g. GET /eval/suites returns []), so this migration
--- DROPS and RECREATES the affected tables instead of attempting a cast.
+-- The final intended state captured here:
+--   * DB-generated UUID primary keys everywhere (app no longer mints ids).
+--   * public.users decoupled from auth.users (auth_id link + signup mirror).
+--   * Full v1 data model (workspaces/projects/assets/compositions/jobs/
+--     timelines/edit_graphs + generation runs/stages/items/artifacts).
+--   * Eval framework (suites/cases/runs/judgments/expectation_results), with a
+--     single reconciled `judgments` table covering inline + offline provenance.
+--   * User tiers + public/private content visibility, public-read RLS, DB-side
+--     tier→visibility enforcement, discovery search RPCs, saved-asset bookmarks.
 --
--- *** THIS RESETS (DELETES ALL ROWS IN) the following tables ***:
---   workspaces, workspace_members, workspace_invites,
---   projects, brief_versions, assets, compositions, jobs, edit_graphs,
---   timelines, generation_runs, generation_stages, generation_stage_items,
---   generation_stage_artifacts, idempotency,
---   eval_suites, eval_cases, eval_runs, judgments, expectation_results.
---
--- public.users is preserved (its id is already a UUID); workspaces is dropped and
--- recreated, which also drops the auth-user mirror's workspace data. Apply ONLY
--- against an empty / disposable dev database. There is no down-migration.
---
--- IN-JSON KEYS ARE EXEMPT (the DB cannot generate them — they live inside jsonb
--- document columns, not as DB columns): edit-graph node ids, beat ids
--- (beat_${i}_${name}), timeline segment/clip ids, planned-beat ids, the eval
--- artifact ids stored inside eval_cases.artifacts. Ephemeral request/correlation
--- ids (req_*) are likewise not persisted PKs and are exempt.
+-- Identity & RLS conventions: docs/supabase-identity-and-rls.md + supabase/README.md.
+-- Because this rewrites the migration history, the linked dev database must be
+-- reset (`supabase db reset --linked`) so it re-applies from this baseline.
 
 set check_function_bodies = off;
 
--- ---------------------------------------------------------------------------
--- 0. Tear down everything keyed on the old text ids.
--- ---------------------------------------------------------------------------
--- Drop the v1 + eval tables (CASCADE clears their policies, indexes, triggers,
--- and cross-FKs). Order does not matter under CASCADE, but we list children
--- before parents for readability.
-drop table if exists expectation_results        cascade;
-drop table if exists judgments                  cascade;
-drop table if exists eval_runs                  cascade;
-drop table if exists eval_cases                 cascade;
-drop table if exists eval_suites                cascade;
+create extension if not exists pgcrypto;
 
-drop table if exists generation_stage_artifacts cascade;
-drop table if exists generation_stage_items     cascade;
-drop table if exists generation_stages          cascade;
-drop table if exists generation_runs            cascade;
-drop table if exists timelines                  cascade;
-drop table if exists edit_graphs                cascade;
-drop table if exists jobs                       cascade;
-drop table if exists compositions               cascade;
-drop table if exists assets                     cascade;
-drop table if exists brief_versions             cascade;
-drop table if exists projects                   cascade;
+-- ===========================================================================
+-- 0. Enums
+-- ===========================================================================
+-- v1 model (mirror the TS string unions).
+create type project_status        as enum ('active', 'deleted');
+create type asset_kind            as enum ('video', 'image', 'audio');
+create type asset_status          as enum ('pending', 'processing', 'ready', 'failed');
+create type composition_mode      as enum ('asset_driven', 'prompt_only', 'hybrid');
+create type composition_status    as enum ('planning', 'generating_assets', 'ready_for_timeline', 'failed');
+create type job_type              as enum ('asset_ingest', 'asset_generation', 'composition', 'generation', 'revision', 'export', 'audio_alignment');
+create type job_status            as enum ('queued', 'running', 'succeeded', 'failed', 'canceled');
+create type generation_stage_type as enum ('brief_intake', 'creative_plan', 'storyboard', 'asset_generation', 'audio_generation', 'timeline_assembly', 'quality_review', 'export', 'ready');
+create type stage_item_kind       as enum ('image', 'video', 'audio', 'caption', 'timeline', 'export');
 
-drop table if exists idempotency                cascade;
+-- eval framework.
+create type eval_run_source      as enum ('suite', 'manual_workbench');
+create type eval_generation_mode as enum ('prompts_only', 'full');
+create type eval_run_status      as enum ('queued', 'running', 'succeeded', 'failed');
+create type judgment_verdict     as enum ('pass', 'needs_review', 'fail');
+create type judgment_trigger     as enum ('auto', 'manual');
 
--- Workspace membership/invites reference workspaces.id (text); drop them so the
--- workspaces id type can change, then recreate against the uuid id below.
-drop table if exists public.workspace_invites   cascade;
-drop table if exists public.workspace_members   cascade;
-drop table if exists public.workspaces          cascade;
+-- tiers / content visibility.
+create type public.user_tier  as enum ('free', 'paid');
+create type public.visibility as enum ('public', 'private');
 
--- The ownership helpers took `text` ids. CREATE OR REPLACE cannot change an
--- argument type, so drop them; they are recreated with uuid params further down.
-drop function if exists public.owns_workspace(text)     cascade;
-drop function if exists public.owns_project(text)       cascade;
-drop function if exists public.is_workspace_member(text) cascade;
-drop function if exists public.is_workspace_admin(text)  cascade;
-drop function if exists public.handle_new_workspace()    cascade;
-drop function if exists public.accept_workspace_invite(text) cascade;
-drop function if exists public.expire_stale_workspace_invites() cascade;
+-- ===========================================================================
+-- 1. Domain users (decoupled from auth.users) + shared helpers.
+-- ===========================================================================
+-- public.users.id is the app/domain user id; auth_id links to auth.users and is
+-- NULL until signup (lets us pre-create invited users). RLS resolves
+-- auth.uid() -> public.users.id via current_app_user_id().
+create table public.users (
+  id              uuid primary key default gen_random_uuid(),
+  auth_id         uuid unique references auth.users (id) on delete set null,
+  email           text,
+  full_name       text,
+  first_name      text,
+  last_name       text,
+  avatar_url      text,
+  metadata        jsonb         not null default '{}'::jsonb,
+  -- Tier metadata (changed only by trusted server roles; see guard trigger).
+  tier            public.user_tier not null default 'free',
+  tier_source     text,
+  tier_changed_at timestamptz   not null default now(),
+  created_at      timestamptz   not null default now(),
+  updated_at      timestamptz   not null default now()
+);
 
--- ---------------------------------------------------------------------------
--- 1. Core ownership — workspaces keyed on a uuid id.
--- ---------------------------------------------------------------------------
+-- One unlinked (pre-auth) row per email so the signup trigger can link unambiguously.
+create unique index users_unique_unlinked_email
+  on public.users (lower(btrim(email)))
+  where auth_id is null and email is not null and btrim(email) <> '';
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create trigger users_set_updated_at
+  before update on public.users
+  for each row execute function public.set_updated_at();
+
+-- auth.uid() -> public.users.id. SECURITY DEFINER so RLS policies on other tables
+-- can call it without recursing through public.users' own RLS.
+create or replace function public.current_app_user_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.users where auth_id = auth.uid() limit 1
+$$;
+revoke all on function public.current_app_user_id() from public;
+grant execute on function public.current_app_user_id() to authenticated, service_role;
+
+-- auth.users -> public.users mirror / link on signup.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_first_name text := new.raw_user_meta_data ->> 'first_name';
+  v_last_name  text := new.raw_user_meta_data ->> 'last_name';
+  v_full_name  text := nullif(btrim(concat_ws(' ', v_first_name, v_last_name)), '');
+  v_email      text := coalesce(new.email, new.raw_user_meta_data ->> 'email');
+  v_existing   uuid;
+begin
+  if nullif(v_email, '') is not null then
+    select id into v_existing
+    from public.users
+    where auth_id is null
+      and lower(btrim(email)) = lower(btrim(v_email));
+  end if;
+
+  if v_existing is not null then
+    update public.users set
+      auth_id    = new.id,
+      first_name = coalesce(first_name, nullif(v_first_name, '')),
+      last_name  = coalesce(last_name,  nullif(v_last_name, '')),
+      full_name  = coalesce(full_name,  v_full_name),
+      avatar_url = coalesce(avatar_url, new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture'),
+      metadata   = metadata || coalesce(new.raw_user_meta_data, '{}'::jsonb)
+    where id = v_existing;
+  else
+    insert into public.users (auth_id, email, full_name, first_name, last_name, avatar_url, metadata)
+    values (
+      new.id,
+      v_email,
+      coalesce(v_full_name, new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name'),
+      v_first_name,
+      v_last_name,
+      coalesce(new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture'),
+      coalesce(new.raw_user_meta_data, '{}'::jsonb)
+    );
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Tier fields are server-owned: block changes from anon/authenticated, and bump
+-- tier_changed_at whenever the tier actually changes.
+create or replace function public.guard_user_tier_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (
+    new.tier is distinct from old.tier
+    or new.tier_source is distinct from old.tier_source
+    or new.tier_changed_at is distinct from old.tier_changed_at
+  ) and coalesce(auth.role(), '') <> 'service_role'
+    and current_user not in ('postgres', 'service_role', 'supabase_admin') then
+    raise exception 'user tier fields can only be changed by trusted server roles'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if new.tier is distinct from old.tier then
+    new.tier_changed_at := now();
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger users_guard_tier_update
+  before update of tier, tier_source, tier_changed_at on public.users
+  for each row execute function public.guard_user_tier_update();
+
+-- RLS: a signed-in user reads/updates only their own linked row. Pre-auth (invite)
+-- rows have auth_id NULL and are managed server-side via the service_role.
+alter table public.users enable row level security;
+
+create policy users_select_own on public.users
+  for select to authenticated
+  using (auth_id = auth.uid());
+
+create policy users_update_own on public.users
+  for update to authenticated
+  using (auth_id = auth.uid())
+  with check (auth_id = auth.uid());
+
+-- owner_tier: the tier of the user owning a workspace ('free' when unowned/missing).
+create or replace function public.owner_tier(ws_id uuid)
+returns public.user_tier
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(u.tier, 'free'::public.user_tier)
+  from public.workspaces w
+  left join public.users u on u.id = w.owner_id
+  where w.id = ws_id
+$$;
+revoke all on function public.owner_tier(uuid) from public;
+grant execute on function public.owner_tier(uuid) to anon, authenticated, service_role;
+
+-- ===========================================================================
+-- 2. Storage buckets (private; server reads/writes via service_role).
+-- ===========================================================================
+insert into storage.buckets (id, name, public)
+values ('assets', 'assets', false)
+on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('eval', 'eval', false)
+on conflict (id) do nothing;
+
+-- ===========================================================================
+-- 3. Workspaces + membership + invites.
+-- ===========================================================================
 create table public.workspaces (
   id             uuid primary key default gen_random_uuid(),
   schema_version text        not null default 'workspace.v1',
   -- Domain user (public.users.id) that owns this workspace; null for the seeded
-  -- local dev workspace. (workspace_members migration repointed this off auth.users.)
+  -- local dev workspace.
   owner_id       uuid        references public.users (id) on delete set null,
   name           text        not null,
   created_at     timestamptz not null default now(),
@@ -91,8 +244,8 @@ create table public.workspaces (
 );
 
 -- Natural-key uniqueness backing find-or-create (app no longer mints ids):
---   * One workspace per owning domain user (supersedes the old 1:1 ws_user_<id>).
---   * One unowned local dev workspace per name (supersedes ws_local_dev).
+--   * One workspace per owning domain user.
+--   * One unowned local dev workspace per name.
 create unique index workspaces_unique_owner
   on public.workspaces (owner_id)
   where owner_id is not null;
@@ -104,7 +257,6 @@ create trigger workspaces_set_updated_at
   before update on public.workspaces
   for each row execute function public.set_updated_at();
 
--- --- membership table (uuid workspace_id) ----------------------------------
 create table public.workspace_members (
   workspace_id uuid not null references public.workspaces (id) on delete cascade,
   user_id      uuid not null references public.users (id) on delete cascade,
@@ -120,16 +272,17 @@ create trigger workspace_members_set_updated_at
   before update on public.workspace_members
   for each row execute function public.set_updated_at();
 
--- --- invites table (uuid id + uuid workspace_id) ---------------------------
-create extension if not exists pgcrypto;
-
 create table public.workspace_invites (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces (id) on delete cascade,
   email         text not null check (btrim(email) <> ''),
   role          text not null default 'member' check (role in ('owner', 'admin', 'member')),
   invited_by    uuid references public.users (id) on delete set null,
-  token         text not null unique default encode(gen_random_bytes(32), 'hex'),
+  -- 64-char hex token from two core gen_random_uuid()s (~244 bits of entropy).
+  -- Avoids pgcrypto's gen_random_bytes, which on Supabase lives in the
+  -- `extensions` schema and is not on the search_path at migration time.
+  token         text not null unique
+                  default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
   status        text not null default 'pending'
                   check (status in ('pending', 'accepted', 'revoked', 'expired')),
   expires_at    timestamptz not null default (now() + interval '14 days'),
@@ -148,9 +301,7 @@ create trigger workspace_invites_set_updated_at
   before update on public.workspace_invites
   for each row execute function public.set_updated_at();
 
--- ---------------------------------------------------------------------------
--- 2. Membership / ownership helpers + triggers (uuid params).
--- ---------------------------------------------------------------------------
+-- --- membership / ownership helpers ----------------------------------------
 create or replace function public.handle_new_workspace()
 returns trigger
 language plpgsql
@@ -204,8 +355,6 @@ $$;
 revoke all on function public.is_workspace_admin(uuid) from public;
 grant execute on function public.is_workspace_admin(uuid) to authenticated, service_role;
 
--- The v1 RLS policies below call owns_workspace()/owns_project(); recreated here
--- with uuid params so access still follows membership + the domain identity.
 create or replace function public.owns_workspace(ws_id uuid)
 returns boolean
 language sql
@@ -232,9 +381,7 @@ as $$
   );
 $$;
 
--- ---------------------------------------------------------------------------
--- 3. Invite accept/expire flows (uuid workspace_id; function now RETURNS uuid).
--- ---------------------------------------------------------------------------
+-- --- invite accept/expire flows --------------------------------------------
 create or replace function public.accept_workspace_invite(p_token text)
 returns uuid
 language plpgsql
@@ -314,9 +461,9 @@ $$;
 revoke all on function public.expire_stale_workspace_invites() from public;
 grant execute on function public.expire_stale_workspace_invites() to service_role;
 
--- ---------------------------------------------------------------------------
--- 4. Projects / briefs / assets — uuid PKs + uuid FKs.
--- ---------------------------------------------------------------------------
+-- ===========================================================================
+-- 4. Projects / briefs / assets (+ content visibility metadata).
+-- ===========================================================================
 create table public.projects (
   id                       uuid primary key default gen_random_uuid(),
   schema_version           text          not null default 'project.v1',
@@ -325,6 +472,7 @@ create table public.projects (
   status                   project_status not null default 'active',
   brief                    jsonb,
   current_brief_version_id uuid,
+  visibility               public.visibility not null default 'public',
   created_at               timestamptz   not null default now(),
   updated_at               timestamptz   not null default now()
 );
@@ -353,6 +501,7 @@ create table public.assets (
   url                      text,
   remote_url               text,
   storage_key              text,
+  storage_bucket           text,
   source                   jsonb       not null,
   duration_sec             double precision,
   description              text,
@@ -360,15 +509,23 @@ create table public.assets (
   semantic_analysis        jsonb,
   provenance               jsonb,
   generated_asset_job_id   uuid,
+  visibility               public.visibility not null default 'public',
   created_at               timestamptz not null default now(),
   updated_at               timestamptz not null default now()
 );
 create index assets_project_id_idx   on public.assets (project_id);
 create index assets_workspace_id_idx on public.assets (workspace_id);
 
--- ---------------------------------------------------------------------------
--- 5. Composition / jobs / timeline / edit graph — uuid PKs + uuid FKs.
--- ---------------------------------------------------------------------------
+comment on column public.projects.visibility is
+  'Public/private discovery visibility. Free-owner content is forced public by the tier enforcement trigger.';
+comment on column public.assets.visibility is
+  'Asset-level public/private visibility. Effective public access also requires the owning project to be public.';
+comment on column public.assets.storage_bucket is
+  'Physical object bucket for delivery (tracks effective visibility once the S3/CloudFront storage toggle is wired).';
+
+-- ===========================================================================
+-- 5. Composition / jobs / timeline / edit graph.
+-- ===========================================================================
 create table public.compositions (
   id                       uuid primary key default gen_random_uuid(),
   schema_version           text               not null default 'composition.v1',
@@ -410,10 +567,8 @@ create table public.edit_graphs (
   project_id       uuid        not null references public.projects (id) on delete cascade,
   brief_version_id uuid        references public.brief_versions (id) on delete set null,
   composition_id   uuid        references public.compositions (id) on delete set null,
-  -- Full EditGraphDocument (nodes/edges/timeline projection/provenance). Its
-  -- internal node ids + the document's own `id` field live INSIDE this jsonb and
-  -- are app-generated (in-JSON keys are exempt from the DB-generated-uuid rule);
-  -- the `id` column above is the DB-generated row key.
+  -- Full EditGraphDocument; its internal node ids live INSIDE this jsonb and are
+  -- app-generated (in-JSON keys are exempt from the DB-generated-uuid rule).
   document         jsonb       not null,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
@@ -438,9 +593,9 @@ create table public.timelines (
 );
 create index timelines_project_id_idx on public.timelines (project_id);
 
--- ---------------------------------------------------------------------------
--- 6. Generation runs / stages / items / artifacts — uuid PKs + uuid FKs.
--- ---------------------------------------------------------------------------
+-- ===========================================================================
+-- 6. Generation runs / stages / items / artifacts.
+-- ===========================================================================
 create table public.generation_runs (
   id                 uuid primary key default gen_random_uuid(),
   project_id         uuid                  not null references public.projects (id) on delete cascade,
@@ -491,6 +646,8 @@ create table public.generation_stage_items (
   provider         text,
   prompt_preview   text,
   asset_id         uuid            references public.assets (id) on delete set null,
+  -- Loose uuid (no FK): may point at an artifact created in a separate write or
+  -- an inline/offline artifact that is not a generation_stage_artifacts row.
   artifact_id      uuid,
   retryable        boolean,
   error            jsonb,
@@ -512,14 +669,9 @@ create table public.generation_stage_artifacts (
 create index generation_stage_artifacts_run_id_idx on public.generation_stage_artifacts (run_id);
 create index generation_stage_artifacts_stage_id_idx on public.generation_stage_artifacts (stage_id);
 
--- generation_stage_items.artifact_id references a stage artifact, but is kept a
--- LOOSE uuid (no FK) — matching the original schema, where an item may point at
--- an artifact created in a separate write or an inline/offline artifact that is
--- not a generation_stage_artifacts row.
-
--- ---------------------------------------------------------------------------
--- 7. Idempotency (composite (scope, key) PK — unchanged shape).
--- ---------------------------------------------------------------------------
+-- ===========================================================================
+-- 7. Idempotency (composite (scope, key) PK).
+-- ===========================================================================
 create table public.idempotency (
   scope         text        not null,
   key           text        not null default '',
@@ -532,9 +684,9 @@ create table public.idempotency (
   primary key (scope, key)
 );
 
--- ---------------------------------------------------------------------------
--- 8. Eval entities — uuid PKs + uuid FKs.
--- ---------------------------------------------------------------------------
+-- ===========================================================================
+-- 8. Eval entities (global admin/tooling records; service-role only).
+-- ===========================================================================
 create table public.eval_suites (
   id          uuid primary key default gen_random_uuid(),
   name        text        not null,
@@ -572,18 +724,18 @@ create table public.eval_runs (
 create index eval_runs_suite_id_idx   on public.eval_runs (suite_id);
 create index eval_runs_created_at_idx on public.eval_runs (created_at desc);
 
+-- Single reconciled judgments table: inline runs set generation_run_id; offline
+-- suite runs set eval_run_id/case_id. Append-only (UPDATE/DELETE revoked below).
 create table public.judgments (
   id                 uuid             primary key default gen_random_uuid(),
   evaluator_id       text             not null,
   rubric_version     text             not null,
   judge_model        text             not null,
-  -- Inline runs set generation_run_id; offline suite runs set eval_run_id/case_id.
   generation_run_id  uuid             references public.generation_runs (id) on delete cascade,
   eval_run_id        uuid             references public.eval_runs (id) on delete cascade,
   case_id            uuid             references public.eval_cases (id) on delete set null,
-  -- graph-node pointers: stage_id/item_id/artifact_id/asset_id are loose ids that
-  -- may reference inline/offline artifacts (not all are generation_* rows), so they
-  -- stay TEXT and are NOT FKs (mirrors the original schema's intent).
+  -- graph-node pointers: loose ids that may reference inline/offline artifacts
+  -- (not all are generation_* rows), so they stay TEXT and are NOT FKs.
   stage_id           text             not null,
   item_id            text,
   artifact_id        text,
@@ -614,10 +766,9 @@ create table public.expectation_results (
 );
 create index expectation_results_eval_run_id_idx on public.expectation_results (eval_run_id);
 
--- ---------------------------------------------------------------------------
--- 9. Row Level Security.
--- ---------------------------------------------------------------------------
--- 9a. Workspaces + membership + invites.
+-- ===========================================================================
+-- 9. Row Level Security — owner (membership) policies.
+-- ===========================================================================
 alter table public.workspaces        enable row level security;
 alter table public.workspace_members enable row level security;
 alter table public.workspace_invites enable row level security;
@@ -664,19 +815,18 @@ create policy workspace_invites_delete on public.workspace_invites
   for delete to authenticated
   using (public.is_workspace_admin(workspace_id));
 
--- 9b. v1 entities (walk back to the owning workspace via membership).
-alter table public.projects               enable row level security;
-alter table public.brief_versions         enable row level security;
-alter table public.assets                 enable row level security;
-alter table public.compositions           enable row level security;
-alter table public.jobs                   enable row level security;
-alter table public.edit_graphs            enable row level security;
-alter table public.timelines              enable row level security;
-alter table public.generation_runs        enable row level security;
-alter table public.generation_stages      enable row level security;
-alter table public.generation_stage_items enable row level security;
+alter table public.projects                   enable row level security;
+alter table public.brief_versions             enable row level security;
+alter table public.assets                     enable row level security;
+alter table public.compositions               enable row level security;
+alter table public.jobs                       enable row level security;
+alter table public.edit_graphs                enable row level security;
+alter table public.timelines                  enable row level security;
+alter table public.generation_runs            enable row level security;
+alter table public.generation_stages          enable row level security;
+alter table public.generation_stage_items     enable row level security;
 alter table public.generation_stage_artifacts enable row level security;
-alter table public.idempotency            enable row level security;
+alter table public.idempotency                enable row level security;
 
 create policy projects_owner on public.projects
   for all using (public.owns_workspace(workspace_id)) with check (public.owns_workspace(workspace_id));
@@ -726,8 +876,8 @@ create policy generation_stage_artifacts_owner on public.generation_stage_artifa
 
 -- Idempotency: service-role only (RLS on, no policy).
 
--- 9c. Eval entities — service-role only (RLS on, no end-user policy), and
--- judgments stays append-only (revoke UPDATE/DELETE even for service_role).
+-- Eval entities: service-role only (RLS on, no end-user policy); judgments stays
+-- append-only (revoke UPDATE/DELETE even for the service_role path).
 alter table public.eval_suites         enable row level security;
 alter table public.eval_cases          enable row level security;
 alter table public.eval_runs           enable row level security;
@@ -748,3 +898,268 @@ create policy judgments_owner on public.judgments
   );
 
 revoke update, delete on table public.judgments from public;
+
+-- ===========================================================================
+-- 10. Public discovery — visibility helpers, indexes, public-read RLS.
+-- ===========================================================================
+create or replace function public.project_is_public(proj_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.projects p
+    where p.id = proj_id
+      and p.visibility = 'public'
+      and p.status <> 'deleted'
+  )
+$$;
+revoke all on function public.project_is_public(uuid) from public;
+grant execute on function public.project_is_public(uuid) to anon, authenticated, service_role;
+
+create or replace function public.asset_is_effectively_public(p_asset_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.assets a
+    join public.projects p on p.id = a.project_id
+    where a.id = p_asset_id
+      and a.visibility = 'public'
+      and p.visibility = 'public'
+      and p.status <> 'deleted'
+  )
+$$;
+revoke all on function public.asset_is_effectively_public(uuid) from public;
+grant execute on function public.asset_is_effectively_public(uuid) to anon, authenticated, service_role;
+
+create or replace function public.generation_run_is_public(p_run_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.generation_runs r
+    where r.id = p_run_id
+      and public.project_is_public(r.project_id)
+  )
+$$;
+revoke all on function public.generation_run_is_public(uuid) from public;
+grant execute on function public.generation_run_is_public(uuid) to anon, authenticated, service_role;
+
+create or replace function public.generation_stage_is_public(p_stage_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.generation_stages s
+    where s.id = p_stage_id
+      and public.generation_run_is_public(s.run_id)
+  )
+$$;
+revoke all on function public.generation_stage_is_public(uuid) from public;
+grant execute on function public.generation_stage_is_public(uuid) to anon, authenticated, service_role;
+
+-- Discovery indexes (partial: only public, non-deleted content).
+create index projects_visibility_idx on public.projects (visibility)
+  where visibility = 'public' and status <> 'deleted';
+create index assets_visibility_idx on public.assets (visibility)
+  where visibility = 'public';
+create index projects_public_feed_idx on public.projects (created_at desc)
+  where visibility = 'public' and status <> 'deleted';
+create index assets_public_feed_idx on public.assets (created_at desc)
+  where visibility = 'public';
+create index projects_search_idx on public.projects
+  using gin (to_tsvector('english', coalesce(name, '') || ' ' || coalesce(brief ->> 'summary', '')))
+  where visibility = 'public' and status <> 'deleted';
+create index assets_search_idx on public.assets
+  using gin (to_tsvector('english', coalesce(description, '') || ' ' || coalesce(context ->> 'summary', '')))
+  where visibility = 'public';
+
+create policy projects_public_read on public.projects
+  for select to anon, authenticated
+  using (visibility = 'public' and status <> 'deleted');
+create policy assets_public_read on public.assets
+  for select to anon, authenticated
+  using (visibility = 'public' and public.project_is_public(project_id));
+create policy brief_versions_public_read on public.brief_versions
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy compositions_public_read on public.compositions
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy jobs_public_read on public.jobs
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy edit_graphs_public_read on public.edit_graphs
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy timelines_public_read on public.timelines
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy generation_runs_public_read on public.generation_runs
+  for select to anon, authenticated
+  using (public.project_is_public(project_id));
+create policy generation_stages_public_read on public.generation_stages
+  for select to anon, authenticated
+  using (public.generation_run_is_public(run_id));
+create policy generation_stage_items_public_read on public.generation_stage_items
+  for select to anon, authenticated
+  using (public.generation_stage_is_public(stage_id));
+create policy generation_stage_artifacts_public_read on public.generation_stage_artifacts
+  for select to anon, authenticated
+  using (public.generation_run_is_public(run_id));
+create policy judgments_public_read on public.judgments
+  for select to anon, authenticated
+  using (
+    generation_run_id is not null
+    and public.generation_run_is_public(generation_run_id)
+  );
+
+-- ===========================================================================
+-- 11. Tier -> visibility enforcement (free-owned content cannot be private).
+-- ===========================================================================
+create or replace function public.enforce_visibility_tier()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_workspace_id uuid;
+begin
+  if tg_table_name = 'assets' then
+    select p.workspace_id into target_workspace_id
+    from public.projects p
+    where p.id = new.project_id;
+
+    if target_workspace_id is null then
+      raise exception 'asset project does not exist (%)', new.project_id
+        using errcode = 'foreign_key_violation';
+    end if;
+
+    if new.workspace_id is distinct from target_workspace_id then
+      raise exception 'asset workspace % does not match project % workspace %',
+        new.workspace_id, new.project_id, target_workspace_id
+        using errcode = 'check_violation';
+    end if;
+  else
+    target_workspace_id := new.workspace_id;
+  end if;
+
+  if new.visibility = 'private'
+     and public.owner_tier(target_workspace_id) = 'free'::public.user_tier then
+    raise exception 'free tier cannot make content private (workspace %)', target_workspace_id
+      using errcode = 'check_violation';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger projects_visibility_tier
+  before insert or update of visibility, workspace_id on public.projects
+  for each row execute function public.enforce_visibility_tier();
+
+create trigger assets_visibility_tier
+  before insert or update of visibility, workspace_id, project_id on public.assets
+  for each row execute function public.enforce_visibility_tier();
+
+-- ===========================================================================
+-- 12. Public discovery search RPCs (SECURITY DEFINER; bypass RLS by design).
+-- ===========================================================================
+create or replace function public.search_public_projects(search_query text)
+returns setof public.projects
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.*
+  from public.projects p
+  where p.visibility = 'public'
+    and p.status <> 'deleted'
+    and to_tsvector(
+      'english',
+      coalesce(p.name, '') || ' ' ||
+      coalesce(p.brief ->> 'summary', '') || ' ' ||
+      coalesce(p.brief ->> 'goal', '')
+    ) @@ plainto_tsquery('english', search_query)
+  order by p.created_at desc, p.id desc
+$$;
+revoke all on function public.search_public_projects(text) from public;
+grant execute on function public.search_public_projects(text)
+  to anon, authenticated, service_role;
+
+create or replace function public.search_public_assets(
+  search_query text,
+  asset_kind_filter public.asset_kind default null
+)
+returns setof public.assets
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.*
+  from public.assets a
+  join public.projects p on p.id = a.project_id
+  where a.visibility = 'public'
+    and p.visibility = 'public'
+    and p.status <> 'deleted'
+    and (asset_kind_filter is null or a.kind = asset_kind_filter)
+    and to_tsvector(
+      'english',
+      coalesce(a.description, '') || ' ' ||
+      coalesce(a.context ->> 'summary', '') || ' ' ||
+      coalesce(a.context #>> '{context,summary}', '') || ' ' ||
+      coalesce(a.context #>> '{agentContext,summary}', '') || ' ' ||
+      coalesce(a.context #>> '{clipUnderstanding,combinedSummary}', '') || ' ' ||
+      coalesce(a.context #>> '{context,transcriptText}', '') || ' ' ||
+      coalesce(a.semantic_analysis::text, '')
+    ) @@ plainto_tsquery('english', search_query)
+  order by a.created_at desc, a.id desc
+$$;
+revoke all on function public.search_public_assets(text, public.asset_kind) from public;
+grant execute on function public.search_public_assets(text, public.asset_kind)
+  to anon, authenticated, service_role;
+
+-- ===========================================================================
+-- 13. Saved public-asset bookmarks (thin user-owned pointers; no byte copy).
+-- ===========================================================================
+create table public.saved_assets (
+  user_id         uuid not null references public.users (id) on delete cascade,
+  source_asset_id uuid not null references public.assets (id) on delete cascade,
+  created_at      timestamptz not null default now(),
+  primary key (user_id, source_asset_id)
+);
+create index saved_assets_source_asset_id_idx on public.saved_assets (source_asset_id);
+
+alter table public.saved_assets enable row level security;
+
+create policy saved_assets_select_own on public.saved_assets
+  for select to authenticated
+  using (user_id = public.current_app_user_id());
+
+-- Bookmarks may only be created for assets that are effectively public.
+create policy saved_assets_insert_own on public.saved_assets
+  for insert to authenticated
+  with check (
+    user_id = public.current_app_user_id()
+    and public.asset_is_effectively_public(source_asset_id)
+  );
+
+create policy saved_assets_delete_own on public.saved_assets
+  for delete to authenticated
+  using (user_id = public.current_app_user_id());

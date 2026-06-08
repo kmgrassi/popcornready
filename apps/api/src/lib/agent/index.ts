@@ -1,18 +1,16 @@
 import { structuredCall } from "../anthropic";
 import {
-  Beat,
   Clip,
   CriticReport,
   EditPlan,
   Patch,
-  PlanCritiqueReport,
   planBeats,
+  PlanCritiqueReport,
   StoryContext,
   Timeline,
   TimelineSegment,
   UploadedFootagePlanReview,
 } from "@popcorn/shared/types";
-import { randomUUID } from "crypto";
 import { clipCatalog, timelineForPrompt } from "@popcorn/timeline/timeline";
 import {
   compileTimelineViaEditGraph,
@@ -64,15 +62,25 @@ Hard rules:
   signal about content.`;
 
 function planText(p: EditPlan): string {
-  return [
+  const lines = [
     `target length: ${p.targetLengthSec}s`,
     `style: ${p.style}`,
     `aspect ratio: ${p.aspectRatio}`,
-    "beats:",
-    ...planBeats(p).map(
-      (b) => `  - ${b.name} (~${b.durationSec}s): ${b.intent}`
-    ),
-  ].join("\n");
+    "scenes:",
+  ];
+  for (const scene of p.scenes) {
+    const meta = [
+      scene.setting ? `setting: ${scene.setting}` : null,
+      scene.mood ? `mood: ${scene.mood}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+    lines.push(`  - scene "${scene.name}"${meta ? ` (${meta})` : ""}`);
+    for (const b of scene.beats) {
+      lines.push(`      • ${b.name} (~${b.durationSec}s): ${b.intent}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function storyPlanText(p: EditPlan): string {
@@ -95,11 +103,17 @@ export async function planEdit(input: {
 }): Promise<EditPlan> {
   const sys = `${PREAMBLE}
 
-TASK: Convert the user's creative goal into a beat-by-beat edit plan. Choose
-beats appropriate to the goal and style (e.g. hook / problem / solution / proof
-/ cta for an ad). Beat durations should roughly sum to the target length.
-Make sure the plan has a clear beginning, middle, payoff, and a reason for
-each scene. Avoid random shot collections.`;
+TASK: Convert the user's creative goal into a storyboard plan organized as
+SCENES, each containing ordered BEATS. A scene is the continuity unit — a shared
+setting, cast, and look that its beats inherit; a beat is one shot (hook /
+problem / solution / proof / cta for an ad, etc.). Group beats that share a
+setting/look into the same scene, and start a new scene when the location, time,
+or look changes. Give each scene a name plus its setting and mood, and (when the
+content has recurring characters) list its characterIds. For a short, single-
+setting clip you may emit a single scene containing all the beats. Beat durations
+should roughly sum to the target length. Make sure the plan has a clear
+beginning, middle, payoff, and a reason for each scene. Avoid random shot
+collections.`;
 
   const user = `Creative goal: ${input.goal}
 Target length: ${input.targetLengthSec}s
@@ -110,34 +124,14 @@ ${storyContextForPrompt(input.storyContext)}
 
 Produce the edit plan.`;
 
-  // The planner emits a flat beat list; we wrap it into a single implicit scene
-  // (Storyboard & Scenes scope, Part A — short clips get one scene rather than
-  // forced hierarchy). PR3 conditions tiles on per-scene anchors when the
-  // planner emits multiple scenes.
-  const raw = await structuredCall<{
-    targetLengthSec: number;
-    style: string;
-    aspectRatio: string;
-    beats: Beat[];
-  }>({
+  const plan = await structuredCall<EditPlan>({
     cachedSystem: sys,
     user,
     schema: planSchema,
     maxTokens: 2000,
   });
-  const plan: EditPlan = {
-    targetLengthSec: raw.targetLengthSec,
-    style: raw.style,
-    // Honor the user's explicit aspect ratio choice.
-    aspectRatio: input.aspectRatio as EditPlan["aspectRatio"],
-    scenes: [
-      {
-        id: randomUUID(),
-        name: "Main",
-        beats: raw.beats ?? [],
-      },
-    ],
-  };
+  // Honor the user's explicit aspect ratio choice.
+  plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
   // Mint stable beat ids at creation so the whole chain links by id, not role.
   ensureBeatIds(plan);
   return plan;

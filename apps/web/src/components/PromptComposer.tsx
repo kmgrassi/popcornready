@@ -66,7 +66,7 @@ const GENERATION_STAGES = [
 const REVIEW_STAGE_DETAILS: Record<GateableGenerationStageType, string> = {
   brief_intake: "Confirm the brief before planning starts.",
   creative_plan: "Review story beats and creative direction.",
-  storyboard: "Review the sketch storyboard before generating.",
+  storyboard: "Review the storyboard sketch before generating visuals.",
   asset_generation: "Inspect generated visuals before assembly.",
   audio_generation: "Check music and narration choices.",
   timeline_assembly: "Review the cut before quality checks.",

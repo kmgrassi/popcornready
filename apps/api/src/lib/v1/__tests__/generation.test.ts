@@ -22,13 +22,13 @@ test.after(() => {
 import { resolveActor } from "../actor";
 import { compileEditGraphToTimeline } from "@popcorn/shared/edit-graph";
 import { ApiError } from "../errors";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import {
   GenerationDeps,
   createGenerationJob,
   runGenerationJob,
 } from "../generation";
 import { V1Store, createStore } from "../store";
-import { planBeats } from "@popcorn/shared/types";
 import {
   AspectRatio,
   BriefVersion,
@@ -48,13 +48,9 @@ const fakeDeps: GenerationDeps = {
       targetLengthSec: input.targetLengthSec,
       style: input.style,
       aspectRatio: input.aspectRatio as AspectRatio,
-      scenes: [
-        {
-          id: "scene_main",
-          name: "Main",
-          beats: [{ id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" }],
-        },
-      ],
+      scenes: singleSceneFromBeats([
+        { id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" },
+      ]),
     };
   },
   async selectClips({ plan, clips }) {
@@ -89,7 +85,6 @@ const fakeDeps: GenerationDeps = {
       patches: [],
     };
   },
-  // Deterministic, offline storyboard tiles: one beat_storyboard asset per beat.
   async generateStoryboardTiles({ projectId, plan }) {
     return planBeats(plan).map((beat) => ({
       id: `tile_${beat.id ?? beat.name}`,

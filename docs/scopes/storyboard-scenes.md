@@ -12,6 +12,9 @@ visible storyboard:
    user can *see* how the video is sketched out before committing to expensive
    photoreal generation. Rendered deliberately as rough storyboard panels (pencil/
    marker linework) so it reads like a real storyboard, not a finished frame.
+3. **A continuous sketch→final path** — the approved sketch **seeds the photoreal
+   keyframe** (which is the clip's first frame), so the storyboard isn't a
+   throwaway preview but the compositional reference for the real video.
 
 Together these make the plan an **inspectable, editable, cheap pre-visualization**
 that gates the costly asset stage — directly in line with
@@ -119,7 +122,43 @@ the whole plan is visible before any photoreal generation.
 
 ---
 
-## Part C — The storyboard view (UI)
+## Part C — Sketch → photoreal keyframe (the bridge)
+
+The approved sketch isn't thrown away — it **seeds the photoreal `beat_keyframe`**,
+so the storyboard the user approved becomes the compositional reference for the
+final frame. What you sketched is what you get, rendered for real.
+
+**Critical guardrail — the sketch must never become the clip's literal first
+frame.** Verified in the current pipeline: the video providers use
+**image-to-video** and the reference image becomes the **first frame** of the clip
+(`apps/api/src/lib/generative/providers/ltx.ts:51` → `/image-to-video`;
+`runway.ts:78` → `/image_to_video`; the `first_frame_video` consistency mode in
+`character-context.ts`; provenance tracks the clip's `firstFrameAssetId`). So
+whatever image is handed to the clip generator *is* frame 1. The chain must be:
+
+```
+beat_storyboard (sketch) ──seeds──▶ beat_keyframe (PHOTOREAL) ──first frame──▶ beat_clip
+        ▲ never passed to image-to-video          ▲ this is the firstFrameAssetId
+```
+
+Requirements:
+
+- The sketch conditions **composition / framing / blocking only** (pose, layout,
+  camera, character placement); the keyframe is re-rendered **fully photoreal**.
+  The pencil/line aesthetic must **not** survive into the keyframe — because the
+  keyframe is the first visible frame of the clip.
+- The seeding **mechanism is provider-dependent** (structural/ControlNet-style
+  conditioning vs. low-retention img2img vs. sketch-as-reference + a strong
+  photoreal prompt) — §Open decisions. Whatever the mechanism, the **acceptance
+  guardrail is fixed**: the image passed as the clip's first frame
+  (`firstFrameAssetId`) is always the photoreal `beat_keyframe`, **never** the
+  `beat_storyboard`.
+- Provenance: `beat_keyframe depends on beat_storyboard` (sketch is an input edge),
+  so re-approving an edited sketch recomputes that beat's keyframe → clip only.
+
+---
+
+## Part D — The storyboard view (UI)
 
 A first-class storyboard surface in the SPA (`apps/web`):
 
@@ -174,19 +213,21 @@ and edit before spending on full generation.
 3. **Scene/character sketch anchors + continuity.** Generate sketch-form scene
    anchors + character anchors; condition beat tiles on them so panels in a scene
    are stylistically consistent.
-4. **Storyboard view (read-only).** `apps/web` storyboard surface: scenes →
+4. **Sketch → photoreal keyframe seeding (the bridge).** The approved
+   `beat_storyboard` conditions the photoreal `beat_keyframe` (composition/blocking
+   only, re-rendered photoreal). Wire the provenance edge (keyframe depends on
+   sketch) and the **first-frame guardrail**: the clip's `firstFrameAssetId` is
+   always the photoreal keyframe, never the sketch (Part C).
+5. **Storyboard view (read-only).** `apps/web` storyboard surface: scenes →
    beat-tile grid with sketches, names, durations, intents. Wire to the run's
    storyboard artifacts.
-5. **Storyboard editing.** Reorder/add/remove/reword/re-time beats & scenes; edit
+6. **Storyboard editing.** Reorder/add/remove/reword/re-time beats & scenes; edit
    scene context; regenerate a tile; recompute-only-affected.
-6. **Pipeline gate + New Project integration.** Wire `storyboard` as a review gate;
+7. **Pipeline gate + New Project integration.** Wire `storyboard` as a review gate;
    integrate as the step between "describe" and "generate" in the New Project flow
    and as a ProjectEditor tab.
-7. **(Optional) Sketch → keyframe seeding.** Let an approved sketch tile condition
-   the photoreal `beat_keyframe` (compositional continuity sketch → final frame).
 
-Dependencies: PR1 → PR2 → PR3 → (PR4 → PR5) → PR6. PR7 optional after PR2 +
-asset-gen.
+Dependencies: PR1 → PR2 → PR3 → PR4 → (PR5 → PR6) → PR7.
 
 ---
 
@@ -201,8 +242,11 @@ asset-gen.
   style/theme system.
 - **Gate behavior**: storyboard as a **mandatory** review step vs.
   **optional/skippable** (fast path straight to generation).
-- **Sketch→final seeding**: do approved sketches seed the photoreal keyframe (PR7)
-  or are they purely a preview discarded after approval?
+- **Seeding mechanism**: how the sketch conditions the photoreal keyframe —
+  structural/ControlNet-style vs. low-retention img2img vs. sketch-as-reference +
+  a strong photoreal prompt — given providers differ (LTX/Runway/Gemini). The
+  *guardrail* (the keyframe, never the sketch, is the clip's first frame) is fixed;
+  only the mechanism is open (Part C).
 - **Cost/provider for tiles**: which image model + resolution; confirm sketches of
   minors still route through Gemini per [[openai-image-minor-safety-block]].
 - **Scenes auto vs. authored**: planner always emits scenes, vs. user can collapse
@@ -211,4 +255,7 @@ asset-gen.
 _Resolved during scoping:_ storyboard = **Scenes → Beats** (a scene is the
 continuity tier above beats; beat ≈ shot); storyboard is made **visible** via
 cheap **sketch tiles** (`beat_storyboard`) that gate the expensive asset stage;
-integrates with the Studio New Project flow as the pre-generation review step.
+the approved sketch **seeds the photoreal keyframe** (sketch→final bridge, now a
+core PR) with a hard guardrail that the photoreal keyframe — never the sketch — is
+the clip's first frame (the video path is image-to-video); integrates with the
+Studio New Project flow as the pre-generation review step.

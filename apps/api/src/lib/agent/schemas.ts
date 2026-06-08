@@ -4,6 +4,32 @@
 const num = { type: "number" } as const;
 const str = { type: "string" } as const;
 
+const beatSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    name: str,
+    durationSec: num,
+    intent: str,
+  },
+  required: ["name", "durationSec", "intent"],
+};
+
+// A storyboard scene: the continuity unit (shared setting/cast/look) grouping
+// ordered beats. The planner may emit a single scene for short clips.
+const sceneSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    name: str,
+    setting: str,
+    mood: str,
+    characterIds: { type: "array", items: str },
+    beats: { type: "array", items: beatSchema },
+  },
+  required: ["name", "beats"],
+};
+
 export const planSchema = {
   type: "object",
   additionalProperties: false,
@@ -11,21 +37,12 @@ export const planSchema = {
     targetLengthSec: num,
     style: str,
     aspectRatio: { type: "string", enum: ["9:16", "16:9", "1:1"] },
-    beats: {
+    scenes: {
       type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          name: str,
-          durationSec: num,
-          intent: str,
-        },
-        required: ["name", "durationSec", "intent"],
-      },
+      items: sceneSchema,
     },
   },
-  required: ["targetLengthSec", "style", "aspectRatio", "beats"],
+  required: ["targetLengthSec", "style", "aspectRatio", "scenes"],
 };
 
 const planCritiqueIssueSchema = {

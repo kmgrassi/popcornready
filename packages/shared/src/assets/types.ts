@@ -21,9 +21,6 @@ export type AssetKind = "image" | "video" | "audio";
 export type AssetRole =
   | "character_anchor"
   | "scene_anchor"
-  // A rough sketch storyboard tile for a beat (Storyboard & Scenes scope, Part
-  // B). Distinct from `beat_keyframe` (photoreal first frame) and `beat_clip`:
-  // a cheap, low-res sketch pre-viz that gates the expensive asset stage.
   | "beat_storyboard"
   | "beat_keyframe"
   | "beat_clip"

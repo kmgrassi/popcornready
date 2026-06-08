@@ -14,7 +14,8 @@
 
 import { createHash } from "crypto";
 import type { Asset, AssetFingerprint, AssetInputs } from "@popcorn/shared/assets/types";
-import { type EditPlan, planBeats } from "@popcorn/shared/types";
+import type { EditPlan } from "@popcorn/shared/types";
+import { planBeats } from "@popcorn/shared/types";
 
 // Bump when the hashed payload shape below changes, so fingerprints frozen by an
 // older build are recognised as a different version rather than silently

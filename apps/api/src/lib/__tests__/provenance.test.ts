@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Asset } from "@popcorn/shared/assets/types";
-import { type EditPlan, planBeats, type Project } from "@popcorn/shared/types";
+import type { EditPlan, Project } from "@popcorn/shared/types";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import { poolAssets } from "../assets/pool";
 import {
   buildProvenanceGraph,
@@ -55,16 +56,10 @@ function plan(): EditPlan {
     targetLengthSec: 12,
     style: "cinematic",
     aspectRatio: "9:16",
-    scenes: [
-      {
-        id: "scene_main",
-        name: "Main",
-        beats: [
-          { id: "beat_1", name: "hook", durationSec: 4, intent: "open strong" },
-          { id: "beat_2", name: "proof", durationSec: 4, intent: "show the result" },
-        ],
-      },
-    ],
+    scenes: singleSceneFromBeats([
+      { id: "beat_1", name: "hook", durationSec: 4, intent: "open strong" },
+      { id: "beat_2", name: "proof", durationSec: 4, intent: "show the result" },
+    ]),
   };
 }
 

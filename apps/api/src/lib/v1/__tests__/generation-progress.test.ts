@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { resolveActor } from "../actor";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import {
   GenerationDeps,
   createGenerationJob,
@@ -26,7 +27,6 @@ import {
 } from "../generation-runs";
 import { createFileJudgmentStore } from "../../eval/judgment-store";
 import { V1Store, createStore } from "../store";
-import { planBeats } from "@popcorn/shared/types";
 import {
   AspectRatio,
   BriefVersion,
@@ -146,13 +146,9 @@ const fakeDeps: GenerationDeps = {
       targetLengthSec: input.targetLengthSec,
       style: input.style,
       aspectRatio: input.aspectRatio as AspectRatio,
-      scenes: [
-        {
-          id: "scene_main",
-          name: "Main",
-          beats: [{ id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" }],
-        },
-      ],
+      scenes: singleSceneFromBeats([
+        { id: "beat_1_hook", name: "hook", durationSec: 3, intent: "grab attention" },
+      ]),
     };
   },
   async selectClips({ plan, clips }) {
@@ -187,7 +183,6 @@ const fakeDeps: GenerationDeps = {
       patches: [],
     };
   },
-  // Deterministic, offline storyboard tiles: one beat_storyboard asset per beat.
   async generateStoryboardTiles({ projectId, plan }) {
     return planBeats(plan).map((beat) => ({
       id: `tile_${beat.id ?? beat.name}`,
@@ -337,21 +332,11 @@ test("runGenerationJob emits stages in the documented order on success", async (
       "quality_review",
     ]);
 
-    // The storyboard stage emits exactly one `image` (beat_storyboard) item per
-    // beat — the fakeDeps plan has a single beat, so one tile.
-    const storyboardItems = events.filter(
-      (e) =>
-        e.kind === "item_start" &&
-        e.stageType === "storyboard" &&
-        e.itemKind === "image"
-    );
-    assert.equal(storyboardItems.length, 1, "one storyboard tile per beat");
-
     // Stages attach the underlying generation job so the run can aggregate.
     const attached = events
       .filter((e) => e.kind === "stage_attach_job")
       .map((e) => (e as Extract<EventRecord, { kind: "stage_attach_job" }>).jobId);
-    assert.ok(attached.length >= 3 && attached.every((id) => id === job.id));
+    assert.ok(attached.length >= 4 && attached.every((id) => id === job.id));
 
     // timeline_assembly produces a `timeline` stage item that succeeds.
     const tlItemStart = events.find(
@@ -371,6 +356,7 @@ test("runGenerationJob emits stages in the documented order on success", async (
       )
       .filter((p): p is number => typeof p === "number");
     assert.ok(runPercents.includes(20), "creative_plan run percent");
+    assert.ok(runPercents.includes(35), "storyboard run percent");
     assert.ok(runPercents.includes(50), "timeline_assembly run percent");
     assert.ok(runPercents.includes(75), "quality_review run percent");
     assert.ok(runPercents.includes(100), "completion run percent");
@@ -467,6 +453,58 @@ test("runGenerationJob pauses after a persisted gated stage instead of advancing
       assert.equal(payload!.run.reviewGate?.stageType, "creative_plan");
       assert.equal(
         payload!.stages.find((stage) => stage.type === "creative_plan")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "timeline_assembly")?.status,
+        "queued"
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("runGenerationJob honors storyboard review gates", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-storyboard-gate-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runPayload = await createRunWithSeedStages({
+        store: runStore,
+        projectId: project.id,
+        body: {
+          briefVersionId: brief.id,
+          reviewGates: ["storyboard"],
+        },
+      });
+      const emitter = createPersistedRunProgressEmitter(runStore, runPayload.run.runId);
+
+      const paused = await runGenerationJob(store, job.id, fakeDeps, emitter);
+      assert.equal(paused.status, "queued");
+      assert.equal(paused.result, null);
+
+      const payload = await assemblePayload(runStore, runPayload.run.runId);
+      assert.ok(payload);
+      assert.equal(payload!.run.reviewGate?.state, "awaiting_review");
+      assert.equal(payload!.run.reviewGate?.stageType, "storyboard");
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "creative_plan")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload!.stages.find((stage) => stage.type === "storyboard")?.status,
         "succeeded"
       );
       assert.equal(

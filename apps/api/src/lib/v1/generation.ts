@@ -43,10 +43,6 @@ export { assetToClip, briefToStoryContext, prepareGeneration } from "./generatio
 
 // --- Execution -------------------------------------------------------------
 
-// The storyboard stage's tile generation (Storyboard & Scenes scope, Part B).
-// Produces one `beat_storyboard` sketch Asset per beat in the plan. Injected
-// like the agent calls so the executor can run offline/deterministically — the
-// default fans out to the cheap image provider via the tile generator.
 export type GenerateStoryboardTilesFn = (input: {
   workspaceId: string;
   projectId: string;
@@ -359,12 +355,8 @@ export async function runGenerationJob(
     }
     haltAfterIfRequested("creative_plan");
 
-    // storyboard: generate one cheap sketch tile per beat (Storyboard & Scenes
-    // scope, Part B). Runs BEFORE the expensive asset stage so the whole plan is
-    // visible as rough panels; each tile is a pooled `beat_storyboard` asset with
-    // `depicts.beatId` + provenance back to the beat intent + scene context. The
-    // tiles are persisted as the stage's artifact (the project asset pool record
-    // for this stage) and surfaced as one item per beat.
+    // storyboard: generate one cheap sketch tile per beat before expensive
+    // asset generation, then expose those tiles as stage items for review.
     job = await saveJobUpdate(
       store,
       job,
@@ -382,7 +374,6 @@ export async function runGenerationJob(
     });
     await activeStage.attachJob(job.id);
     await progress.updateRun({ progressPercent: 35, message: "Sketching the storyboard" });
-
     let storyboardTiles: Asset[] = [];
     try {
       storyboardTiles = await deps.generateStoryboardTiles({
@@ -395,7 +386,6 @@ export async function runGenerationJob(
       await activeStage.fail(summary);
       throw err;
     }
-    // Surface each tile as a stage item so the UI can show the sketch panels.
     for (const tile of storyboardTiles) {
       const item = await activeStage.startItem({
         kind: "image",

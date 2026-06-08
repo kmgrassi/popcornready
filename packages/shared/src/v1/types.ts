@@ -488,8 +488,6 @@ export type GenerationRunStatus = JobStatus;
 export type GenerationStageType =
   | "brief_intake"
   | "creative_plan"
-  // Cheap sketch storyboard tiles per beat (Storyboard & Scenes scope), a
-  // review gate before the expensive asset stage.
   | "storyboard"
   | "asset_generation"
   | "audio_generation"

@@ -178,43 +178,41 @@ export interface Beat {
   intent: string;
 }
 
-// A scene is the continuity unit above a beat (Storyboard & Scenes scope, Part
-// A): a shared setting, cast, and look that its beats inherit. Beats (≈ shots)
-// nest under scenes so panels in a scene share a world instead of each
-// re-rolling its own.
+// A Scene is the continuity tier above beats: a shared setting, cast, and look
+// that its beats inherit. The storyboard is an ordered list of scenes, each
+// containing ordered beats (≈ shots). See docs/scopes/storyboard-scenes.md.
 export interface Scene {
-  id: string;
-  name: string;
-  setting?: string;
-  mood?: string;
-  characterIds?: string[];
-  // The scene_anchor image (establishing look) in the project asset pool.
-  anchorAssetId?: string;
-  beats: Beat[];
+  id: string; // stable, like Beat.id
+  name: string; // "Setup", "The reveal", …
+  setting?: string; // location / time / environment
+  mood?: string; // lighting, tone
+  characterIds?: string[]; // cast present in this scene
+  anchorAssetId?: string; // the scene_anchor image (establishing look)
+  beats: Beat[]; // ≈ shots; inherit the scene's setting/cast/look
 }
 
 export interface EditPlan {
   targetLengthSec: number;
   style: string;
   aspectRatio: AspectRatio;
-  // The storyboard as ordered Scenes → Beats (Storyboard & Scenes scope, Part
-  // A). Replaces the former flat `beats: Beat[]`.
   scenes: Scene[];
 }
 
-// Flatten a plan's scenes into their ordered beats. Consumers that operate at
-// the shot level (asset/storyboard generation, timeline assembly, critique)
-// iterate beats through this helper rather than reaching into `scenes` directly.
-// Tolerates the historical flat `{ beats: [...] }` shape — the planSchema the
-// LLM fills still returns top-level `beats`, and projects persisted before the
-// Scene tier landed have no `scenes` — so reads never throw on a flat plan.
-// `ensureBeatIds` migrates such plans to the scene shape in place.
-export function planBeats(plan: EditPlan): Beat[] {
+// Read-helper: flatten a plan's scenes into their ordered beats. Consumers that
+// only care about the beat sequence (timeline, edit-graph, storyboard tiles)
+// use this rather than reaching into `scene.beats` directly.
+export function planBeats(plan: Pick<EditPlan, "scenes">): Beat[] {
   if (!plan.scenes) {
     const flat = (plan as { beats?: Beat[] }).beats;
     return Array.isArray(flat) ? flat : [];
   }
-  return plan.scenes.flatMap((scene) => scene.beats);
+  return plan.scenes.flatMap((scene) => scene.beats ?? []);
+}
+
+// Wrap a flat list of beats in a single implicit scene. Use when constructing a
+// plan from a flat beat list (e.g. short clips that don't need explicit scenes).
+export function singleSceneFromBeats(beats: Beat[], name = "Scene 1"): Scene[] {
+  return [{ id: "scene_1", name, beats }];
 }
 
 export interface StoryContext {

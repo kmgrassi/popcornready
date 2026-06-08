@@ -5,11 +5,11 @@ import {
   EditPlan,
   Patch,
   planBeats,
+  singleSceneFromBeats,
   StoryContext,
   Timeline,
   TimelineSegment,
 } from "./types";
-import { randomUUID } from "crypto";
 
 export const EDIT_GRAPH_SCHEMA_VERSION = "editGraph.v1" as const;
 export const EDIT_GRAPH_COMPILER_VERSION = "edit-graph-compiler.v1" as const;
@@ -149,30 +149,38 @@ export function editGraphBeatId(index: number, name: string): string {
   return `beat_${index + 1}_${name || "untitled"}`;
 }
 
+// Fold a flat `{ beats: [...] }` plan into a single default scene, in place.
+// Older persisted plans and some model outputs may not have the Scene tier yet.
+export function normalizePlanScenes(plan: {
+  scenes?: { id?: string; name?: string; beats?: { id?: string; name: string }[] }[];
+  beats?: { id?: string; name: string }[];
+}): void {
+  if (!plan.scenes) {
+    plan.scenes = Array.isArray(plan.beats) && plan.beats.length
+      ? [{ id: "scene_1", name: "Main", beats: plan.beats }]
+      : [];
+  }
+  delete plan.beats;
+}
+
 // Mint stable ids for any beats missing one, in place. Called at plan creation
 // so every downstream consumer can reference beats by id. Uses the existing
 // derived scheme, which keeps behaviour identical to today while making the id
 // an explicit, persisted field (a later change can swap in fully rename/reorder-
-// stable ids without touching the threading).
-// Fold a flat `{ beats: [...] }` plan into a single default scene, in place.
-// Plans still enter the system flat — the planSchema the LLM fills returns
-// top-level `beats`, and projects persisted before the Scene tier landed have
-// no `scenes` — so migrate them to the canonical scene shape before any
-// scene-aware consumer reads them.
-export function normalizePlanScenes(plan: EditPlan): void {
-  const flat = (plan as { beats?: Beat[] }).beats;
-  if (!plan.scenes) {
-    plan.scenes = Array.isArray(flat) && flat.length
-      ? [{ id: randomUUID(), name: "Main", beats: flat }]
-      : [];
-  }
-  delete (plan as { beats?: Beat[] }).beats;
-}
-
-export function ensureBeatIds(plan: EditPlan): void {
+// stable ids without touching the threading). Ids are minted across the flat,
+// scene-flattened beat order so they stay globally unique within a plan.
+export function ensureBeatIds(plan: {
+  scenes?: { id?: string; beats?: { id?: string; name: string }[] }[];
+  beats?: { id?: string; name: string }[];
+}): void {
   normalizePlanScenes(plan);
-  planBeats(plan).forEach((beat, index) => {
-    if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
+  let index = 0;
+  (plan.scenes ?? []).forEach((scene, sceneIndex) => {
+    if (!scene.id) scene.id = `scene_${sceneIndex + 1}`;
+    (scene.beats ?? []).forEach((beat) => {
+      if (!beat.id) beat.id = editGraphBeatId(index, beat.name);
+      index += 1;
+    });
   });
 }
 
@@ -187,17 +195,20 @@ function defaultPlanForTimeline(timeline: Timeline): EditPlan {
     beatsByRole.set(segment.role, (beatsByRole.get(segment.role) ?? 0) + durationSec);
   }
 
-  const beats: Beat[] = [...beatsByRole.entries()].map(([role, durationSec]) => ({
-    name: role || "timeline",
-    durationSec,
-    intent: role || "Preserve the current edit.",
-  }));
+  const beats: Beat[] = [...beatsByRole.entries()].map(
+    ([role, durationSec], index) => ({
+      id: editGraphBeatId(index, role || "timeline"),
+      name: role || "timeline",
+      durationSec,
+      intent: role || "Preserve the current edit.",
+    })
+  );
 
   return {
     targetLengthSec: beats.reduce((sum, beat) => sum + beat.durationSec, 0),
     style: "current",
     aspectRatio: timeline.aspectRatio,
-    scenes: [{ id: randomUUID(), name: "Main", beats }],
+    scenes: singleSceneFromBeats(beats, "Timeline"),
   };
 }
 
