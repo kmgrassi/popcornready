@@ -17,7 +17,9 @@ import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
 import ThemeToggle from "./ThemeToggle";
+import { Button, ButtonLink } from "./ui/Button";
 import { v1Api, type MeResponse } from "../lib/api-client";
+import styles from "./AppLayout.module.css";
 
 const STORAGE_KEY = "popcorn-ready-theme";
 const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
@@ -27,6 +29,13 @@ const DASHBOARD_NAV = [
   { label: "Runs", to: "/runs" },
   { label: "Assets", to: "/assets" },
   { label: "Outputs", to: "/outputs" },
+];
+
+const TOPNAV = [
+  { label: "Studio", to: "/studio" },
+  { label: "Storyboard", to: "/storyboard" },
+  { label: "Evals", to: "/evals" },
+  { label: "Admin", to: "/admin" },
 ];
 
 function applyStoredTheme() {
@@ -156,34 +165,36 @@ export function AuthenticatedAppLayout() {
   }
 
   return (
-    <div className="dashboard-shell">
-      <aside className="dashboard-sidebar">
-        <Link className="dashboard-brand" to="/dashboard">
-          <LogoMark className="dashboard-logo" />
+    <div className={styles.shell}>
+      <aside className={styles.sidebar}>
+        <Link className={styles.brand} to="/dashboard">
+          <LogoMark className={styles.logo} />
           <span>Popcorn Ready</span>
         </Link>
 
-        <label className="dashboard-workspace-label" htmlFor="workspace-select">
-          Workspace
-        </label>
-        <select
-          id="workspace-select"
-          className="dashboard-workspace-select"
-          value={workspaceLabel}
-          disabled
-          aria-label="Active workspace"
-        >
-          <option value={workspaceLabel}>{workspaceLabel}</option>
-        </select>
+        <div className={styles.workspace}>
+          <label className={styles.workspaceLabel} htmlFor="workspace-select">
+            Workspace
+          </label>
+          <select
+            id="workspace-select"
+            className={styles.workspaceSelect}
+            value={workspaceLabel}
+            disabled
+            aria-label="Active workspace"
+          >
+            <option value={workspaceLabel}>{workspaceLabel}</option>
+          </select>
+        </div>
 
-        <nav className="dashboard-nav" aria-label="Dashboard">
+        <nav className={styles.nav} aria-label="Dashboard">
           {DASHBOARD_NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === "/dashboard"}
               className={({ isActive }) =>
-                isActive ? "dashboard-nav-link active" : "dashboard-nav-link"
+                isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
               }
             >
               {item.label}
@@ -191,48 +202,57 @@ export function AuthenticatedAppLayout() {
           ))}
         </nav>
 
-        <div className="dashboard-sidebar-footer">
-          <Link className="dashboard-primary-action" to="/studio">
+        <div className={styles.sidebarFooter}>
+          <ButtonLink className={styles.newVideo} variant="secondary" to="/studio">
             New video
-          </Link>
+          </ButtonLink>
           <ThemeToggle />
         </div>
       </aside>
 
-      <div className="dashboard-content">
-        <header className="dashboard-topbar">
-          <nav className="dashboard-topnav" aria-label="Utilities">
-            <Link to="/studio">Studio</Link>
-            <Link to="/storyboard">Storyboard</Link>
-            <Link to="/evals">Evals</Link>
-            <Link to="/admin">Admin</Link>
+      <div className={styles.content}>
+        <header className={styles.topbar}>
+          <nav className={styles.topnav} aria-label="Utilities">
+            {TOPNAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  isActive
+                    ? `${styles.topLink} ${styles.topLinkActive}`
+                    : styles.topLink
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
           </nav>
-          <div className="dashboard-account-cluster">
+          <div className={styles.account}>
             {meError && auth.configured ? (
-              <span className="dashboard-me-error" title={meError}>
+              <span className={`${styles.authMode} ${styles.authError}`} title={meError}>
                 Account unavailable
               </span>
             ) : (
-              <span className="dashboard-auth-mode">{authModeLabel}</span>
+              <span className={styles.authMode}>{authModeLabel}</span>
             )}
-            <details className="dashboard-account-menu">
+            <details className={styles.accountMenu}>
               <summary>{accountLabel}</summary>
-              <div className="dashboard-account-panel">
-                <span>{workspaceLabel}</span>
+              <div className={styles.accountPanel}>
+                <span className={styles.accountWorkspace}>{workspaceLabel}</span>
                 {canSignOut ? (
-                  <button
-                    type="button"
-                    className="secondary compact"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void signOut()}
                   >
                     Sign out
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </details>
           </div>
         </header>
-        <main className="dashboard-route-frame">
+        <main className={styles.routeFrame}>
           <Outlet />
         </main>
       </div>

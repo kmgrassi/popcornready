@@ -1,0 +1,84 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    transform var(--transition),
+    box-shadow var(--transition);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Sizes */
+.md {
+  min-height: 38px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-md);
+}
+
+.sm {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* Primary — gold/accent fill, dark text */
+.primary {
+  background: var(--accent);
+  color: var(--button-text);
+}
+
+.primary:hover {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.primary:active {
+  filter: brightness(0.96);
+  transform: translateY(0);
+}
+
+/* Secondary — dark surface, warm border, light text */
+.secondary {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+/* Ghost — transparent until hover */
+.ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-strong);
+}
