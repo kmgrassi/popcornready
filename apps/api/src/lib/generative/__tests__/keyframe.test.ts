@@ -115,6 +115,15 @@ test("keyframeReferencePaths puts the character anchor first and the sketch afte
   );
 });
 
+test("keyframeReferencePaths omits the sketch when it would be the sole reference", () => {
+  // No photoreal reference to lead — the sketch must not become the source
+  // image the model copies, or the keyframe keeps the storyboard aesthetic.
+  assert.deepEqual(
+    keyframeReferencePaths({ storyboardSketchPath: "/sketch.png" }),
+    []
+  );
+});
+
 test("buildKeyframePrompt forces a photoreal re-render and forbids the sketch aesthetic when sketch-seeded", () => {
   const prompt = buildKeyframePrompt({
     beat: { id: BEAT_ID, name: "hook", durationSec: 4, intent: "open on the hero" },

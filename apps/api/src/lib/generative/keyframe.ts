@@ -135,7 +135,15 @@ export function keyframeReferencePaths(input: {
 }): string[] {
   const paths: string[] = [];
   if (input.characterReferencePath) paths.push(input.characterReferencePath);
-  if (input.storyboardSketchPath) paths.push(input.storyboardSketchPath);
+  // The sketch is only ever a lower-priority STRUCTURAL reference. If it were
+  // the sole/first reference (e.g. a scene/object-only shot with no photoreal
+  // character anchor), the model would treat the pencil sketch as the source
+  // image to copy and the keyframe would keep the storyboard aesthetic. Require
+  // a photoreal reference to lead; otherwise omit the sketch and let the prompt
+  // drive a fresh photoreal frame.
+  if (input.storyboardSketchPath && paths.length > 0) {
+    paths.push(input.storyboardSketchPath);
+  }
   return paths;
 }
 
