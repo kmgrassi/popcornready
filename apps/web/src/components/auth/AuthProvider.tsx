@@ -24,6 +24,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  clearError: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -149,9 +150,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStatus("unauthenticated");
   }, []);
 
+  // Lets a view drop a stale surfaced error without a status change — e.g. the
+  // auth form clears the previous message when the user switches login <-> signup.
+  const clearError = useCallback(() => setError(null), []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, error, configured, signIn, signUp, signOut }),
-    [status, user, error, configured, signIn, signUp, signOut]
+    () => ({ status, user, error, configured, signIn, signUp, signOut, clearError }),
+    [status, user, error, configured, signIn, signUp, signOut, clearError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
