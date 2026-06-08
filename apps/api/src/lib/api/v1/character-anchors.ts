@@ -131,6 +131,11 @@ export async function generateCharacterAnchor(
   // `createGeneratedAsset` (it records characterBinding.characterProfileIds).
   // Existing references for the character can be passed via `referenceAssetIds`
   // / `characterReferenceIds`; both flow straight through.
+  //
+  // Bind to the RESOLVED character.id, not the route param: on the autocreate
+  // path `registerAsset` mints a fresh id (addAsset drops incoming ids), so
+  // `characterId` points at a character that no longer exists. Using the
+  // resolved id keeps later characterProfileIds lookup/regeneration working.
   const generatedAssetBody: Record<string, unknown> = {
     ...body,
     kind: "image",
@@ -139,7 +144,7 @@ export async function generateCharacterAnchor(
     description:
       optionalString(body.description) ??
       `Character anchor likeness for ${name}.`,
-    characterProfileIds: [characterId],
+    characterProfileIds: [character.id],
   };
   delete generatedAssetBody.autocreate;
 
