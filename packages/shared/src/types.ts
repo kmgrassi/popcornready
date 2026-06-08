@@ -170,9 +170,9 @@ export interface Clip {
 
 export interface Beat {
   // Stable id minted at plan creation so assets/segments reference a beat by id
-  // rather than its (non-unique, rename-fragile) `name`. Required: every beat is
-  // minted with an id at plan creation.
-  id: string;
+  // rather than its (non-unique, rename-fragile) `name`. Optional for backward
+  // compatibility with plans persisted before stable ids existed.
+  id?: string;
   name: string; // e.g. "hook", "problem", "solution", "proof", "cta"
   durationSec: number;
   intent: string;
@@ -202,7 +202,11 @@ export interface EditPlan {
 // only care about the beat sequence (timeline, edit-graph, storyboard tiles)
 // use this rather than reaching into `scene.beats` directly.
 export function planBeats(plan: Pick<EditPlan, "scenes">): Beat[] {
-  return (plan.scenes ?? []).flatMap((scene) => scene.beats ?? []);
+  if (!plan.scenes) {
+    const flat = (plan as { beats?: Beat[] }).beats;
+    return Array.isArray(flat) ? flat : [];
+  }
+  return plan.scenes.flatMap((scene) => scene.beats ?? []);
 }
 
 // Wrap a flat list of beats in a single implicit scene. Use when constructing a

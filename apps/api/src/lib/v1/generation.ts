@@ -27,6 +27,9 @@ import {
   VersionedTimeline,
 } from "@popcorn/shared/v1/types";
 import { assetToClip, briefToStoryContext } from "./generation/prepare";
+import { EditPlan, planBeats } from "@popcorn/shared/types";
+import { Asset } from "@popcorn/shared/assets/types";
+import { generateStoryboardTilesForPlan } from "./generation/storyboard";
 
 // PR4 — timeline generation from agent inputs.
 //
@@ -40,16 +43,24 @@ export { assetToClip, briefToStoryContext, prepareGeneration } from "./generatio
 
 // --- Execution -------------------------------------------------------------
 
+export type GenerateStoryboardTilesFn = (input: {
+  workspaceId: string;
+  projectId: string;
+  plan: EditPlan;
+}) => Promise<Asset[]>;
+
 export interface GenerationDeps {
   planEdit: typeof realPlanEdit;
   selectClips: typeof realSelectClips;
   critique: typeof realCritique;
+  generateStoryboardTiles: GenerateStoryboardTilesFn;
 }
 
 const defaultDeps: GenerationDeps = {
   planEdit: realPlanEdit,
   selectClips: realSelectClips,
   critique: realCritique,
+  generateStoryboardTiles: generateStoryboardTilesForPlan,
 };
 
 // Persists a stage's output as a first-class addressable artifact and returns
@@ -344,17 +355,57 @@ export async function runGenerationJob(
     }
     haltAfterIfRequested("creative_plan");
 
-    // storyboard: PR1 seeds storyboard as a first-class stage, but this
-    // pipeline does not yet generate storyboard artifacts. Run a pass-through
-    // stage so the rail advances and storyboard review gates can pause.
+    // storyboard: generate one cheap sketch tile per beat before expensive
+    // asset generation, then expose those tiles as stage items for review.
+    job = await saveJobUpdate(
+      store,
+      job,
+      {
+        progress: { currentStep: "storyboarding", percent: 35 },
+      },
+      logger
+    );
+    const planBeatList = planBeats(plan);
     activeStage = await progress.beginStage("storyboard", {
-      label: "Storyboarding",
-      message: "Preparing storyboard context.",
+      label: "Sketching the storyboard",
+      message: `Sketching ${planBeatList.length} beat${
+        planBeatList.length === 1 ? "" : "s"
+      }.`,
     });
     await activeStage.attachJob(job.id);
-    await progress.updateRun({ progressPercent: 35, message: "Preparing storyboard." });
+    await progress.updateRun({ progressPercent: 35, message: "Sketching the storyboard" });
+    let storyboardTiles: Asset[] = [];
+    try {
+      storyboardTiles = await deps.generateStoryboardTiles({
+        workspaceId: job.workspaceId,
+        projectId: job.projectId,
+        plan,
+      });
+    } catch (err) {
+      const summary = toErrorSummary(err, { fallbackCode: "internal_error" });
+      await activeStage.fail(summary);
+      throw err;
+    }
+    for (const tile of storyboardTiles) {
+      const item = await activeStage.startItem({
+        kind: "image",
+        label: tile.description ?? `Storyboard tile ${tile.depicts?.beatId ?? ""}`,
+        provider: tile.provenance?.provider,
+      });
+      await item.succeed({ assetId: tile.id });
+    }
+    const storyboardArtifact = persistStageArtifact
+      ? await persistStageArtifact({
+          stageType: "storyboard",
+          kind: "timeline",
+          content: { tiles: storyboardTiles },
+        })
+      : undefined;
     await activeStage.succeed({
-      message: "Storyboard context ready.",
+      message: `Sketched ${storyboardTiles.length} storyboard tile${
+        storyboardTiles.length === 1 ? "" : "s"
+      }.`,
+      ...(storyboardArtifact ? { resultArtifactId: storyboardArtifact.artifactId } : {}),
     });
     activeStage = null;
     haltAfterIfRequested("storyboard");

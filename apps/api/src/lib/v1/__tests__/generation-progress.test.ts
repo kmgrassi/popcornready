@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { resolveActor } from "../actor";
-import { singleSceneFromBeats } from "@popcorn/shared/types";
+import { planBeats, singleSceneFromBeats } from "@popcorn/shared/types";
 import {
   GenerationDeps,
   createGenerationJob,
@@ -182,6 +182,27 @@ const fakeDeps: GenerationDeps = {
       },
       patches: [],
     };
+  },
+  async generateStoryboardTiles({ projectId, plan }) {
+    return planBeats(plan).map((beat) => ({
+      id: `tile_${beat.id ?? beat.name}`,
+      schemaVersion: "asset.v1" as const,
+      projectId,
+      kind: "image" as const,
+      role: "beat_storyboard" as const,
+      depicts: { beatId: beat.id ?? beat.name },
+      media: {
+        url: `/generated/tile_${beat.id ?? beat.name}.png`,
+        filename: `tile_${beat.id ?? beat.name}.png`,
+        durationSec: beat.durationSec,
+      },
+      source: "generated" as const,
+      provenance: {
+        provider: "mock",
+        prompt: `sketch: ${beat.intent}`,
+        inputs: { beatId: beat.id ?? beat.name },
+      },
+    }));
   },
 };
 

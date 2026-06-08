@@ -3,13 +3,13 @@ import { promises as fs } from "fs";
 import path from "path";
 import { promisify } from "util";
 import { MODEL, structuredVisionCall } from "@/lib/anthropic";
-import type {
-  Beat,
-  CharacterProfile,
-  EditPlan,
-  VideoSnapshotReview,
+import {
+  type Beat,
+  type CharacterProfile,
+  type EditPlan,
+  planBeats,
+  type VideoSnapshotReview,
 } from "@popcorn/shared/types";
-import { planBeats } from "@popcorn/shared/types";
 
 const execFileAsync = promisify(execFile);
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";

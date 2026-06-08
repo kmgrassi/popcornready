@@ -149,6 +149,20 @@ export function editGraphBeatId(index: number, name: string): string {
   return `beat_${index + 1}_${name || "untitled"}`;
 }
 
+// Fold a flat `{ beats: [...] }` plan into a single default scene, in place.
+// Older persisted plans and some model outputs may not have the Scene tier yet.
+export function normalizePlanScenes(plan: {
+  scenes?: { id?: string; name?: string; beats?: { id?: string; name: string }[] }[];
+  beats?: { id?: string; name: string }[];
+}): void {
+  if (!plan.scenes) {
+    plan.scenes = Array.isArray(plan.beats) && plan.beats.length
+      ? [{ id: "scene_1", name: "Main", beats: plan.beats }]
+      : [];
+  }
+  delete plan.beats;
+}
+
 // Mint stable ids for any beats missing one, in place. Called at plan creation
 // so every downstream consumer can reference beats by id. Uses the existing
 // derived scheme, which keeps behaviour identical to today while making the id
@@ -157,7 +171,9 @@ export function editGraphBeatId(index: number, name: string): string {
 // scene-flattened beat order so they stay globally unique within a plan.
 export function ensureBeatIds(plan: {
   scenes?: { id?: string; beats?: { id?: string; name: string }[] }[];
+  beats?: { id?: string; name: string }[];
 }): void {
+  normalizePlanScenes(plan);
   let index = 0;
   (plan.scenes ?? []).forEach((scene, sceneIndex) => {
     if (!scene.id) scene.id = `scene_${sceneIndex + 1}`;
