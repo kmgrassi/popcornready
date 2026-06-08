@@ -783,6 +783,7 @@
   .dashboard-route-frame > .app {
     height: auto;
     min-height: calc(100vh - 170px);
+  }
 
   .workspace-stub-page {
     padding: 20px;
