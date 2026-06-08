@@ -1,6 +1,7 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
+import { useAuth } from "./components/auth/AuthProvider";
 import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
@@ -18,7 +19,8 @@ export function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<HomePage />} />
+        <Route index element={<LandingRoute />} />
+        <Route path="/dashboard" element={<DashboardEntryPage />} />
         <Route path="/studio" element={<StudioPage />} />
         <Route
           path="/projects"
@@ -95,6 +97,28 @@ function Placeholder({ name }: { name: string }) {
     <main className="web-shell-main">
       <h1>Popcorn Ready</h1>
       <p className="muted">{name} is migrating from Next to Vite SPA.</p>
+    </main>
+  );
+}
+
+function LandingRoute() {
+  const { status } = useAuth();
+
+  if (status === "disabled" || status === "authenticated") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <HomePage />;
+}
+
+function DashboardEntryPage() {
+  return (
+    <main className="web-shell-main">
+      <h1>Dashboard</h1>
+      <p className="muted">
+        Your dashboard is migrating into the Vite app. Use the studio while the
+        dashboard views finish landing.
+      </p>
     </main>
   );
 }
