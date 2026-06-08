@@ -19,7 +19,10 @@ function newId(prefix: string): string {
 }
 
 function emptyBeat(): Beat {
-  return { id: newId("beat"), name: "New beat", intent: "", durationSec: 3 };
+  // `intent` must be a non-empty string to pass the plan validator
+  // (`parseBeat` -> `requireString(intent)`). Seed a starter the user can edit
+  // so adding a beat and saving immediately does not fail validation.
+  return { id: newId("beat"), name: "New beat", intent: "New beat", durationSec: 3 };
 }
 
 function emptyScene(): Scene {

@@ -13,7 +13,10 @@ import { v1Api } from "../lib/api-client";
 function emptyPlan(): EditPlan {
   return {
     targetLengthSec: 30,
-    style: "",
+    // The editor exposes no style field, so a scaffolded plan must carry a
+    // non-empty default or the first Save fails `requireString(style)` with no
+    // way to recover in the UI. Mirror the main Editor's default.
+    style: "fast-paced social ad",
     aspectRatio: "9:16",
     scenes: [],
     beats: [],
