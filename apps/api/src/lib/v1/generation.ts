@@ -394,13 +394,18 @@ export async function runGenerationJob(
       });
       await activeStage.attachJob(job.id);
       await progress.updateRun({ progressPercent: 20, message: "Planning the cut" });
+      const reviewFeedback = await progress.getReviewFeedback?.();
       plan = await deps.planEdit({
         goal: brief.brief.goal,
         targetLengthSec: brief.brief.targetLengthSec,
         style: brief.brief.style || "fast-paced social ad",
         aspectRatio: brief.brief.aspectRatio,
         storyContext,
+        feedback: reviewFeedback,
       });
+      if (reviewFeedback) {
+        await progress.clearReviewFeedback?.();
+      }
       // Persist the plan as a first-class addressable artifact and carry its id on
       // succeed() so the inline judge can read it as evidence (§3).
       const planArtifact = persistStageArtifact

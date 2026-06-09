@@ -100,6 +100,7 @@ export async function planEdit(input: {
   style: string;
   aspectRatio: string;
   storyContext?: StoryContext | null;
+  feedback?: string | null;
 }): Promise<EditPlan> {
   const sys = `${PREAMBLE}
 
@@ -115,12 +116,17 @@ should roughly sum to the target length. Make sure the plan has a clear
 beginning, middle, payoff, and a reason for each scene. Avoid random shot
 collections.`;
 
+  const feedback = input.feedback?.trim()
+    ? `\nUser feedback on the previous attempt:\n${input.feedback.trim()}\n`
+    : "";
+
   const user = `Creative goal: ${input.goal}
 Target length: ${input.targetLengthSec}s
 Style: ${input.style}
 Aspect ratio: ${input.aspectRatio}
 Story context:
 ${storyContextForPrompt(input.storyContext)}
+${feedback}
 
 Produce the edit plan.`;
 

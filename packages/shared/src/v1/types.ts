@@ -560,6 +560,7 @@ export interface GenerationRun {
   status: GenerationRunStatus;
   reviewGates?: GateableGenerationStageType[];
   reviewGate?: RunReviewGate | null;
+  reviewFeedback?: string | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   message?: string;
