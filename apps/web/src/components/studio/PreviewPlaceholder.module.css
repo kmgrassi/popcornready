@@ -7,6 +7,11 @@
   align-items: center;
   justify-content: center;
   width: 100%;
+  /* Match the real player's footprint (.player-wrap max-width in globals.css)
+   * so the idle/generating placeholder doesn't balloon on wide columns and
+   * cause a layout jump when the actual cut appears. */
+  max-width: 420px;
+  margin-inline: auto;
   aspect-ratio: 9 / 16;
   padding: var(--space-6);
   /* Film-frame border: a soft double outline using border + inset shadow. */
