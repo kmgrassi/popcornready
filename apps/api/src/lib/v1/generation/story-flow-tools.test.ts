@@ -56,8 +56,8 @@ test("story tool plan inserts approval before media work for long-form runs", ()
 
   assert.equal(storyFlowRequiresApproval(brief({ targetLengthSec: 180 })), true);
   assert.ok(tools.includes("request_approval"));
-  assert.ok(tools.indexOf("request_approval") < tools.indexOf("generate_storyboard"));
-  assert.ok(tools.indexOf("generate_storyboard") < tools.indexOf("generate_keyframe"));
+  assert.ok(tools.indexOf("generate_storyboard") < tools.indexOf("request_approval"));
+  assert.ok(tools.indexOf("request_approval") < tools.indexOf("generate_keyframe"));
   assert.ok(tools.includes("generate_clip"));
   assert.ok(tools.includes("generate_audio"));
 });

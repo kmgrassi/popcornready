@@ -95,6 +95,12 @@ export function buildStoryFlowToolPlan(
     },
   ];
 
+  invocations.push({
+    toolName: "generate_storyboard",
+    input: base,
+    reason: "Generate cheap storyboard/pre-viz before keyframes or clips.",
+  });
+
   if (storyFlowRequiresApproval(input.brief)) {
     invocations.push({
       toolName: "request_approval",
@@ -103,15 +109,10 @@ export function buildStoryFlowToolPlan(
         gate: "pre_asset_story_flow",
         requiredBecause: `targetLengthSec exceeds ${LONG_FORM_APPROVAL_THRESHOLD_SEC}`,
       },
-      reason: "Long-form runs require user approval before expensive media generation.",
+      reason:
+        "Long-form runs require user approval of storyboard/pre-viz before expensive media generation.",
     });
   }
-
-  invocations.push({
-    toolName: "generate_storyboard",
-    input: base,
-    reason: "Generate cheap storyboard/pre-viz before keyframes or clips.",
-  });
 
   if (hasMediaWork(input.jobInput)) {
     invocations.push(
