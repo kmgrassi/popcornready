@@ -44,6 +44,10 @@ function bearerToken(req: Request): string | null {
   return value.slice("bearer ".length).trim() || null;
 }
 
+function hasAuthorizationHeader(req: Request): boolean {
+  return req.get("authorization") != null;
+}
+
 function sendError(
   res: Response,
   requestId: string,
@@ -73,6 +77,10 @@ export async function authMiddleware(
   try {
     const accessToken = bearerToken(req);
     if (!accessToken) {
+      if (hasAuthorizationHeader(req)) {
+        sendError(res, requestId, "unauthorized", "Invalid or expired session.");
+        return;
+      }
       // hybrid: unauthenticated callers fall through to the local dev identity
       // ("autopilot"); resolveAuth() supplies it. supabase: nothing to
       // authenticate (harper convention; see spec §4).
