@@ -5,6 +5,8 @@ import type { AssetKind } from "@popcorn/shared/v1/types";
 import { parsePagination } from "@/lib/api/v1/schemas";
 import { listWorkspaceAssets } from "@/lib/api/v1/store";
 
+const ASSET_KIND_VALUES: AssetKind[] = ["video", "image", "audio"];
+
 export const workspacesRouter = Router();
 
 // Cross-project asset list for the dashboard. Scoped to the caller's own
@@ -28,6 +30,19 @@ workspacesRouter.get(
     const kindParam = req.searchParams.get("kind") ?? undefined;
     const sourceParam = req.searchParams.get("source") ?? undefined;
     const projectId = req.searchParams.get("projectId") ?? undefined;
+
+    // "all"/absent means no filter; a present-but-unknown kind is a client error
+    // (an unchecked cast would reach the asset_kind enum cast and 500).
+    let kind: AssetKind | undefined;
+    if (kindParam && kindParam !== "all") {
+      if (!ASSET_KIND_VALUES.includes(kindParam as AssetKind)) {
+        throw new ApiError(
+          "validation_failed",
+          `Unknown asset kind "${kindParam}". Expected one of: ${ASSET_KIND_VALUES.join(", ")}.`
+        );
+      }
+      kind = kindParam as AssetKind;
+    }
     const source =
       sourceParam === "generated" || sourceParam === "uploaded"
         ? sourceParam
@@ -35,7 +50,7 @@ workspacesRouter.get(
 
     const { items, nextCursor } = await listWorkspaceAssets(
       workspaceId,
-      { kind: kindParam ? (kindParam as AssetKind) : undefined, source, projectId },
+      { kind, source, projectId },
       limit,
       cursor
     );
