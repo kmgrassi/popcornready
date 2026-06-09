@@ -72,6 +72,26 @@ test("classifies provider quota failures as recoverable", () => {
   assert.equal(err.retryAfterSec, 60);
 });
 
+test("classifies provider polling deadline messages as recoverable timeouts", () => {
+  const gemini = classifyToolFailure(
+    new Error("Gemini video generation timed out before completion."),
+    { toolName: "generate_clip", retryAfterSec: 30 }
+  );
+  const openai = classifyToolFailure(
+    new Error("OpenAI video job vid_123 did not complete within 480000ms."),
+    { toolName: "generate_clip" }
+  );
+
+  assert.equal(gemini.kind, "timeout");
+  assert.equal(gemini.recoverable, true);
+  assert.equal(gemini.retryAfterSec, 30);
+  assert.deepEqual(gemini.suggestedNextTools, [
+    { tool: "generate_clip", inputHint: { retry: true } },
+  ]);
+  assert.equal(openai.kind, "timeout");
+  assert.equal(openai.recoverable, true);
+});
+
 test("builds budget approval recovery errors", () => {
   const err = budgetExceededError({
     toolName: "generate_clip",

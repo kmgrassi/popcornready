@@ -87,6 +87,14 @@ const POLICY_PATTERNS = [
   "not allowed",
 ];
 
+const TIMEOUT_PATTERNS = [
+  "timeout",
+  "timed out",
+  "did not complete within",
+  "deadline",
+  "polling deadline",
+];
+
 function compactRecord(
   value: Record<string, unknown>
 ): Record<string, unknown> | undefined {
@@ -338,7 +346,7 @@ export function classifyToolFailure(
     };
   }
 
-  if (message.toLowerCase().includes("timeout")) {
+  if (normalizedMessageIncludes(message, TIMEOUT_PATTERNS)) {
     return {
       kind: "timeout",
       message,
