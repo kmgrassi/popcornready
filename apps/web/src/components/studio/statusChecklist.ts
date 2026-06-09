@@ -96,12 +96,13 @@ export function buildChecklistItems(
       }
     } else if (backing.some((s) => s.status === "failed")) {
       status = "failed";
+    } else if (backing.some((s) => s.stageId === run?.reviewGate?.stageId)) {
+      status = "active";
     } else if (backing.every((s) => s.status === "succeeded")) {
       status = "done";
     } else if (
       backing.some((s) => s.status === "running") ||
-      backing.some((s) => s.type === run?.currentStageType) ||
-      backing.some((s) => s.stageId === run?.reviewGate?.stageId)
+      backing.some((s) => s.type === run?.currentStageType)
     ) {
       status = "active";
     } else {
