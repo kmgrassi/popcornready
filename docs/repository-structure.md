@@ -85,7 +85,9 @@ pnpm install                 # install the whole workspace
 pnpm dev                     # turbo: run every package's dev task
 pnpm dev:api                 # just the Express API   (@popcorn/api)
 pnpm dev:web                 # just the Vite SPA       (@popcorn/web)
-pnpm typecheck | test | lint # turbo across the workspace
+pnpm typecheck               # turbo: run every package's typecheck task
+pnpm test                    # turbo: run every package's test task
+pnpm lint                    # turbo: run every package's lint task
 ```
 
 Local dev: the API listens on `PORT` (default 4000); the web SPA (Vite, `:3000`)
