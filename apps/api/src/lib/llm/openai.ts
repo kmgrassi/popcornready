@@ -29,8 +29,13 @@ function reasoningParams(
 // may not yet expose — mirrors the `as any` pattern in lib/anthropic.ts.
 type ChatCreate = (params: Record<string, unknown>) => Promise<any>;
 
+// Low-reasoning calls route to the cheaper fast model.
+const FAST_EFFORTS = new Set<LlmEffort>(["minimal", "low"]);
+
 export interface OpenAiDeps {
   model: string;
+  // Cheaper model for minimal/low-effort calls. Defaults to `model`.
+  fastModel?: string;
   // Injected in tests; defaults to the real OpenAI client lazily.
   create?: ChatCreate;
 }
@@ -126,13 +131,17 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
     return create;
   };
   const model = deps.model;
+  const fastModel = deps.fastModel ?? model;
+  const pickModel = (effort?: LlmEffort): string =>
+    effort && FAST_EFFORTS.has(effort) ? fastModel : model;
 
   const structuredImpl = async <T>(
     args: StructuredArgs,
     userContent: unknown
   ): Promise<T> => {
+    const callModel = pickModel(args.effort);
     const res = await ensureCreate()({
-      model,
+      model: callModel,
       messages: [
         { role: "system", content: args.cachedSystem },
         { role: "user", content: userContent },
@@ -146,7 +155,7 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
         },
       },
       max_completion_tokens: args.maxTokens ?? 8000,
-      ...reasoningParams(model, args.effort),
+      ...reasoningParams(callModel, args.effort),
     });
     const text = String(res?.choices?.[0]?.message?.content ?? "");
     return parseStructuredText<T>(text);
@@ -173,8 +182,9 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
       return structuredImpl<T>(args, parts);
     },
     async chooseTool(args: ChooseToolArgs) {
+      const callModel = pickModel(args.effort);
       const res = await ensureCreate()({
-        model,
+        model: callModel,
         messages: [
           { role: "system", content: args.system },
           { role: "user", content: JSON.stringify(args.userPayload) },
@@ -182,9 +192,9 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
         tools: args.tools.map(toOpenAITool),
         tool_choice: "auto",
         max_completion_tokens: args.maxTokens ?? 2000,
-        ...reasoningParams(model, args.effort),
+        ...reasoningParams(callModel, args.effort),
       });
-      return interpretOpenAiToolResponse(res, model);
+      return interpretOpenAiToolResponse(res, callModel);
     },
   };
 }

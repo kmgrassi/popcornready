@@ -131,6 +131,23 @@ test("chooseTool sends function tools + tool_choice auto and uses max_completion
   assert.equal(decision.type, "tool_call");
 });
 
+test("low/minimal effort routes to the fast model; medium/high/none use the primary", async () => {
+  const seen: string[] = [];
+  const client = createOpenAiLlmClient({
+    model: "gpt-5",
+    fastModel: "gpt-5-mini",
+    create: async (params: any) => {
+      seen.push(params.model);
+      return { choices: [{ message: { content: "{}" } }] };
+    },
+  });
+  for (const effort of ["minimal", "low", "medium", "high"] as const) {
+    await client.structured({ cachedSystem: "s", user: "u", schema: {}, effort });
+  }
+  await client.structured({ cachedSystem: "s", user: "u", schema: {} });
+  assert.deepEqual(seen, ["gpt-5-mini", "gpt-5-mini", "gpt-5", "gpt-5", "gpt-5"]);
+});
+
 test("reasoning_effort is sent for reasoning models (gpt-5) and omitted for gpt-4o", async () => {
   let reasoning: any;
   const gpt5 = createOpenAiLlmClient({

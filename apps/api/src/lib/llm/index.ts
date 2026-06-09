@@ -14,13 +14,25 @@ let cache: { key: string; client: LlmClient } | null = null;
 // underlying SDK client is constructed once.
 export function getLlmClient(env: NodeJS.ProcessEnv = process.env): LlmClient {
   const config = resolveLlmConfig(env);
-  const key = `${config.provider}:${config.openaiModel}:${config.anthropicModel}`;
+  const key = [
+    config.provider,
+    config.openaiModel,
+    config.openaiFastModel,
+    config.anthropicModel,
+    config.anthropicFastModel,
+  ].join(":");
   if (cache && cache.key === key) return cache.client;
 
   const client =
     config.provider === "openai"
-      ? createOpenAiLlmClient({ model: config.openaiModel })
-      : createAnthropicLlmClient({ model: config.anthropicModel });
+      ? createOpenAiLlmClient({
+          model: config.openaiModel,
+          fastModel: config.openaiFastModel,
+        })
+      : createAnthropicLlmClient({
+          model: config.anthropicModel,
+          fastModel: config.anthropicFastModel,
+        });
 
   cache = { key, client };
   return client;

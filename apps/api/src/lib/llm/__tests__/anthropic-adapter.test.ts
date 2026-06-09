@@ -75,6 +75,21 @@ test("interpretAnthropicToolResponse rejects a tool the registry does not allow"
   );
 });
 
+test("low/minimal effort routes chooseTool to the fast model", async () => {
+  const seen: string[] = [];
+  const client = createAnthropicLlmClient({
+    model: "claude-x",
+    fastModel: "claude-haiku",
+    createMessage: async (params: any) => {
+      seen.push(params.model);
+      return { content: [{ type: "text", text: "ok" }] };
+    },
+  });
+  await client.chooseTool({ system: "s", userPayload: {}, tools: [planShots], effort: "minimal" });
+  await client.chooseTool({ system: "s", userPayload: {}, tools: [planShots], effort: "high" });
+  assert.deepEqual(seen, ["claude-haiku", "claude-x"]);
+});
+
 test("chooseTool sends input_schema tools + tool_choice auto and maps the result", async () => {
   let sent: any;
   const client = createAnthropicLlmClient({

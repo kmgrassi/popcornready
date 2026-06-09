@@ -25,8 +25,13 @@ function toAnthropicEffort(
 
 type MessageCreate = (params: Record<string, unknown>) => Promise<any>;
 
+// Low-reasoning calls route to the cheaper fast model.
+const FAST_EFFORTS = new Set<LlmEffort>(["minimal", "low"]);
+
 export interface AnthropicDeps {
   model?: string;
+  // Cheaper model for minimal/low-effort calls. Defaults to `model`.
+  fastModel?: string;
   // Injected in tests; defaults to the real Anthropic client lazily.
   createMessage?: MessageCreate;
 }
@@ -75,6 +80,9 @@ export function interpretAnthropicToolResponse(
 
 export function createAnthropicLlmClient(deps: AnthropicDeps = {}): LlmClient {
   const model = deps.model ?? MODEL;
+  const fastModel = deps.fastModel ?? model;
+  const pickModel = (effort?: LlmEffort): string =>
+    effort && FAST_EFFORTS.has(effort) ? fastModel : model;
   let createMessage = deps.createMessage;
   const ensureCreate = (): MessageCreate => {
     if (createMessage) return createMessage;
@@ -87,15 +95,24 @@ export function createAnthropicLlmClient(deps: AnthropicDeps = {}): LlmClient {
     provider: "anthropic",
     model,
     structured<T>(args: StructuredArgs) {
-      return structuredCall<T>({ ...args, model, effort: toAnthropicEffort(args.effort) });
+      return structuredCall<T>({
+        ...args,
+        model: pickModel(args.effort),
+        effort: toAnthropicEffort(args.effort),
+      });
     },
     structuredVision<T>(args: StructuredVisionArgs) {
-      return structuredVisionCall<T>({ ...args, model, effort: toAnthropicEffort(args.effort) });
+      return structuredVisionCall<T>({
+        ...args,
+        model: pickModel(args.effort),
+        effort: toAnthropicEffort(args.effort),
+      });
     },
     async chooseTool(args: ChooseToolArgs) {
       const allowed = new Set(args.tools.map((tool) => tool.name));
+      const callModel = pickModel(args.effort);
       const res = await ensureCreate()({
-        model,
+        model: callModel,
         max_tokens: args.maxTokens ?? 2000,
         system: args.system,
         tools: args.tools.map(toAnthropicTool),
@@ -104,7 +121,7 @@ export function createAnthropicLlmClient(deps: AnthropicDeps = {}): LlmClient {
           { role: "user", content: JSON.stringify(args.userPayload) },
         ],
       });
-      return interpretAnthropicToolResponse(res, model, allowed);
+      return interpretAnthropicToolResponse(res, callModel, allowed);
     },
   };
 }

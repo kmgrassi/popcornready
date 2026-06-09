@@ -4,7 +4,10 @@ import type { LlmProvider } from "./types";
 export interface LlmConfig {
   provider: LlmProvider;
   openaiModel: string;
+  // Cheaper/faster model used for low-reasoning calls (minimal/low effort).
+  openaiFastModel: string;
   anthropicModel: string;
+  anthropicFastModel: string;
 }
 
 const PROVIDERS = new Set<LlmProvider>(["openai", "anthropic"]);
@@ -18,9 +21,16 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfi
       `Unknown LLM_PROVIDER "${provider}". Expected one of: openai, anthropic.`
     );
   }
+  const openaiModel = (env.OPENAI_MODEL || "gpt-5").trim();
+  const anthropicModel = (env.ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL).trim();
   return {
     provider: provider as LlmProvider,
-    openaiModel: (env.OPENAI_MODEL || "gpt-5").trim(),
-    anthropicModel: (env.ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL).trim(),
+    openaiModel,
+    // Default the fast lane to gpt-5-mini; falls back to the primary model if a
+    // deployment doesn't have a mini variant configured.
+    openaiFastModel: (env.OPENAI_FAST_MODEL || "gpt-5-mini").trim() || openaiModel,
+    anthropicModel,
+    anthropicFastModel:
+      (env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5").trim() || anthropicModel,
   };
 }

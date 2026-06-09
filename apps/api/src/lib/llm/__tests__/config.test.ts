@@ -27,6 +27,16 @@ test("OPENAI_MODEL / ANTHROPIC_MODEL override the defaults", () => {
   assert.equal(config.anthropicModel, "claude-opus-4-8");
 });
 
+test("fast models default to gpt-5-mini / a claude model and are overridable", () => {
+  const def = resolveLlmConfig({});
+  assert.equal(def.openaiFastModel, "gpt-5-mini");
+  assert.ok(def.anthropicFastModel.startsWith("claude"));
+  assert.equal(
+    resolveLlmConfig({ OPENAI_FAST_MODEL: "gpt-4o-mini" }).openaiFastModel,
+    "gpt-4o-mini"
+  );
+});
+
 test("provider is trimmed and case-insensitive", () => {
   assert.equal(resolveLlmConfig({ LLM_PROVIDER: " Anthropic " }).provider, "anthropic");
 });
