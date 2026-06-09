@@ -61,6 +61,33 @@ into Studio and the standalone route is retired.
   **shares** the polling + stage components used inside Studio's `generating`/`review` states (one
   implementation, not two).
 
+## Characters & visual consistency (decided — out of the wizard)
+
+There is **no manual character step** in the wizard. Per direction, character/asset consistency is
+**agent-decided, not a user form**: all text generation runs first (brief → creative plan / story),
+then the model decides whether a recurring character or setting needs a consistency **anchor**, and
+**if so the anchor is established before any image/video generation**. This is how the pipeline
+*should* work (it matches `docs/NORTH_STAR.md`).
+
+Consequences for this redesign:
+
+- **Cut the manual controls.** The old `components/editor/CharacterPanel.tsx`,
+  `AssetGenerationPanel.tsx`, and `useCharacterLibrary.ts` are **deleted along with `Editor.tsx`** —
+  they are not re-homed into a wizard step. The wizard never asks the user to manage a character
+  library.
+- **The capability is backend engine work, not a UI PR.** Today the v1 job executor
+  (`runGenerationJob`) runs only `creative_plan → storyboard → timeline_assembly → quality_review`;
+  **`asset_generation` is defined but never executed**, character anchors live in the legacy one-shot
+  path + a separate on-demand endpoint, and the agent's `characterIds` signal is ignored by the run.
+  Making "text → conditional anchor → visuals" real means: implement the `asset_generation` stage,
+  wire the plan's character decision into an anchor-creation step ordered before keyframes, and feed
+  character invariants into keyframe/clip prompts. **This belongs in the generation-engine scope**
+  (alongside `docs/scopes/stepwise-story-generation-prs.md` and the `plan_visual_anchors` story-flow
+  tool), and is tracked there — **not** in a Studio-redesign PR.
+- **UI touch-point only:** PR 4's status checklist must be able to surface a *conditional*
+  "Establishing character consistency" item when the engine runs an anchor stage (it simply renders
+  whatever stages/items the run reports — no character-specific UI beyond that).
+
 ## Relationship to the backend stepwise scope
 
 **Step 5 (Review & Edit) depends on `docs/scopes/stepwise-story-generation-prs.md`** (resumable
@@ -168,6 +195,9 @@ The shared visual + component contract. Land first.
   advanced disclosure here.
 - **Done when:** clicking Generate swaps the setup card for the checklist; stages tick green as the run
   progresses; reaching a gate/terminal transitions to `review`.
+- **Note:** the checklist is data-driven — it renders whatever stages/items the run reports, so when
+  the engine later runs a conditional character-anchor stage it surfaces as an "Establishing
+  character consistency" item with no character-specific UI work here.
 - **Acceptance:** generation status is a calm checklist; reinforces agent-driven stepwise feel.
 
 ### PR 5 — Preview area redesign *(independent)*
