@@ -12,7 +12,7 @@ import {
   requireRun,
   type CreateGenerationRunBody,
 } from "@/lib/v1/generation-runs";
-import { resumeGenerationRun } from "@/lib/v1/generation/resume-run";
+import { resumeGenerationRun } from "@/lib/v1/generation/run-execution";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
@@ -94,12 +94,16 @@ generationRunsRouter.post(
 
     const store = getGenerationRunStore();
     const payload = await assemblePayload(store, runId);
-    requireRun(payload, runId, projectId);
+    const existing = requireRun(payload, runId, projectId);
 
-    await approveReviewGate(store, runId, body ?? {});
-    await resumeGenerationRun({ runId, runStore: store });
-    const approved = await assemblePayload(store, runId);
-    return { status: 202, body: approved };
+    const approved = await approveReviewGate(store, runId, body ?? {});
+    if (!existing.run.reviewGate) {
+      return { status: 200, body: approved };
+    }
+
+    await resumeGenerationRun({ runId, projectId, runStore: store });
+    const resumed = await assemblePayload(store, runId);
+    return { status: 202, body: requireRun(resumed, runId, projectId) };
   })
 );
 
@@ -115,9 +119,10 @@ generationRunsRouter.post(
     requireRun(payload, runId, projectId);
 
     await rejectReviewGate(store, runId, body ?? {});
-    await resumeGenerationRun({ runId, runStore: store });
-    const rejected = await assemblePayload(store, runId);
-    return { status: 202, body: rejected };
+
+    await resumeGenerationRun({ runId, projectId, runStore: store });
+    const resumed = await assemblePayload(store, runId);
+    return { status: 202, body: requireRun(resumed, runId, projectId) };
   })
 );
 

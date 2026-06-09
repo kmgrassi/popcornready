@@ -123,14 +123,24 @@ function extractOpenAIOutputText(payload: any): string {
   return chunks.join("");
 }
 
-function parseReviewJson(text: string): ReviewResult {
-  try {
-    return JSON.parse(text) as ReviewResult;
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as ReviewResult;
-    throw new Error(`Reviewer did not return JSON: ${text.slice(0, 500)}`);
+function extractOpenAIToolResult(payload: any): ReviewResult {
+  for (const item of payload?.output || []) {
+    if (item?.type === "function_call" && item?.name === "review_video_snapshot") {
+      const args = String(item.arguments || "");
+      if (!args.trim()) break;
+      return JSON.parse(args) as ReviewResult;
+    }
+    for (const content of item?.content || []) {
+      if (
+        content?.type === "tool_call" &&
+        content?.name === "review_video_snapshot"
+      ) {
+        return content.input as ReviewResult;
+      }
+    }
   }
+  const text = extractOpenAIOutputText(payload);
+  throw new Error(`Reviewer did not call review_video_snapshot: ${text.slice(0, 500)}`);
 }
 
 async function imageInputBlock(imagePath: string) {
@@ -160,22 +170,25 @@ async function reviewWithOpenAI(input: {
     },
     body: JSON.stringify({
       model,
+      tools: [
+        {
+          type: "function",
+          name: "review_video_snapshot",
+          description:
+            "Return the generated video snapshot review grades and recommended action.",
+          parameters: reviewSchema,
+          strict: false,
+        },
+      ],
+      tool_choice: { type: "function", name: "review_video_snapshot" },
+      parallel_tool_calls: false,
       input: [
         {
           role: "user",
           content: [
             {
               type: "input_text",
-              text: `${input.prompt}
-
-Return only a JSON object with this exact shape:
-{
-  "storyMatch": "pass" | "needs_review" | "fail",
-  "characterMatch": "pass" | "needs_review" | "fail",
-  "visualQuality": "pass" | "needs_review" | "fail",
-  "continuityNotes": "string",
-  "recommendedAction": "keep" | "regenerate" | "manual_review"
-}`,
+              text: input.prompt,
             },
             ...imageBlocks,
           ],
@@ -190,7 +203,7 @@ Return only a JSON object with this exact shape:
   }
 
   const payload = await res.json();
-  return { result: parseReviewJson(extractOpenAIOutputText(payload)), model };
+  return { result: extractOpenAIToolResult(payload), model };
 }
 
 async function reviewWithAnthropic(input: {
@@ -247,7 +260,7 @@ export async function reviewGeneratedVideoSnapshots(input: {
 You receive still snapshots extracted from a clip, optionally preceded by a
 hero character reference image. Judge whether the generated clip appears to
 match the requested story beat, recurring character, and baseline visual
-quality. Return JSON only.`;
+quality. Call the required result tool with the review.`;
 
   const user = `Full user prompt:
 ${input.goal}

@@ -170,6 +170,7 @@ export interface WorkspaceAsset {
   url?: string;
   thumbnailUrl?: string;
   durationSec?: number;
+  visibility?: "public" | "private";
   createdAt: string;
   updatedAt?: string;
 }
@@ -377,6 +378,18 @@ export const v1Api = {
       {
         signal,
         searchParams: params,
+      }
+    ),
+  setAssetVisibility: (
+    projectId: string,
+    assetId: string,
+    visibility: "public" | "private"
+  ) =>
+    apiRequest<{ asset: { id: string; visibility?: "public" | "private" } }>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/visibility`,
+      {
+        method: "PATCH",
+        body: { visibility },
       }
     ),
   updateGenerationRun: (

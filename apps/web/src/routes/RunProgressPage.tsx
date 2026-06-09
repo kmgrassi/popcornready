@@ -41,8 +41,10 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
     "approve" | "reject" | "cancel" | undefined
   >();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reviewFeedbackNote, setReviewFeedbackNote] = useState("");
   const pollNowRef = useRef<(() => void) | null>(null);
   const hint = readLastRunHint(projectId);
+  const reviewGateKey = payload?.run.reviewGate?.stageId ?? null;
 
   const applyPayload = useCallback(
     (next: GenerationRunDetail) => {
@@ -105,20 +107,30 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
     };
   }, [applyPayload, projectId, runId]);
 
-  async function runAction(action: "approve" | "reject" | "cancel") {
+  useEffect(() => {
+    setReviewFeedbackNote("");
+  }, [reviewGateKey]);
+
+  async function runAction(action: "approve" | "reject" | "cancel", note?: string) {
     if (actionPending) return;
     setActionPending(action);
     setActionError(null);
     try {
+      const trimmedNote = note?.trim();
       const body =
         action === "reject" && payload?.run.reviewGate
           ? {
               stageType: payload.run.reviewGate.stageType,
-              note: "Regenerate from review feedback.",
+              ...(trimmedNote ? { note: trimmedNote } : {}),
             }
-          : undefined;
+          : action === "approve" && trimmedNote
+            ? { note: trimmedNote }
+            : undefined;
       const data = await v1Api.updateGenerationRun(projectId, runId, action, body);
       applyPayload(data);
+      if (action === "approve" || action === "reject") {
+        setReviewFeedbackNote("");
+      }
       if (action === "cancel") {
         clearLastRunHint(projectId);
       }
@@ -170,8 +182,10 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
           ? {
               pending: actionPending,
               error: actionError,
-              onApprove: () => void runAction("approve"),
-              onReject: () => void runAction("reject"),
+              feedbackNote: reviewFeedbackNote,
+              onFeedbackNoteChange: setReviewFeedbackNote,
+              onApprove: (note) => void runAction("approve", note),
+              onReject: (note) => void runAction("reject", note),
               onCancel: () => void runAction("cancel"),
             }
           : undefined

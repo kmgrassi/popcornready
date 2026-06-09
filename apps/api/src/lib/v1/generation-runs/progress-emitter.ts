@@ -154,6 +154,7 @@ export function createPersistedRunProgressEmitter(
 
         if (
           completed.isReviewGate &&
+          !completed.reviewedAt &&
           isGateableGenerationStageType(completed.type)
         ) {
           await store.updateRun(runId, {
@@ -239,6 +240,16 @@ export function createPersistedRunProgressEmitter(
 
     async updateRun(patch: StageUpdate) {
       await store.updateRun(runId, patch);
+    },
+
+    async getReviewFeedback() {
+      const run = await getRunOrThrow();
+      const feedback = run.reviewFeedback?.trim() ?? "";
+      return feedback.length > 0 ? feedback : null;
+    },
+
+    async clearReviewFeedback() {
+      await store.updateRun(runId, { reviewFeedback: null });
     },
   };
 }

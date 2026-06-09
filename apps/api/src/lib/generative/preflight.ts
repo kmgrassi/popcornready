@@ -164,8 +164,8 @@ Review against this framework:
 - Flag provider-fit issues such as asking for too many actions in one short
   clip, ambiguous camera motion, impossible text rendering, or vague subjects.
 
-Return JSON only. Keep the revised prompt ready to send directly to the
-generation provider. Keep the description short and useful for the asset
+Call the required result tool with the revised prompt ready to send directly to
+the generation provider. Keep the description short and useful for the asset
 library. If dialogue inputs are provided, return revisedDialogueInputs with the
 same zero-based indexes and revised text only; do not invent or remove speakers.
 If no dialogue inputs are provided, return an empty revisedDialogueInputs array.

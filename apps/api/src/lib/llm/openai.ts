@@ -9,7 +9,6 @@ import {
   StructuredVisionArgs,
   ToolChoiceResult,
   ToolSpec,
-  parseStructuredText,
 } from "./types";
 
 // Reasoning models accept `reasoning_effort`; non-reasoning models (gpt-4o,
@@ -51,10 +50,12 @@ export function toOpenAITool(spec: ToolSpec): Record<string, unknown> {
   };
 }
 
-// OpenAI's json_schema response format rejects several JSON Schema keywords that
-// our tool schemas use (minLength, minimum, …). With strict:false the model
-// still follows the schema; we strip the unsupported keywords so the request is
-// accepted across models.
+const STRUCTURED_RESULT_TOOL = "return_result";
+
+// OpenAI's function tool parameters reject several JSON Schema keywords that
+// our schemas use (minLength, minimum, ...). With strict:false the model still
+// follows the schema; we strip unsupported keywords so requests are accepted
+// across models.
 const UNSUPPORTED_SCHEMA_KEYS = new Set([
   "minLength",
   "maxLength",
@@ -82,6 +83,27 @@ export function sanitizeForOpenAI(schema: JsonSchema): JsonSchema {
     return value;
   };
   return walk(schema) as JsonSchema;
+}
+
+function toolInputFromOpenAIMessage<T>(
+  message: any,
+  expectedTool: string
+): T {
+  const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const call = calls.find(
+    (candidate: any) => candidate?.function?.name === expectedTool
+  );
+  const raw = call?.function?.arguments;
+  if (typeof raw !== "string" || !raw.trim()) {
+    throw new Error(`Model did not call required tool: ${expectedTool}`);
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(
+      `Model returned invalid tool arguments for ${expectedTool}: ${raw.slice(0, 500)}`
+    );
+  }
 }
 
 // Pure response parsing — unit-tested without a network call.
@@ -140,25 +162,27 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
     userContent: unknown
   ): Promise<T> => {
     const callModel = pickModel(args.effort);
+    const tool = toOpenAITool({
+      name: STRUCTURED_RESULT_TOOL,
+      description: "Return the structured result for this task.",
+      parameters: sanitizeForOpenAI(args.schema),
+    });
     const res = await ensureCreate()({
       model: callModel,
       messages: [
         { role: "system", content: args.cachedSystem },
         { role: "user", content: userContent },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "result",
-          schema: sanitizeForOpenAI(args.schema),
-          strict: false,
-        },
-      },
+      tools: [tool],
+      tool_choice: { type: "function", function: { name: STRUCTURED_RESULT_TOOL } },
+      parallel_tool_calls: false,
       max_completion_tokens: args.maxTokens ?? 8000,
       ...reasoningParams(callModel, args.effort),
     });
-    const text = String(res?.choices?.[0]?.message?.content ?? "");
-    return parseStructuredText<T>(text);
+    return toolInputFromOpenAIMessage<T>(
+      res?.choices?.[0]?.message,
+      STRUCTURED_RESULT_TOOL
+    );
   };
 
   return {
@@ -191,6 +215,7 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
         ],
         tools: args.tools.map(toOpenAITool),
         tool_choice: "auto",
+        parallel_tool_calls: false,
         max_completion_tokens: args.maxTokens ?? 2000,
         ...reasoningParams(callModel, args.effort),
       });

@@ -70,7 +70,6 @@ test("review gate fields are optional and persist when present", async () => {
   const enteredAt = new Date().toISOString();
 
   await store.updateRun(run.runId, {
-    reviewFeedback: "Make the ending warmer.",
     reviewGate: {
       stageType: "creative_plan",
       stageId: stage.stageId,
@@ -84,7 +83,6 @@ test("review gate fields are optional and persist when present", async () => {
   const payload = await assemblePayload(store, run.runId);
   assert.ok(payload);
   assert.deepEqual(payload!.run.reviewGates, ["creative_plan"]);
-  assert.equal(payload!.run.reviewFeedback, "Make the ending warmer.");
   assert.deepEqual(payload!.run.reviewGate, {
     stageType: "creative_plan",
     stageId: stage.stageId,
@@ -93,37 +91,6 @@ test("review gate fields are optional and persist when present", async () => {
   });
   assert.equal(payload!.stages[0].isReviewGate, true);
   assert.equal(payload!.stages[0].reviewedAt, reviewedAt);
-});
-
-test("approveReviewGate persists non-empty feedback notes", async () => {
-  const created = await createRunWithSeedStages({
-    store,
-    projectId: "proj_approve_note",
-    body: { reviewGates: ["creative_plan"] },
-  });
-  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
-  await store.updateStage(gateStage.stageId, {
-    status: "succeeded",
-    completedAt: new Date().toISOString(),
-  });
-  await store.updateRun(created.run.runId, {
-    status: "running",
-    currentStageType: "creative_plan",
-    reviewGate: {
-      stageType: "creative_plan",
-      stageId: gateStage.stageId,
-      state: "awaiting_review",
-      enteredAt: new Date().toISOString(),
-    },
-  });
-
-  const approved = await approveReviewGate(store, created.run.runId, {
-    note: "Keep the voiceover playful.",
-  });
-
-  assert.equal(approved.run.reviewGate, null);
-  assert.equal(approved.run.reviewFeedback, "Keep the voiceover playful.");
-  assert.equal(approved.run.currentStageType, "storyboard");
 });
 
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {
@@ -647,6 +614,37 @@ test("persisted progress emitter pauses a run after a gated stage succeeds", asy
   assert.equal(payload!.stages[1].status, "succeeded");
 });
 
+test("persisted progress emitter does not pause an approved gate during resume", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_resume_approved",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(gateStage.stageId, {
+    status: "succeeded",
+    reviewedAt,
+  });
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "storyboard",
+    reviewGate: null,
+  });
+
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  await (await emitter.beginStage("creative_plan")).succeed();
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.equal(payload!.run.reviewGate, null);
+  assert.equal(payload!.run.currentStageType, "creative_plan");
+  assert.equal(
+    payload!.stages.find((stage) => stage.type === "creative_plan")?.reviewedAt,
+    reviewedAt
+  );
+});
+
 test("persisted progress emitter does not pause YOLO runs or skipped gates", async () => {
   const yolo = await createRunWithSeedStages({
     store,
@@ -693,6 +691,34 @@ test("approveReviewGate rejects canceled runs", async () => {
   );
 });
 
+test("approveReviewGate stores a non-empty review note as forward feedback", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_approve_feedback",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const storyboardStage = created.stages.find((stage) => stage.type === "storyboard")!;
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const approved = await approveReviewGate(store, created.run.runId, {
+    note: "make the next step more playful",
+  });
+
+  assert.equal(approved.run.reviewGate, null);
+  assert.equal(approved.run.reviewFeedback, "make the next step more playful");
+  assert.equal(approved.run.currentStageType, storyboardStage.type);
+});
+
 test("rejectReviewGate resets the gated stage for regeneration and drops stale output", async () => {
   const created = await createRunWithSeedStages({
     store,
@@ -733,6 +759,7 @@ test("rejectReviewGate resets the gated stage for regeneration and drops stale o
 
   assert.equal(rejected.run.reviewGate, null);
   assert.equal(rejected.run.status, "running");
+  assert.equal(rejected.run.reviewFeedback, "too dark");
   const updatedStage = rejected.stages.find((stage) => stage.stageId === gateStage.stageId)!;
   assert.equal(updatedStage.status, "queued");
   assert.equal(updatedStage.progressPercent, 0);

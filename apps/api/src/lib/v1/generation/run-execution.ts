@@ -2,20 +2,32 @@ import {
   createEvaluatorRegistry,
   type EvaluatorRegistry,
 } from "@popcorn/eval";
+import type {
+  GateableGenerationStageType,
+  GenerationJob,
+  GenerationStage,
+  GenerationStageType,
+} from "@popcorn/shared/v1/types";
+
 import { createInlineEvalEmitter } from "../../eval/inline-hook";
 import {
   createSupabaseJudgmentStore,
   type JudgmentStore,
 } from "../../eval/judgment-store";
+import { ApiError } from "../errors";
+import {
+  runGenerationJob,
+  type GenerationDeps,
+  type RunExecutionOptions,
+} from "../generation";
 import type { RunProgressEmitter } from "../generation-progress";
 import { createRunWithSeedStages } from "../generation-runs/payload";
 import { createPersistedRunProgressEmitter } from "../generation-runs/progress-emitter";
 import {
   getGenerationRunStore,
+  type GenerationRunsStore,
 } from "../generation-runs/store";
-import type { GenerationRunsStore } from "../generation-runs/store";
-import type { RunExecutionOptions } from "../generation";
-import type { GenerationStageType } from "@popcorn/shared/v1/types";
+import { getStore, type V1Store } from "../store";
 
 interface CreateGenerationRunExecutionArgs {
   projectId: string;
@@ -26,17 +38,28 @@ interface CreateGenerationRunExecutionArgs {
   judgmentStore?: JudgmentStore;
 }
 
-interface CreateExistingGenerationRunExecutionArgs {
+interface GenerationRunExecution {
   runId: string;
+  progress: RunProgressEmitter;
+  execution: RunExecutionOptions;
+}
+
+interface BuildGenerationRunExecutionArgs {
+  runId: string;
+  briefVersionId?: string;
   runStore?: GenerationRunsStore;
   registry?: EvaluatorRegistry;
   judgmentStore?: JudgmentStore;
 }
 
-interface GenerationRunExecution {
+interface ResumeGenerationRunArgs {
   runId: string;
-  progress: RunProgressEmitter;
-  execution: RunExecutionOptions;
+  projectId?: string;
+  store?: V1Store;
+  runStore?: GenerationRunsStore;
+  deps?: GenerationDeps;
+  registry?: EvaluatorRegistry;
+  judgmentStore?: JudgmentStore;
 }
 
 function bodyWithBriefVersion(
@@ -64,33 +87,56 @@ async function requireStageId(
   return stage.stageId;
 }
 
-async function requireStageForOutput(
+async function loadStageOutput(
   store: GenerationRunsStore,
   runId: string,
   stageType: GenerationStageType
-) {
+): ReturnType<NonNullable<RunExecutionOptions["loadStageOutput"]>> {
   const stages = await store.listStagesForRun(runId);
   const stage = stages.find((candidate) => candidate.type === stageType);
-  if (!stage) {
-    throw new Error(`generation stage not found for ${stageType} on run ${runId}`);
+  if (!stage) return null;
+  if (stage.status !== "succeeded") return { status: stage.status };
+
+  const artifactId = stage.artifactIds.at(-1);
+  if (!artifactId) return { status: stage.status };
+
+  const artifact = await store.getStageArtifact(artifactId);
+  if (!artifact) {
+    throw new Error(
+      `generation stage artifact not found for ${stageType} on run ${runId}: ${artifactId}`
+    );
   }
-  return stage;
+  return {
+    status: stage.status,
+    artifactId: artifact.artifactId,
+    content: artifact.content,
+  };
 }
 
-function executionForRun(args: {
-  runId: string;
-  runStore: GenerationRunsStore;
-  briefVersionId?: string;
-  registry?: EvaluatorRegistry;
-  judgmentStore?: JudgmentStore;
-}): GenerationRunExecution {
-  const { runId, runStore } = args;
-  const persistedProgress = createPersistedRunProgressEmitter(runStore, runId);
+async function checkPendingReviewGate(
+  store: GenerationRunsStore,
+  runId: string
+): ReturnType<NonNullable<RunExecutionOptions["checkPendingReviewGate"]>> {
+  const run = await store.getRun(runId);
+  const gate = run?.reviewGate;
+  if (!gate || gate.state !== "awaiting_review") return null;
+  return {
+    runId,
+    stageId: gate.stageId,
+    stageType: gate.stageType as GateableGenerationStageType,
+  };
+}
+
+async function buildGenerationRunExecution(
+  args: BuildGenerationRunExecutionArgs
+): Promise<GenerationRunExecution> {
+  const runStore = args.runStore ?? getGenerationRunStore();
+  const persistedProgress = createPersistedRunProgressEmitter(runStore, args.runId);
   const progress = createInlineEvalEmitter(persistedProgress, {
     registry: args.registry ?? createEvaluatorRegistry(),
     judgmentStore: args.judgmentStore ?? createSupabaseJudgmentStore(),
     runsStore: runStore,
-    runId,
+    runId: args.runId,
     deriveIntent: async (target) => ({
       stageType: target.stageType,
       modality: target.modality,
@@ -99,42 +145,22 @@ function executionForRun(args: {
   });
 
   return {
-    runId,
+    runId: args.runId,
     progress,
     execution: {
       async persistStageArtifact(input) {
-        const stageId = await requireStageId(runStore, runId, input.stageType);
+        const stageId = await requireStageId(runStore, args.runId, input.stageType);
         const artifact = await runStore.saveStageArtifact({
-          runId,
+          runId: args.runId,
           stageId,
           kind: input.kind,
           content: input.content,
         });
         return { artifactId: artifact.artifactId };
       },
-      async getStageStatus(stageType) {
-        const stage = await requireStageForOutput(runStore, runId, stageType);
-        return stage.status;
-      },
-      async loadStageOutput(stageType) {
-        const stage = await requireStageForOutput(runStore, runId, stageType);
-        const artifactId = stage.artifactIds[stage.artifactIds.length - 1];
-        if (!artifactId) {
-          throw new Error(`generation stage ${stageType} has no persisted artifact`);
-        }
-        const artifact = await runStore.getStageArtifact(artifactId);
-        if (!artifact) {
-          throw new Error(`generation stage artifact not found: ${artifactId}`);
-        }
-        return artifact.content;
-      },
-      async getReviewFeedback() {
-        const run = await runStore.getRun(runId);
-        return run?.reviewFeedback ?? null;
-      },
-      async clearReviewFeedback() {
-        await runStore.updateRun(runId, { reviewFeedback: null });
-      },
+      loadStageOutput: (input) =>
+        loadStageOutput(runStore, args.runId, input.stageType),
+      checkPendingReviewGate: () => checkPendingReviewGate(runStore, args.runId),
     },
   };
 }
@@ -148,29 +174,91 @@ export async function createGenerationRunExecution(
     projectId: args.projectId,
     body: bodyWithBriefVersion(args.body, args.briefVersionId),
   });
-  const runId = payload.run.runId;
-  return executionForRun({
-    runId,
-    runStore,
+  return buildGenerationRunExecution({
+    runId: payload.run.runId,
     briefVersionId: payload.run.briefVersionId,
+    runStore,
     registry: args.registry,
     judgmentStore: args.judgmentStore,
   });
 }
 
-export async function createExistingGenerationRunExecution(
-  args: CreateExistingGenerationRunExecutionArgs
-): Promise<GenerationRunExecution> {
+function orderedAttachedJobIds(stages: GenerationStage[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const stage of [...stages].sort((a, b) => b.order - a.order)) {
+    for (const jobId of [...stage.jobIds].reverse()) {
+      if (!seen.has(jobId)) {
+        seen.add(jobId);
+        ids.push(jobId);
+      }
+    }
+  }
+  return ids;
+}
+
+async function loadAttachedGenerationJobs(
+  store: V1Store,
+  projectId: string,
+  jobIds: string[]
+): Promise<GenerationJob[]> {
+  const jobs: GenerationJob[] = [];
+  for (const jobId of jobIds) {
+    const job = (await store.getJob(jobId)) as GenerationJob | null;
+    if (job?.type === "generation" && job.projectId === projectId) {
+      jobs.push(job);
+    }
+  }
+  return jobs;
+}
+
+export async function resumeGenerationRun(
+  args: ResumeGenerationRunArgs
+): Promise<GenerationJob> {
   const runStore = args.runStore ?? getGenerationRunStore();
+  const store = args.store ?? getStore();
   const run = await runStore.getRun(args.runId);
   if (!run) {
-    throw new Error(`generation run not found: ${args.runId}`);
+    throw new ApiError("not_found", `Generation run not found: ${args.runId}`);
   }
-  return executionForRun({
+  if (args.projectId && run.projectId !== args.projectId) {
+    throw new ApiError("not_found", `Generation run not found: ${args.runId}`);
+  }
+
+  const stages = await runStore.listStagesForRun(args.runId);
+  const jobs = await loadAttachedGenerationJobs(
+    store,
+    run.projectId,
+    orderedAttachedJobIds(stages)
+  );
+  const queued = jobs.find((job) => job.status === "queued");
+  if (!queued) {
+    const running = jobs.find((job) => job.status === "running");
+    if (running) {
+      throw new ApiError(
+        "job_not_cancelable",
+        "Generation run is already resuming.",
+        { jobId: running.id }
+      );
+    }
+    throw new ApiError(
+      "validation_failed",
+      "Generation run has no queued generation job to resume."
+    );
+  }
+
+  const execution = await buildGenerationRunExecution({
     runId: args.runId,
-    runStore,
     briefVersionId: run.briefVersionId,
+    runStore,
     registry: args.registry,
     judgmentStore: args.judgmentStore,
   });
+  return runGenerationJob(
+    store,
+    queued.id,
+    args.deps,
+    execution.progress,
+    execution.execution
+  );
 }

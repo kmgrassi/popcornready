@@ -78,6 +78,12 @@ export interface RunProgressEmitter {
   // Update run-level fields directly. Useful for bumping `progressPercent` or
   // setting a top-line message between stage transitions.
   updateRun(patch: StageUpdate): Promise<void>;
+
+  // Optional persisted-run review feedback helpers. Generation code reads this
+  // before the stage that can consume it, then clears it once the model accepts
+  // the feedback into a new output.
+  getReviewFeedback?(): Promise<string | null>;
+  clearReviewFeedback?(): Promise<void>;
 }
 
 export interface RunStageHandle {
@@ -162,6 +168,10 @@ export const noopProgressEmitter: RunProgressEmitter = {
     return noopStage(type);
   },
   async updateRun() {},
+  async getReviewFeedback() {
+    return null;
+  },
+  async clearReviewFeedback() {},
 };
 
 // --- Error mapping ---------------------------------------------------------

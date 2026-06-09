@@ -22,6 +22,32 @@ const execFileAsync = promisify(execFile);
 const ANALYSIS_VERSION = "asset-analysis.v1";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_OPENAI_VISION_MODEL = "gpt-4.1-mini";
+const ASSET_ANALYSIS_TOOL = "summarize_asset_frames";
+
+const assetAnalysisSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    subjects: { type: "array", items: { type: "string" } },
+    actions: { type: "array", items: { type: "string" } },
+    setting: { type: "string" },
+    mood: { type: "string" },
+    likelyUses: { type: "array", items: { type: "string" } },
+    cautions: { type: "array", items: { type: "string" } },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+  },
+  required: [
+    "summary",
+    "subjects",
+    "actions",
+    "setting",
+    "mood",
+    "likelyUses",
+    "cautions",
+    "confidence",
+  ],
+};
 
 export interface ApiResult {
   status: number;
@@ -139,29 +165,35 @@ async function extractVideoFrames(args: {
   return frames;
 }
 
-function jsonFromOpenAIResponse(data: unknown): unknown {
+function toolResultFromOpenAIResponse(data: unknown): unknown {
   const output = (data as { output?: unknown[] })?.output;
   if (Array.isArray(output)) {
     for (const item of output) {
-      const content = (item as { content?: unknown[] })?.content;
-      if (!Array.isArray(content)) continue;
-      for (const part of content) {
-        const text = (part as { text?: string })?.text;
-        if (!text) continue;
+      if (
+        (item as { type?: unknown })?.type === "function_call" &&
+        (item as { name?: unknown })?.name === ASSET_ANALYSIS_TOOL
+      ) {
+        const args = (item as { arguments?: unknown })?.arguments;
+        if (typeof args !== "string" || !args.trim()) return undefined;
         try {
-          return JSON.parse(text);
+          return JSON.parse(args);
         } catch {
           return undefined;
         }
       }
-    }
-  }
-  const text = (data as { output_text?: string })?.output_text;
-  if (text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
+      const content = (item as { content?: unknown[] })?.content;
+      if (!Array.isArray(content)) continue;
+      for (const part of content) {
+        if (
+          (part as { type?: unknown })?.type === "tool_call" &&
+          (part as { name?: unknown })?.name === ASSET_ANALYSIS_TOOL
+        ) {
+          const input = (part as { input?: unknown })?.input;
+          if (input && typeof input === "object" && !Array.isArray(input)) {
+            return input;
+          }
+        }
+      }
     }
   }
   return undefined;
@@ -204,6 +236,18 @@ async function summarizeWithOpenAI(
     },
     body: JSON.stringify({
       model,
+      tools: [
+        {
+          type: "function",
+          name: ASSET_ANALYSIS_TOOL,
+          description:
+            "Summarize sampled uploaded-video frames for an editing agent.",
+          parameters: assetAnalysisSchema,
+          strict: false,
+        },
+      ],
+      tool_choice: { type: "function", name: ASSET_ANALYSIS_TOOL },
+      parallel_tool_calls: false,
       input: [
         {
           role: "user",
@@ -211,7 +255,7 @@ async function summarizeWithOpenAI(
             {
               type: "input_text",
               text:
-                "Summarize this uploaded video from sampled frames for an editing agent. Return strict JSON with summary, subjects, actions, setting, mood, likelyUses, cautions, confidence.",
+                "Summarize this uploaded video from sampled frames for an editing agent. Call the required tool with summary, subjects, actions, setting, mood, likelyUses, cautions, and confidence.",
             },
             {
               type: "input_text",
@@ -235,13 +279,13 @@ async function summarizeWithOpenAI(
     );
   }
 
-  const parsed = jsonFromOpenAIResponse(await response.json()) as
+  const parsed = toolResultFromOpenAIResponse(await response.json()) as
     | Record<string, unknown>
     | undefined;
   if (!parsed) {
     throw new ApiError(
       "model_output_invalid",
-      "OpenAI asset analysis returned invalid JSON."
+      `OpenAI asset analysis did not call ${ASSET_ANALYSIS_TOOL}.`
     );
   }
 

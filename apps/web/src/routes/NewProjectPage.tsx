@@ -88,6 +88,8 @@ export function NewProjectPage() {
   const canContinue = step === 0 || (step === 1 && goal.trim()) || step === 2 || step === 3;
   const canGenerate = goal.trim() && !submitting;
   const effectiveSeedKind = provider === "gemini" ? "video" : seedKind;
+  const stepThroughEveryStage =
+    reviewGates.length === GATEABLE_GENERATION_STAGE_TYPES.length;
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -105,6 +107,10 @@ export function NewProjectPage() {
         ? current.filter((candidate) => candidate !== stage)
         : [...current, stage]
     );
+  }
+
+  function setStepThroughEveryStage(enabled: boolean) {
+    setReviewGates(enabled ? [...GATEABLE_GENERATION_STAGE_TYPES] : []);
   }
 
   function applyPreset(preset: (typeof PLATFORMS)[number]) {
@@ -447,6 +453,16 @@ export function NewProjectPage() {
                   disabled={submitting}
                 />
                 Show captions
+              </label>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={stepThroughEveryStage}
+                  onChange={(event) => setStepThroughEveryStage(event.target.checked)}
+                  disabled={submitting}
+                />
+                Step through every stage
               </label>
               <div className="new-project-review-list">
                 {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => (

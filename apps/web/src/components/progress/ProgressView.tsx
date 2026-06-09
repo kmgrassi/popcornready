@@ -17,6 +17,7 @@ import {
 import { StageRail } from "./StageRail";
 import { StatusBanner } from "./StatusBanner";
 import { TerminalState } from "./TerminalState";
+import styles from "./ProgressView.module.css";
 
 interface ProgressViewProps {
   run: GenerationRun;
@@ -25,8 +26,10 @@ interface ProgressViewProps {
   reviewActions?: {
     pending?: "approve" | "reject" | "cancel";
     error?: string | null;
-    onApprove: () => void;
-    onReject: () => void;
+    feedbackNote?: string;
+    onFeedbackNoteChange?: (note: string) => void;
+    onApprove: (note: string) => void;
+    onReject: (note: string) => void;
     onCancel: () => void;
   };
   cancelAction?: {
@@ -53,12 +56,18 @@ export function ProgressView({
   const [detail, setDetail] = useState({ run, stages, stageItems });
   const [fallbackApproving, setFallbackApproving] = useState(false);
   const [fallbackError, setFallbackError] = useState<string | null>(null);
+  const [fallbackFeedbackNote, setFallbackFeedbackNote] = useState("");
+  const reviewGateKey = detail.run.reviewGate?.stageId ?? null;
 
   useEffect(() => {
     setDetail({ run, stages, stageItems });
     setFallbackApproving(false);
     setFallbackError(null);
   }, [run, stages, stageItems]);
+
+  useEffect(() => {
+    setFallbackFeedbackNote("");
+  }, [reviewGateKey]);
 
   const terminal = isTerminal(detail.run.status);
   const reviewStage = detail.run.reviewGate
@@ -73,6 +82,8 @@ export function ProgressView({
   const pending = reviewActions?.pending ?? (fallbackApproving ? "approve" : undefined);
   const actionError = reviewActions?.error ?? fallbackError;
   const showCancelAction = !terminal && !detail.run.reviewGate && !!cancelAction;
+  const feedbackNote = reviewActions?.feedbackNote ?? fallbackFeedbackNote;
+  const setFeedbackNote = reviewActions?.onFeedbackNoteChange ?? setFallbackFeedbackNote;
 
   async function approveFallback() {
     const reviewGate = detail.run.reviewGate;
@@ -132,7 +143,9 @@ export function ProgressView({
     }
   }
 
-  const onApprove = reviewActions?.onApprove ?? approveFallback;
+  const onApprove = reviewActions
+    ? () => reviewActions.onApprove(feedbackNote)
+    : approveFallback;
 
   return (
     <div className="progress-shell">
@@ -231,7 +244,7 @@ export function ProgressView({
                       <button
                         type="button"
                         className="secondary compact"
-                        onClick={reviewActions.onReject}
+                        onClick={() => reviewActions.onReject(feedbackNote)}
                         disabled={!!pending}
                       >
                         {pending === "reject"
@@ -254,6 +267,23 @@ export function ProgressView({
                 {reviewStage?.message ??
                   "Inspect this stage's output before the next generation stage starts."}
               </p>
+              <div className={styles.feedbackField}>
+                <label className={styles.feedbackLabel} htmlFor="review-feedback-note">
+                  Feedback
+                </label>
+                <textarea
+                  id="review-feedback-note"
+                  className={styles.feedbackTextarea}
+                  value={feedbackNote}
+                  onChange={(event) => setFeedbackNote(event.target.value)}
+                  placeholder="Tell the generator what to change or carry forward."
+                  disabled={!!pending}
+                  rows={4}
+                />
+                <p className={styles.feedbackHint}>
+                  Optional. Regenerate sends this feedback back to this step.
+                </p>
+              </div>
               {actionError ? (
                 <p className="review-gate-error" role="alert">
                   {actionError}

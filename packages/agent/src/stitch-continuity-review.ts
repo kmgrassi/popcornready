@@ -214,8 +214,8 @@ Grade the stitched cut on:
 - audioSync: if audio is present, does it track the visuals? Omit if no audio.
 
 Be strict but practical. Use "needs_review" when the boundary frames are
-ambiguous. Recommend "regenerate" only for clear stitching failures. Return JSON
-only.`;
+ambiguous. Recommend "regenerate" only for clear stitching failures. Call the
+required result tool with the review.`;
 
 function timelineSummaryText(timeline: StitchTimelineSummary): string {
   const lines = [

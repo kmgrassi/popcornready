@@ -13,14 +13,15 @@ import {
   noopProgressEmitter,
   toErrorSummary,
 } from "./generation-progress";
-import { isRunReviewGatePaused } from "./generation-runs";
+import { RunReviewGatePaused, isRunReviewGatePaused } from "./generation-runs";
 import { randomUUID } from "crypto";
 import { Logger, createLogger } from "./logger";
 import { redactMessage } from "./redact";
 import { V1Store } from "./store";
 import {
+  GateableGenerationStageType,
   GenerationJob,
-  GenerationRunStatus,
+  GenerationStage,
   GenerationStageItem,
   GenerationStageType,
   SCHEMA,
@@ -78,6 +79,20 @@ export type StageArtifactPersister = (input: {
   content: unknown;
 }) => Promise<{ artifactId: string }>;
 
+export type StageOutputLoader = (input: {
+  stageType: GenerationStageType;
+}) => Promise<{
+  status: GenerationStage["status"];
+  artifactId?: string;
+  content?: unknown;
+} | null>;
+
+export type ReviewGateHaltChecker = () => Promise<{
+  runId: string;
+  stageId: string;
+  stageType: GateableGenerationStageType;
+} | null>;
+
 // Opt-in bounded-execution controls (Stage Eval Framework §3, NORTH_STAR
 // principle 2). The autonomous production default leaves both unset.
 export interface RunExecutionOptions {
@@ -93,10 +108,12 @@ export interface RunExecutionOptions {
   // omitted, stages succeed without a result artifact (legacy text stages had
   // nothing to evaluate).
   persistStageArtifact?: StageArtifactPersister;
-  getStageStatus?: (stageType: GenerationStageType) => Promise<GenerationRunStatus | undefined>;
-  loadStageOutput?: (stageType: GenerationStageType) => Promise<unknown>;
-  getReviewFeedback?: () => Promise<string | null | undefined>;
-  clearReviewFeedback?: () => Promise<void>;
+  // Resume support: when supplied, a previously succeeded stage is loaded from
+  // its persisted artifact instead of being recomputed.
+  loadStageOutput?: StageOutputLoader;
+  // Resume safety: if the run is still waiting on a manual review gate, halt
+  // before loading or recomputing any stage.
+  checkPendingReviewGate?: ReviewGateHaltChecker;
 }
 
 // Internal control-flow signal: a bounded-execution stop (stopAfter /
@@ -210,8 +227,8 @@ export async function runGenerationJob(
   if (loaded.status !== "queued") return loaded;
 
   const persistStageArtifact = execution.persistStageArtifact;
-  const getStageStatus = execution.getStageStatus;
   const loadStageOutput = execution.loadStageOutput;
+  const checkPendingReviewGate = execution.checkPendingReviewGate;
   const stopAfter = execution.stopAfter;
   const promptsOnly = execution.promptsOnly === true;
 
@@ -250,19 +267,25 @@ export async function runGenerationJob(
   // Track the active stage so a failure mid-flight can roll it (and only it)
   // to a `failed` terminal state.
   let activeStage: RunStageHandle | null = null;
-  const stageSucceeded = async (stageType: GenerationStageType): Promise<boolean> =>
-    (await getStageStatus?.(stageType)) === "succeeded";
-  const loadSucceededOutput = async <T>(
+
+  async function loadSucceededStageOutput<T>(
     stageType: GenerationStageType
-  ): Promise<T> => {
-    if (!loadStageOutput) {
+  ): Promise<T | undefined> {
+    if (!loadStageOutput) return undefined;
+    const output = await loadStageOutput({ stageType });
+    if (!output || output.status !== "succeeded") return undefined;
+    if (output.content === undefined) {
       throw new ApiError(
         "internal_error",
-        `Cannot resume ${stageType}; no stage output loader is configured.`
+        `Cannot resume generation: ${stageType} succeeded without a persisted result artifact.`
       );
     }
-    return (await loadStageOutput(stageType)) as T;
-  };
+    logger.info("stage.skipped", {
+      stageType,
+      artifactId: output.artifactId,
+    });
+    return output.content as T;
+  }
 
   // Bounded-execution breakpoint: after the just-succeeded stage, halt if the
   // caller set `stopAfter` to it, or if `prompts_only` stops before the first
@@ -276,6 +299,13 @@ export async function runGenerationJob(
   };
 
   try {
+    const pendingReviewGate = checkPendingReviewGate
+      ? await checkPendingReviewGate()
+      : null;
+    if (pendingReviewGate) {
+      throw new RunReviewGatePaused(pendingReviewGate);
+    }
+
     await progress.updateRun({ progressPercent: 5, message: "Validating request" });
 
     const input = loaded.input;
@@ -348,48 +378,48 @@ export async function runGenerationJob(
     const modelLogger = logger.child({ provider: "anthropic" });
 
     // creative_plan: convert the brief into a beat-level plan.
-    job = await saveJobUpdate(
-      store,
-      job,
-      {
-        progress: { currentStep: "planning_timeline", percent: 20 },
-      },
-      modelLogger
-    );
-    const plan = (await stageSucceeded("creative_plan"))
-      ? await loadSucceededOutput<EditPlan>("creative_plan")
-      : await (async () => {
-          activeStage = await progress.beginStage("creative_plan", {
-            label: "Planning the cut",
-            message: `Planning a ${brief.brief.targetLengthSec}-second video.`,
-          });
-          await activeStage.attachJob(job.id);
-          await progress.updateRun({ progressPercent: 20, message: "Planning the cut" });
-          const feedback = (await execution.getReviewFeedback?.()) ?? null;
-          const planned = await deps.planEdit({
-            goal: brief.brief.goal,
-            targetLengthSec: brief.brief.targetLengthSec,
-            style: brief.brief.style || "fast-paced social ad",
-            aspectRatio: brief.brief.aspectRatio,
-            storyContext,
-            feedback,
-          });
-          // Persist the plan as a first-class addressable artifact and carry its id on
-          // succeed() so the inline judge can read it as evidence (§3).
-          const planArtifact = persistStageArtifact
-            ? await persistStageArtifact({
-                stageType: "creative_plan",
-                kind: "timeline",
-                content: planned,
-              })
-            : undefined;
-          if (feedback) await execution.clearReviewFeedback?.();
-          await activeStage.succeed(
-            planArtifact ? { resultArtifactId: planArtifact.artifactId } : undefined
-          );
-          activeStage = null;
-          return planned;
-        })();
+    let plan = await loadSucceededStageOutput<EditPlan>("creative_plan");
+    if (!plan) {
+      job = await saveJobUpdate(
+        store,
+        job,
+        {
+          progress: { currentStep: "planning_timeline", percent: 20 },
+        },
+        modelLogger
+      );
+      activeStage = await progress.beginStage("creative_plan", {
+        label: "Planning the cut",
+        message: `Planning a ${brief.brief.targetLengthSec}-second video.`,
+      });
+      await activeStage.attachJob(job.id);
+      await progress.updateRun({ progressPercent: 20, message: "Planning the cut" });
+      const reviewFeedback = await progress.getReviewFeedback?.();
+      plan = await deps.planEdit({
+        goal: brief.brief.goal,
+        targetLengthSec: brief.brief.targetLengthSec,
+        style: brief.brief.style || "fast-paced social ad",
+        aspectRatio: brief.brief.aspectRatio,
+        storyContext,
+        feedback: reviewFeedback,
+      });
+      if (reviewFeedback) {
+        await progress.clearReviewFeedback?.();
+      }
+      // Persist the plan as a first-class addressable artifact and carry its id on
+      // succeed() so the inline judge can read it as evidence (§3).
+      const planArtifact = persistStageArtifact
+        ? await persistStageArtifact({
+            stageType: "creative_plan",
+            kind: "timeline",
+            content: plan,
+          })
+        : undefined;
+      await activeStage.succeed(
+        planArtifact ? { resultArtifactId: planArtifact.artifactId } : undefined
+      );
+      activeStage = null;
+    }
 
     // Bounded execution: prompts_only stops here — the plan/specs are produced
     // without any clip selection / assembly (the first media-ward work). An
@@ -399,82 +429,80 @@ export async function runGenerationJob(
     }
     haltAfterIfRequested("creative_plan");
 
+    const planBeatList = planBeats(plan);
     // storyboard: generate one cheap sketch tile per beat before expensive
     // asset generation, then expose those tiles as stage items for review.
-    job = await saveJobUpdate(
-      store,
-      job,
-      {
-        progress: { currentStep: "storyboarding", percent: 35 },
-      },
-      logger
-    );
-    const planBeatList = planBeats(plan);
-    if (await stageSucceeded("storyboard")) {
-      await loadSucceededOutput<{ tiles: Asset[] }>("storyboard");
-    } else {
-      await (async () => {
-        activeStage = await progress.beginStage("storyboard", {
-          label: "Sketching the storyboard",
-          message: `Sketching ${planBeatList.length} beat${
-            planBeatList.length === 1 ? "" : "s"
-          }.`,
+    let storyboardContent = await loadSucceededStageOutput<{ tiles: Asset[] }>("storyboard");
+    let storyboardTiles: Asset[] = storyboardContent?.tiles ?? [];
+    if (!storyboardContent) {
+      job = await saveJobUpdate(
+        store,
+        job,
+        {
+          progress: { currentStep: "storyboarding", percent: 35 },
+        },
+        logger
+      );
+      activeStage = await progress.beginStage("storyboard", {
+        label: "Sketching the storyboard",
+        message: `Sketching ${planBeatList.length} beat${
+          planBeatList.length === 1 ? "" : "s"
+        }.`,
+      });
+      await activeStage.attachJob(job.id);
+      await progress.updateRun({ progressPercent: 35, message: "Sketching the storyboard" });
+      try {
+        storyboardTiles = await deps.generateStoryboardTiles({
+          workspaceId: job.workspaceId,
+          projectId: job.projectId,
+          plan,
         });
-        await activeStage.attachJob(job.id);
-        await progress.updateRun({ progressPercent: 35, message: "Sketching the storyboard" });
-        let tiles: Asset[] = [];
-        try {
-          tiles = await deps.generateStoryboardTiles({
-            workspaceId: job.workspaceId,
-            projectId: job.projectId,
-            plan,
-          });
-        } catch (err) {
-          const summary = toErrorSummary(err, { fallbackCode: "internal_error" });
-          await activeStage.fail(summary);
-          throw err;
-        }
-        for (const tile of tiles) {
-          const item = await activeStage.startItem({
-            kind: "image",
-            label: tile.description ?? `Storyboard tile ${tile.depicts?.beatId ?? ""}`,
-            provider: tile.provenance?.provider,
-          });
-          await item.succeed({ assetId: tile.id });
-        }
-        const storyboardArtifact = persistStageArtifact
-          ? await persistStageArtifact({
-              stageType: "storyboard",
-              kind: "timeline",
-              content: { tiles },
-            })
-          : undefined;
-        await activeStage.succeed({
-          message: `Sketched ${tiles.length} storyboard tile${
-            tiles.length === 1 ? "" : "s"
-          }.`,
-          ...(storyboardArtifact ? { resultArtifactId: storyboardArtifact.artifactId } : {}),
+      } catch (err) {
+        const summary = toErrorSummary(err, { fallbackCode: "internal_error" });
+        await activeStage.fail(summary);
+        throw err;
+      }
+      for (const tile of storyboardTiles) {
+        const item = await activeStage.startItem({
+          kind: "image",
+          label: tile.description ?? `Storyboard tile ${tile.depicts?.beatId ?? ""}`,
+          provider: tile.provenance?.provider,
         });
-        activeStage = null;
-      })();
+        await item.succeed({ assetId: tile.id });
+      }
+      const storyboardArtifact = persistStageArtifact
+        ? await persistStageArtifact({
+            stageType: "storyboard",
+            kind: "timeline",
+            content: { tiles: storyboardTiles },
+          })
+        : undefined;
+      await activeStage.succeed({
+        message: `Sketched ${storyboardTiles.length} storyboard tile${
+          storyboardTiles.length === 1 ? "" : "s"
+        }.`,
+        ...(storyboardArtifact ? { resultArtifactId: storyboardArtifact.artifactId } : {}),
+      });
+      activeStage = null;
     }
     haltAfterIfRequested("storyboard");
 
     // timeline_assembly: select clips and build the timeline segments.
-    job = await saveJobUpdate(
-      store,
-      job,
-      {
-        progress: { currentStep: "selecting_clips", percent: 50 },
-      },
-      modelLogger
-    );
     let timeline: ReturnType<typeof sanitizeTimeline>;
-    if (await stageSucceeded("timeline_assembly")) {
-      timeline = await loadSucceededOutput<ReturnType<typeof sanitizeTimeline>>(
-        "timeline_assembly"
-      );
+    const loadedTimeline = await loadSucceededStageOutput<ReturnType<typeof sanitizeTimeline>>(
+      "timeline_assembly"
+    );
+    if (loadedTimeline) {
+      timeline = loadedTimeline;
     } else {
+      job = await saveJobUpdate(
+        store,
+        job,
+        {
+          progress: { currentStep: "selecting_clips", percent: 50 },
+        },
+        modelLogger
+      );
       activeStage = await progress.beginStage("timeline_assembly", {
         label: "Assembling the timeline",
         message: "Selecting clips for each beat.",
@@ -520,38 +548,64 @@ export async function runGenerationJob(
     haltAfterIfRequested("timeline_assembly");
 
     // quality_review: critique the draft timeline and apply patches.
-    job = await saveJobUpdate(
-      store,
-      job,
-      {
-        progress: { currentStep: "critiquing_timeline", percent: 75 },
-      },
-      modelLogger
-    );
-    activeStage = await progress.beginStage("quality_review", {
-      label: "Reviewing the cut",
-      message: "Checking pacing, clarity, and coverage.",
-    });
-    await activeStage.attachJob(job.id);
-    await progress.updateRun({ progressPercent: 75, message: "Reviewing the cut" });
-
-    const { report, patches } = await deps.critique({ plan, timeline, clips, storyContext });
-    timeline = applyPatches(timeline, patches, clips);
-
-    if (timeline.segments.length === 0) {
-      return failJobAndStage(
+    let report: Awaited<ReturnType<GenerationDeps["critique"]>>["report"];
+    let patches: Awaited<ReturnType<GenerationDeps["critique"]>>["patches"];
+    const loadedQualityReview = await loadSucceededStageOutput<{
+      report: Awaited<ReturnType<GenerationDeps["critique"]>>["report"];
+      patches: Awaited<ReturnType<GenerationDeps["critique"]>>["patches"];
+      timeline: ReturnType<typeof sanitizeTimeline>;
+    }>("quality_review");
+    if (loadedQualityReview) {
+      report = loadedQualityReview.report;
+      patches = loadedQualityReview.patches;
+      timeline = loadedQualityReview.timeline;
+    } else {
+      job = await saveJobUpdate(
         store,
         job,
-        "timeline_invalid",
-        "Generated timeline has no valid segments.",
-        activeStage,
-        logger
+        {
+          progress: { currentStep: "critiquing_timeline", percent: 75 },
+        },
+        modelLogger
       );
+      activeStage = await progress.beginStage("quality_review", {
+        label: "Reviewing the cut",
+        message: "Checking pacing, clarity, and coverage.",
+      });
+      await activeStage.attachJob(job.id);
+      await progress.updateRun({ progressPercent: 75, message: "Reviewing the cut" });
+
+      const critiqueResult = await deps.critique({ plan, timeline, clips, storyContext });
+      report = critiqueResult.report;
+      patches = critiqueResult.patches;
+      timeline = applyPatches(timeline, patches, clips);
+
+      const qualityReviewArtifact = persistStageArtifact
+        ? await persistStageArtifact({
+            stageType: "quality_review",
+            kind: "timeline",
+            content: { report, patches, timeline },
+          })
+        : undefined;
+
+      if (timeline.segments.length === 0) {
+        return failJobAndStage(
+          store,
+          job,
+          "timeline_invalid",
+          "Generated timeline has no valid segments.",
+          activeStage,
+          logger
+        );
+      }
+      await activeStage.succeed({
+        message: `Applied ${patches.length} revision${patches.length === 1 ? "" : "s"}.`,
+        ...(qualityReviewArtifact
+          ? { resultArtifactId: qualityReviewArtifact.artifactId }
+          : {}),
+      });
+      activeStage = null;
     }
-    await activeStage.succeed({
-      message: `Applied ${patches.length} revision${patches.length === 1 ? "" : "s"}.`,
-    });
-    activeStage = null;
 
     job = await saveJobUpdate(
       store,
@@ -666,7 +720,13 @@ export async function runGenerationJob(
     const rawMessage = err instanceof Error ? err.message : "Generation failed.";
     let code: ErrorCode = "internal_error";
     if (err instanceof ApiError) code = err.code;
-    else if (rawMessage.includes("did not return valid JSON")) code = "model_output_invalid";
+    else if (
+      rawMessage.includes("did not return valid JSON") ||
+      rawMessage.includes("did not call required tool") ||
+      rawMessage.includes("invalid tool")
+    ) {
+      code = "model_output_invalid";
+    }
     // Redact before persisting so any provider response leaking into the error
     // message (Authorization headers, raw upstream JSON bodies) never lands in
     // the job record or the API response.

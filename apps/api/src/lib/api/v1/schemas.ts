@@ -1068,6 +1068,24 @@ export function parseRegisterAsset(input: unknown): RegisterAssetInput {
   };
 }
 
+export interface SetAssetVisibilityInput {
+  visibility: "public" | "private";
+}
+
+export function parseSetAssetVisibility(input: unknown): SetAssetVisibilityInput {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  if (input.visibility !== "public" && input.visibility !== "private") {
+    throw validationError('visibility must be "public" or "private".', [
+      { path: "visibility", message: 'Must be "public" or "private".' },
+    ]);
+  }
+  return { visibility: input.visibility };
+}
+
 export function parseUpdateAssetContext(input: unknown): UpdateAssetContextInput {
   if (!isPlainObject(input)) {
     throw validationError("The request body is invalid.", [
