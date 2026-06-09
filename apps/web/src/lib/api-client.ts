@@ -203,6 +203,19 @@ export interface WorkspaceOutputsResponse {
   pagination: ListPagination;
 }
 
+export interface GenerationRunArtifactResponse {
+  artifact: {
+    artifactId: string;
+    runId: string;
+    stageId: string;
+    itemId?: string;
+    kind: string;
+    content: unknown;
+    createdAt: string;
+  };
+  timelineId?: string;
+}
+
 export interface CreateProjectInput {
   name: string;
   brief?: VideoBriefInput;
@@ -288,6 +301,18 @@ function studioProjectFromV1(project: V1Project): Project {
   };
 }
 
+function workspaceAssetToClip(asset: WorkspaceAsset): Project["clips"][number] {
+  return {
+    id: asset.assetId ?? asset.id,
+    filename: asset.filename ?? asset.title ?? asset.id,
+    url: asset.url ?? asset.thumbnailUrl ?? "",
+    kind: asset.kind,
+    durationSec: asset.durationSec ?? 4,
+    description: asset.description ?? asset.title ?? "",
+    source: asset.source === "generated" ? "generated" : "upload",
+  };
+}
+
 export const v1Api = {
   me: () => apiRequest<MeResponse>("/api/v1/me"),
   listProjects: (params?: { limit?: number; cursor?: string | null }) =>
@@ -324,6 +349,16 @@ export const v1Api = {
   ) =>
     apiRequest<GenerationRunDetail>(
       `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}`,
+      { signal }
+    ),
+  getGenerationRunArtifact: (
+    projectId: string,
+    runId: string,
+    artifactId: string,
+    signal?: AbortSignal
+  ) =>
+    apiRequest<GenerationRunArtifactResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/generation-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`,
       { signal }
     ),
   listWorkspaceGenerationRuns: (
@@ -405,6 +440,18 @@ export const v1Api = {
         body: body ?? {},
       }
     ),
+  createTimelineRevision: (
+    projectId: string,
+    timelineId: string,
+    message: string
+  ) =>
+    apiRequest<{ job: unknown }>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}/revisions`,
+      {
+        method: "POST",
+        body: { message },
+      }
+    ),
   startPromptGenerationRun: (
     projectId: string,
     input: StartGenerationRunInput
@@ -431,6 +478,26 @@ export const v1Api = {
     const { projects } = await v1Api.listProjects({ limit: 1 });
     return {
       project: projects[0] ? studioProjectFromV1(projects[0]) : null,
+    };
+  },
+  getStudioProjectById: async (
+    projectId: string,
+    timeline?: Project["timeline"] | null
+  ): Promise<StudioProjectResponse> => {
+    const [{ project }, { workspaceId }] = await Promise.all([
+      v1Api.getProject(projectId),
+      v1Api.me(),
+    ]);
+    const { assets } = await v1Api.listWorkspaceAssets(workspaceId, {
+      projectId,
+      limit: 100,
+    });
+    return {
+      project: {
+        ...studioProjectFromV1(project),
+        timeline: timeline ?? null,
+        clips: assets.map(workspaceAssetToClip),
+      },
     };
   },
   // Read-only selector for the Storyboard view. Resolves the current studio

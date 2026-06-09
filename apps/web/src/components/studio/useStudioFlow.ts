@@ -7,6 +7,7 @@
 // the polling that drives the generation checklist + review handoff.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Clip, Project, Timeline } from "@popcorn/shared/types";
 import type {
   AspectRatio,
   GateableGenerationStageType,
@@ -15,6 +16,7 @@ import type {
 } from "@popcorn/shared/v1/types";
 import type { StoryContext } from "@popcorn/shared/types";
 import { v1Api } from "../../lib/api-client";
+import type { GenerationRunResultArtifact } from "../../lib/v1/generation-runs/status";
 import { createAndStartRun } from "../../lib/startRun";
 
 // --- State / step vocabularies ---------------------------------------------
@@ -123,8 +125,17 @@ export interface StudioFlow {
    * poll loop. PR 4's richer checklist consumes the same data.
    */
   stages: GenerationStage[];
+  /** Result artifacts attached to the active run, including timeline outputs. */
+  resultArtifacts: GenerationRunResultArtifact[];
   /** Project id of the in-flight run, for deep-link / polling. */
   projectId?: string;
+  /** Project + cut data loaded only once review has a real timeline artifact. */
+  reviewProject?: Project | null;
+  reviewTimeline?: Timeline | null;
+  reviewTimelineId?: string;
+  reviewClips: Clip[];
+  reviewLoading: boolean;
+  reviewError?: string;
   /** Set when startGeneration() failed; cleared on retry. */
   error?: string;
   goTo(step: StudioStep): void;
@@ -140,6 +151,8 @@ export interface StudioFlow {
   approveGate(note?: string): Promise<void>;
   /** Reject the active run's review gate (regenerate the gated stage). No-op when not gated. */
   rejectGate(note?: string): Promise<void>;
+  /** Sends review feedback to the timeline revision endpoint when a timeline exists. */
+  requestRevision(note: string): Promise<void>;
 }
 
 /**
@@ -174,6 +187,18 @@ function isReviewReady(run: GenerationRun): boolean {
   return run.status === "succeeded";
 }
 
+function isTimeline(value: unknown): value is Timeline {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { segments?: unknown };
+  return Array.isArray(candidate.segments);
+}
+
+function timelineFromArtifactContent(content: unknown): Timeline | null {
+  if (isTimeline(content)) return content;
+  const nested = (content as { timeline?: unknown } | null)?.timeline;
+  return isTimeline(nested) ? nested : null;
+}
+
 export interface UseStudioFlowOptions {
   /** Seed the draft (e.g. from `?goal=`/`?length=` query params). */
   initialBrief?: Partial<BriefDraft>;
@@ -193,7 +218,13 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
   }));
   const [run, setRun] = useState<GenerationRun | undefined>();
   const [stages, setStages] = useState<GenerationStage[]>([]);
+  const [resultArtifacts, setResultArtifacts] = useState<GenerationRunResultArtifact[]>([]);
   const [projectId, setProjectId] = useState<string | undefined>();
+  const [reviewProject, setReviewProject] = useState<Project | null>(null);
+  const [reviewTimeline, setReviewTimeline] = useState<Timeline | null>(null);
+  const [reviewTimelineId, setReviewTimelineId] = useState<string | undefined>();
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
   const update = useCallback((patch: Partial<BriefDraft>) => {
@@ -223,6 +254,10 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     try {
       const { projectId: createdProjectId, runId } = await createAndStartRun(brief);
       setProjectId(createdProjectId);
+      setReviewProject(null);
+      setReviewTimeline(null);
+      setReviewTimelineId(undefined);
+      setReviewError(undefined);
       setRun({
         runId,
         projectId: createdProjectId,
@@ -260,6 +295,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
         if (cancelled) return;
         setRun(data.run);
         setStages(data.stages);
+        setResultArtifacts(data.resultArtifacts ?? []);
 
         if (isReviewReady(data.run)) {
           setState("review");
@@ -314,6 +350,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
         );
         setRun(data.run);
         setStages(data.stages);
+        setResultArtifacts(data.resultArtifacts ?? []);
         // Re-poll immediately so the resumed run advances without waiting for
         // the slow gated cadence.
         pollRef.current?.();
@@ -336,6 +373,84 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     [resolveGate],
   );
 
+  useEffect(() => {
+    if (state !== "review" || !projectId || !run?.runId) return;
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadReviewCut() {
+      setReviewLoading(true);
+      setReviewError(undefined);
+      try {
+        const detail = await v1Api.getGenerationRun(projectId!, run!.runId, controller.signal);
+        if (cancelled) return;
+        setRun(detail.run);
+        setStages(detail.stages);
+        setResultArtifacts(detail.resultArtifacts ?? []);
+
+        const timelineArtifact = (detail.resultArtifacts ?? []).find(
+          (artifact) => artifact.kind === "timeline"
+        );
+        let loadedTimeline: Timeline | null = null;
+        let loadedTimelineId: string | undefined;
+        if (timelineArtifact) {
+          const { artifact, timelineId } = await v1Api.getGenerationRunArtifact(
+            projectId!,
+            run!.runId,
+            timelineArtifact.artifactId,
+            controller.signal
+          );
+          if (cancelled) return;
+          loadedTimeline = timelineFromArtifactContent(artifact.content);
+          loadedTimelineId = timelineId;
+        }
+
+        const { project } = await v1Api.getStudioProjectById(projectId!, loadedTimeline);
+        if (cancelled) return;
+        setReviewProject(project);
+        setReviewTimeline(project?.timeline ?? loadedTimeline);
+        setReviewTimelineId(loadedTimelineId);
+      } catch (reviewLoadError) {
+        if (cancelled || controller.signal.aborted) return;
+        setReviewError(
+          reviewLoadError instanceof Error
+            ? reviewLoadError.message
+            : "Could not load the review timeline."
+        );
+        setReviewProject(null);
+        setReviewTimeline(null);
+        setReviewTimelineId(undefined);
+      } finally {
+        if (!cancelled) setReviewLoading(false);
+      }
+    }
+
+    void loadReviewCut();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [state, projectId, run?.runId]);
+
+  const requestRevision = useCallback(
+    async (note: string) => {
+      const message = note.trim();
+      if (!message || !projectId || !reviewTimelineId) return;
+      setError(undefined);
+      try {
+        await v1Api.createTimelineRevision(projectId, reviewTimelineId, message);
+      } catch (revisionError) {
+        setError(
+          revisionError instanceof Error
+            ? revisionError.message
+            : "Could not send timeline feedback."
+        );
+        throw revisionError;
+      }
+    },
+    [projectId, reviewTimelineId],
+  );
+
   return useMemo(
     () => ({
       state,
@@ -343,7 +458,14 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       brief,
       run,
       stages,
+      resultArtifacts,
       projectId,
+      reviewProject,
+      reviewTimeline,
+      reviewTimelineId,
+      reviewClips: reviewProject?.clips ?? [],
+      reviewLoading,
+      reviewError,
       error,
       goTo,
       back,
@@ -352,7 +474,8 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       startGeneration,
       approveGate,
       rejectGate,
+      requestRevision,
     }),
-    [state, step, brief, run, stages, projectId, error, goTo, back, next, update, startGeneration, approveGate, rejectGate],
+    [state, step, brief, run, stages, resultArtifacts, projectId, reviewProject, reviewTimeline, reviewTimelineId, reviewLoading, reviewError, error, goTo, back, next, update, startGeneration, approveGate, rejectGate, requestRevision],
   );
 }

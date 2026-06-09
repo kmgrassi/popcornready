@@ -39,4 +39,13 @@ export interface GenerationRunDetail {
   run: GenerationRun;
   stages: GenerationStage[];
   stageItems: GenerationStageItem[];
+  resultArtifacts?: GenerationRunResultArtifact[];
+}
+
+export interface GenerationRunResultArtifact {
+  kind: GenerationStageItem["kind"];
+  artifactId: string;
+  assetId?: string;
+  stageId: string;
+  itemId?: string;
 }

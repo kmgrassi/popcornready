@@ -13,6 +13,7 @@ import {
   type CreateGenerationRunBody,
 } from "@/lib/v1/generation-runs";
 import { resumeGenerationRun } from "@/lib/v1/generation/run-execution";
+import { getStore } from "@/lib/v1/store";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
@@ -80,6 +81,51 @@ generationRunsRouter.get(
     return {
       status: 200,
       body: verified,
+      headers: NO_STORE_HEADERS,
+    };
+  })
+);
+
+generationRunsRouter.get(
+  "/projects/:projectId/generation-runs/:runId/artifacts/:artifactId",
+  route(async ({ auth }, params) => {
+    const projectId = requireParam(params, "projectId");
+    const runId = requireParam(params, "runId");
+    const artifactId = requireParam(params, "artifactId");
+    await requireProjectAccess(auth.workspaceId, projectId);
+
+    const runStore = getGenerationRunStore();
+    const payload = await assemblePayload(runStore, runId);
+    requireRun(payload, runId, projectId);
+
+    const artifact = await runStore.getStageArtifact(artifactId);
+    if (!artifact || artifact.runId !== runId) {
+      throw new ApiError("not_found", `Generation artifact not found: ${artifactId}`);
+    }
+
+    const stage = await runStore.getStage(artifact.stageId);
+    let timelineId: string | undefined;
+    if (artifact.kind === "timeline" && stage?.jobIds.length) {
+      const store = getStore();
+      for (const jobId of stage.jobIds) {
+        const job = await store.getJob(jobId);
+        const result = job?.result as { timelineIds?: unknown } | null;
+        const [candidate] = Array.isArray(result?.timelineIds)
+          ? result.timelineIds.filter((id): id is string => typeof id === "string")
+          : [];
+        if (candidate) {
+          timelineId = candidate;
+          break;
+        }
+      }
+    }
+
+    return {
+      status: 200,
+      body: {
+        artifact,
+        ...(timelineId ? { timelineId } : {}),
+      },
       headers: NO_STORE_HEADERS,
     };
   })
