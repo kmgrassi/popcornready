@@ -6,7 +6,7 @@
 //   - local_path (AUTH_MODE=local only): copy the file into managed local storage
 //     so later operations never depend on the original source file, status "ready".
 //
-// multipart_upload and generated sources are out of scope for PR1.
+// generated sources are out of scope for PR1.
 
 import { promises as fs } from "fs";
 import path from "path";
@@ -389,9 +389,56 @@ export async function registerAsset(
     return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
   }
 
+  if (input.source.type === "multipart_upload") {
+    const filename = input.filename || `${randomUUID()}.bin`;
+    const kind = resolveKind(input.kind, filename);
+    const dataBase64 = input.source.dataBase64;
+    if (!dataBase64) {
+      throw new ApiError("asset_invalid", "Uploaded asset bytes are required.");
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(dataBase64, "base64");
+    } catch {
+      throw new ApiError("asset_invalid", "Uploaded asset bytes are not valid base64.");
+    }
+    if (bytes.length === 0) {
+      throw new ApiError("asset_invalid", "Uploaded asset bytes are empty.");
+    }
+
+    const ext = path.extname(filename);
+    const destDir = mediaUploadDir(auth.workspaceId, projectId);
+    await fs.mkdir(destDir, { recursive: true });
+    const destPath = path.join(destDir, `${randomUUID()}${ext}`);
+    await fs.writeFile(destPath, bytes);
+    const storageKey = path.relative(localDir(), destPath);
+
+    const asset: V1Asset = {
+      id: "",
+      schemaVersion: SCHEMA_VERSIONS.asset,
+      workspaceId: auth.workspaceId,
+      projectId,
+      kind,
+      filename,
+      status: "ready",
+      source: {
+        type: "multipart_upload",
+        ...(input.source.mimeType ? { mimeType: input.source.mimeType } : {}),
+      },
+      storageKey,
+      durationSec: input.durationSec,
+      context: input.context,
+      userContext: input.userContext,
+      agentContext: input.agentContext,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
+  }
+
   throw new ApiError(
     "validation_failed",
-    `Asset source "${input.source.type}" is not supported yet. Use remote_url or local_path.`
+    `Asset source "${input.source.type}" is not supported yet. Use remote_url, local_path, or multipart_upload.`
   );
 }
 

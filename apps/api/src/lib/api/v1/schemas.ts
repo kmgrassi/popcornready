@@ -194,7 +194,7 @@ const ASSET_RELATIONSHIP_TYPES: AssetRelationshipType[] = [
 export type AgentAssetSource =
   | { type: "remote_url"; url: string }
   | { type: "local_path"; path: string }
-  | { type: "multipart_upload" }
+  | { type: "multipart_upload"; dataBase64?: string; mimeType?: string }
   | { type: "generated"; generatedAssetId: string };
 
 export interface AssetContext {
@@ -759,8 +759,12 @@ function parseAssetSource(input: unknown, fields: FieldError[]): AgentAssetSourc
       if (!p) return undefined;
       return { type: "local_path", path: p };
     }
-    case "multipart_upload":
-      return { type: "multipart_upload" };
+    case "multipart_upload": {
+      const dataBase64 = requireString(input.dataBase64, "source.dataBase64", fields);
+      if (!dataBase64) return undefined;
+      const mimeType = optionalString(input.mimeType, "source.mimeType", fields);
+      return { type: "multipart_upload", dataBase64, ...(mimeType ? { mimeType } : {}) };
+    }
     case "generated": {
       const generatedAssetId = requireString(
         input.generatedAssetId,

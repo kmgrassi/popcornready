@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FOOTAGE_ACCEPT, readSelectedFootage } from "../../../lib/upload";
 import type { StepProps } from "../useStudioFlow";
 import { StepShell } from "./StepShell";
@@ -21,21 +21,42 @@ function formatDuration(seconds: number): string {
 export function SourceFootageStep({ draft, update, next, back }: StepProps) {
   const [isReading, setIsReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
+  const selectionRequestId = useRef(0);
   const isUploadMode = draft.footageChoice === "upload";
+  const hasVisualFootage = draft.selectedFootage.some(
+    (selected) =>
+      selected.file.type.startsWith("video/") || selected.file.type.startsWith("image/"),
+  );
 
   async function onFilesSelected(files: FileList | null) {
+    const requestId = selectionRequestId.current + 1;
+    selectionRequestId.current = requestId;
     setIsReading(true);
     setReadError(null);
     try {
       const selectedFootage = await readSelectedFootage(files);
+      if (selectionRequestId.current !== requestId) return;
       update({ footageChoice: "upload", selectedFootage });
     } catch (error) {
+      if (selectionRequestId.current !== requestId) return;
       setReadError(
         error instanceof Error ? error.message : "Could not read the selected footage.",
       );
     } finally {
-      setIsReading(false);
+      if (selectionRequestId.current === requestId) {
+        setIsReading(false);
+      }
     }
+  }
+
+  function selectPromptOnly() {
+    selectionRequestId.current += 1;
+    setReadError(null);
+    setIsReading(false);
+    update({
+      footageChoice: "prompt_only",
+      selectedFootage: [],
+    });
   }
 
   return (
@@ -45,7 +66,7 @@ export function SourceFootageStep({ draft, update, next, back }: StepProps) {
       onNext={next}
       onBack={back}
       nextLabel={isUploadMode ? "Continue with footage" : "Continue prompt-only"}
-      nextDisabled={isReading}
+      nextDisabled={isReading || (isUploadMode && !hasVisualFootage)}
     >
       <div className={styles.choiceGrid}>
         <label className={styles.choiceCard}>
@@ -53,12 +74,7 @@ export function SourceFootageStep({ draft, update, next, back }: StepProps) {
             type="radio"
             name="footage-choice"
             checked={draft.footageChoice === "prompt_only"}
-            onChange={() =>
-              update({
-                footageChoice: "prompt_only",
-                selectedFootage: [],
-              })
-            }
+            onChange={selectPromptOnly}
           />
           <span className={styles.choiceTitle}>Prompt only</span>
           <p className={styles.choiceText}>
@@ -137,7 +153,7 @@ export function SourceFootageStep({ draft, update, next, back }: StepProps) {
             </ul>
           ) : (
             <p className={styles.status}>
-              No files selected yet. You can continue and attach footage later.
+              Select at least one video or image before continuing with footage.
             </p>
           )}
         </section>
