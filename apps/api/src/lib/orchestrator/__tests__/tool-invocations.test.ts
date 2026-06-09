@@ -80,6 +80,8 @@ test("records async job wait and resumes from durable state after completion", a
       status: "running",
     });
 
+    assert.deepEqual(await listRunsReadyToResume(), []);
+
     await markToolInvocationWaitingForJob(invocation.id, {
       status: "accepted",
       jobId: "job_1",
@@ -98,6 +100,7 @@ test("records async job wait and resumes from durable state after completion", a
       invocation.id
     );
     assert.equal((await listWaitingToolInvocations()).length, 1);
+    assert.deepEqual(await listRunsReadyToResume(), []);
 
     await completeToolInvocation(invocation.id, {
       status: "succeeded",

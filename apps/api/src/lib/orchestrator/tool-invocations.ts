@@ -499,7 +499,20 @@ export async function findToolInvocationWaitingOn(
 
 export async function listRunsReadyToResume(): Promise<OrchestratorRun[]> {
   const db = await readDb();
-  return db.runs.filter(
-    (run) => run.status === "running" && run.currentTurnId != null
-  );
+  return db.runs.filter((run) => {
+    if (run.status !== "running" || run.currentTurnId == null) return false;
+
+    const turn = db.turns.find((candidate) => candidate.id === run.currentTurnId);
+    if (!turn) return false;
+    if (turn.terminalReason !== "done" && turn.terminalReason !== "error") {
+      return false;
+    }
+
+    return turn.toolInvocationIds.every((invocationId) => {
+      const invocation = db.invocations.find(
+        (candidate) => candidate.id === invocationId
+      );
+      return invocation != null && isTerminalStatus(invocation.status);
+    });
+  });
 }
