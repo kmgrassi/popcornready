@@ -151,14 +151,22 @@ The shared visual + component contract. Land first.
 
 ### PR 1 — Studio shell: state machine + stepper + empty state *(backbone; steps plug in)*
 - **Files:** `routes/StudioPage.tsx` (rewrite to render `StudioShell`), new
-  `components/studio/StudioShell.tsx`, `useStudioFlow.ts`, `StudioEmptyState.tsx`; route updates in
-  `App.tsx` (point `/projects/new` + sidebar "New video" at `/studio`).
+  `components/studio/StudioShell.tsx`, `useStudioFlow.ts`, `StudioEmptyState.tsx`; **extract the
+  helpers out of `NewProjectPage` first** — `lib/startRun.ts` (`createProject` +
+  `startPromptGenerationRun`) and `lib/upload.ts` (file-upload logic) — **then** delete
+  `NewProjectPage.tsx`; route updates in `App.tsx` (point `/projects/new` + sidebar "New video" at
+  `/studio`).
 - **Work:** implement the `initial|generating|review` machine and the 6-step `Stepper` (renders the
   active step's component only). Initial empty state: headline "Create your first AI rough cut",
   support text "Start with a brief, add footage, then review an editable timeline.", primary CTA
   "Start new video". Big high-contrast "Start new video" CTA near the top of Studio.
+- **Why the extraction lives here:** PR 1 is the PR that deletes `NewProjectPage`, so it must also
+  lift `startRun.ts`/`upload.ts` in the same change — that keeps the only working create/run wiring
+  alive with no cross-PR ordering hazard. PR 3 (upload) and PR 4 (generate) then *consume* these
+  helpers; they do not re-extract them.
 - **Done when:** `/studio` with no active project shows the empty state + CTA; clicking it enters the
-  Brief step; the stepper shows all 6 steps with only the active one's controls visible.
+  Brief step; the stepper shows all 6 steps with only the active one's controls visible; `startRun.ts`
+  and `upload.ts` exist and `NewProjectPage` is gone with no lost functionality.
 - **Acceptance:** first action obvious in 5s; main CTA visually obvious; empty state explains next steps.
 
 ### PR 2 — Step 1 Brief (simplified) + progressive disclosure
@@ -176,8 +184,8 @@ The shared visual + component contract. Land first.
 - **Acceptance:** <5 first-screen controls; advanced collapsed by default; plain labels.
 
 ### PR 3 — Step 2 Source Footage + Step 3 Story Direction
-- **Files:** `components/studio/steps/SourceFootageStep.tsx`, `steps/StoryDirectionStep.tsx`; reuse the
-  upload logic lifted from `NewProjectPage` (extract into `lib/upload.ts` if not already shared).
+- **Files:** `components/studio/steps/SourceFootageStep.tsx`, `steps/StoryDirectionStep.tsx`; consume
+  `lib/upload.ts` (extracted in PR 1) — do not re-extract from `NewProjectPage`, which PR 1 has deleted.
 - **Work:** Footage step = "How should we use your footage?" (upload vs. prompt-only vs.
   uploaded-footage-edit mode). Story Direction step surfaces the few creative knobs worth a dedicated
   step (format + hook), leaving the long tail in Brief's advanced panel. Both follow the step contract.
@@ -186,8 +194,8 @@ The shared visual + component contract. Land first.
 
 ### PR 4 — Step 4 Generate + generation status checklist *(consumes the create flow)*
 - **Files:** `components/studio/steps/GenerateStep.tsx`, `components/studio/GenerationChecklist.tsx`,
-  `components/studio/statusChecklist.ts`; shared create helper `lib/startRun.ts` (extracted from
-  `NewProjectPage` `createProject` + `startPromptGenerationRun`).
+  `components/studio/statusChecklist.ts`; consume the shared create helper `lib/startRun.ts`
+  (extracted in PR 1 — `createProject` + `startPromptGenerationRun`), do not re-extract it.
 - **Work:** "Generate rough cut" CTA → `flow.startGeneration()` → state `generating`. Replace the step
   controls with a **clean progress checklist**: Planning story structure → Selecting clips → Building
   timeline → Generating preview → Ready for review, driven by polling `getGenerationRun` (reuse the
@@ -295,8 +303,11 @@ PR 9 (API: workspace list routes) ── independent, backend-only, start anytim
 - `components/AppLayout.tsx` — PR 1 (route targets for "New video") and PR 8 (nav items) both touch it;
   sequence PR 1 → PR 8 or split the file's nav array into its own module.
 - `styles/tokens.css` / `globals.css` — only PR 0 edits tokens; other PRs add component `.module.css`.
-- `NewProjectPage.tsx` — **deleted** by PR 1; PR 4 first lifts its create logic into `lib/startRun.ts`.
-  Do the extraction in PR 4 before PR 1 removes the route, so the helper exists when the route dies.
+- `NewProjectPage.tsx` — **PR 1 owns the whole lifecycle**: it extracts `lib/startRun.ts` +
+  `lib/upload.ts` *and* deletes the route in the same PR, so the working create/run wiring is never
+  orphaned. PR 3 and PR 4 only *consume* those helpers — no extraction, no ordering hazard. (Earlier
+  drafts split the extraction into PR 4; that's wrong because PR 1 lands first and would delete the
+  source — keep extraction and deletion together in PR 1.)
 
 ## Risks / decisions
 
