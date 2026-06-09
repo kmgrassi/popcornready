@@ -132,6 +132,13 @@ Inherited from the data-model scope (treated as settled):
 
 New decisions for this implementation:
 
+- **The `visibility` flag and `storage_bucket` are independent.** A row's
+  `visibility` flag is *user intent* and changes only via an explicit toggle of
+  *that* row; `storage_bucket` tracks *effective* visibility (where the bytes
+  live) and is reconciled on any effective change. A **project** toggle
+  reconciles its assets' bytes but **never rewrites their asset-level flags** —
+  so re-publishing a project restores the exact prior effective-public set.
+  (Raised in PR review; see §5.)
 - **Identical object key in both buckets.** The `storage_key` is
   `{workspaceId}/{projectId}/{assetId}/{filename}` and is **stable across a
   visibility move** — only the bucket changes. This makes the move a pure
@@ -169,7 +176,7 @@ New directory `apps/api/src/lib/storage/` (cohesive, feature-named files per
 | `s3-presign.ts` | port of `s3Signing.ts` — presigned GET + parse-from-URL |
 | `object-store.ts` | port of `storage.repository.ts` — `putObject`, `getObject`, `copyObject`, `deleteObject`, `objectUrl` (stable), `signedObjectUrl` (CloudFront→S3-presign→unsigned), `ensureBucket` |
 | `asset-urls.ts` | **new** — `resolveAssetUrl(asset)` / `resolveAssetUrls(assets[])`, the one place that maps a row to a delivery URL (the adapted decision point) |
-| `visibility-move.ts` | **new** — `moveAssetVisibility()` and `cascadeProjectPrivatize()` (the toggle + eager cascade) |
+| `visibility-move.ts` | **new** — `reconcileAssetStorage()` (byte move, `storage_bucket` only) + `setAssetVisibility()` / `setProjectVisibility()` (flag change + reconcile; the project toggle preserves per-asset flags) |
 | `local-store.ts` | the `STORAGE_BACKEND=local` implementation (disk), so the public interface is backend-agnostic |
 
 `object-store.ts` and `local-store.ts` implement one small `ObjectStore`
@@ -248,28 +255,54 @@ no per-request signing cost — the intended growth/scale property.
 
 ---
 
-## 5. Visibility toggle + eager cascade
+## 5. Visibility changes — flag vs. storage, and the cascade
 
-`moveAssetVisibility(assetId, target)`:
+Two distinct things change, and conflating them is a trap (raised in PR review):
+
+- **The `visibility` *flag*** on a row is **user intent** ("I want this asset
+  public"). It is changed *only* by an explicit toggle of *that* row.
+- **`storage_bucket`** tracks **effective** visibility (where the bytes must
+  physically live). It is reconciled whenever effective visibility changes —
+  including when a *project* toggle changes an asset's effective state *without*
+  touching the asset's own flag.
+
+The byte-move primitive operates on `storage_bucket` only — never the flag:
 
 ```
-target=public :  copyObject(private→public, key); UPDATE assets SET visibility=public, storage_bucket=public; deleteObject(private, key)
-target=private:  copyObject(public→private, key); UPDATE assets SET visibility=private, storage_bucket=private; deleteObject(public, key)
+reconcileAssetStorage(asset, project):
+  effective = asset.visibility == 'public' AND project.visibility == 'public'
+  want      = effective ? PUBLIC_BUCKET : PRIVATE_BUCKET
+  if asset.storage_bucket == want: return                       # nothing to do
+  copyObject(asset.storage_bucket → want, key)                  # same key
+  UPDATE assets SET storage_bucket = want WHERE id = asset.id    # flag UNTOUCHED
+  deleteObject(old bucket, key)
 ```
 
-- Order is **copy → update row → delete original** (settled).
-- The DB tier trigger still gates *acquiring* privacy (free owners can only do
-  →public); the move code calls the user-scoped client so the trigger fires.
-- **`cascadeProjectPrivatize(projectId)`:** when a project flips to private,
-  enumerate its effective-public assets and move each to `assets-private`
-  (bounded burst; project-privatize is rare). Publishing a project does **not**
-  auto-publish its assets (asset visibility can only narrow the project ceiling).
+- Order is **copy → update row → delete original** (settled): a mid-failure
+  orphans a harmless source object (sweepable), never a row pointing at a
+  deleted key.
 
-Thin endpoints (full shapes belong to the endpoint scope, but the minimum to
-exercise this):
-- `PATCH /projects/:projectId/assets/:assetId` `{ visibility }` → `moveAssetVisibility`
-- `PATCH /projects/:projectId` `{ visibility }` → set project visibility; on
-  →private also run `cascadeProjectPrivatize`.
+**Asset-level toggle** — `setAssetVisibility(assetId, v)`: update the asset's
+`visibility` flag (user-scoped client, so the DB tier trigger gates *acquiring*
+privacy), then `reconcileAssetStorage`.
+
+**Project-level toggle** — `setProjectVisibility(projectId, v)`: update the
+project's `visibility` flag, then `reconcileAssetStorage` for **every** asset in
+the project. This is the eager cascade, and it **leaves each asset's own
+`visibility` flag intact**:
+
+- project→private: every asset becomes effective-private → bytes move to
+  `assets-private`; asset flags are remembered beneath the ceiling.
+- project→public (re-publish): assets still flagged `public` become
+  effective-public again (bytes move back to `assets-public`); assets the owner
+  had individually marked `private` stay private. The prior effective-public set
+  is restored exactly — which is impossible if the cascade had overwritten the
+  flags.
+
+Thin endpoints (full shapes belong to the endpoint scope; minimum to exercise):
+- `PATCH /projects/:projectId/assets/:assetId` `{ visibility }` → `setAssetVisibility`
+- `PATCH /projects/:projectId` `{ visibility }` → `setProjectVisibility` (eager
+  reconcile of all its assets, flags preserved).
 
 **CloudFront cache on privatize (must-handle):** after deleting a public object,
 edge caches and any holder of the old stable URL can still fetch a cached copy
