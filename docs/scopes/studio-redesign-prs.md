@@ -201,7 +201,26 @@ The shared visual + component contract. Land first.
   output in the Outputs view.
 - **Done when:** export is a discrete final step with an obvious CTA and a clear done state.
 
-### PR 8 — Sidebar simplification + library relocation *(independent)*
+### PR 9 — API: workspace list routes for the redesigned nav *(precondition for PR 8)*
+The backend is otherwise **ready** — the routes the old `Editor.tsx` claims are "not mounted" are in
+fact mounted and working (`generation-entrypoints/prompt`, `generation-runs/:runId` + approve/reject/
+cancel, `timelines` assemble/critique/`:timelineId/revisions`/`:timelineId/exports`, assets, beats).
+The only genuine API gaps the redesign hits:
+- **Files:** `apps/api/src/routes/v1/workspaces.ts` (today mounts only `/workspaces/:id/assets`).
+- **Work:** add the two cross-project list endpoints the web client already calls but the API lacks:
+  - `GET /api/v1/workspaces/:workspaceId/generation-runs` → backs `v1Api.listWorkspaceGenerationRuns()`
+    (api-client `:340`) — the Projects/Runs view.
+  - `GET /api/v1/workspaces/:workspaceId/outputs` → backs `v1Api.listWorkspaceOutputs()`
+    (api-client `:377`) — the Outputs view where Created Videos relocate.
+  - Both are RLS-scoped reads aggregating across the workspace's projects (mirror the existing
+    `/workspaces/:id/assets` handler shape).
+- **Out of scope (decide, don't build for the redesign):** audio alignment (no route exists; the
+  6-step wizard doesn't surface it — leave unbuilt), `generation-runs/:runId/retry` 501 (regenerate
+  uses approve/reject, which work), `generation-entrypoints/revisions` 501 (superseded by the working
+  `timelines/:timelineId/revisions`).
+- **Done when:** Outputs and Projects/Runs views load real cross-project data instead of 404ing.
+
+### PR 8 — Sidebar simplification + library relocation *(independent; needs PR 9 for live data)*
 - **Files:** `components/AppLayout.tsx`, `components/AppLayout.module.css`, `components/ThemeToggle.tsx`.
 - **Work:** Sidebar nav = Home, Studio, Projects, Assets, Outputs, Settings/Admin; clear active-section
   highlight; quieter workspace selector. Move the theme buttons out of the footer into a Settings menu
@@ -224,12 +243,16 @@ PR 0 (tokens + UI kit) ──┬─► PR 1 (shell) ──┬─► PR 2 (Brief)
                          │                  ├─► PR 6 (Review + timeline)  ◄── backend stepwise scope
                          │                  └─► PR 7 (Export)
                          ├─► PR 5 (Preview)   (independent)
-                         └─► PR 8 (Sidebar + library)  (independent)
+                         └─► PR 8 (Sidebar + library)  ◄── PR 9 (API workspace routes)
+
+PR 9 (API: workspace list routes) ── independent, backend-only, start anytime
 ```
 
 - **Land first:** PR 0 (everything consumes the tokens/kit), then PR 1 (the shell other steps plug into).
 - **Fully parallel after PR 1:** PR 2, 3, 4, 6, 7 (each is a distinct step component implementing the
-  step contract). PR 5 and PR 8 can start immediately alongside PR 0/1 (different files).
+  step contract). PR 5 and PR 8 can start immediately alongside PR 0/1 (different files). PR 9 is
+  backend-only (different package, `apps/api`) and can land any time — PR 8's Outputs/Projects views
+  show live data once it merges.
 - **Cross-plan coordination:** PR 6 shares the feedback box with Workstream D of
   `stepwise-story-generation-prs.md` — assign them to the same person or build the component first in
   whichever lands sooner.
@@ -250,10 +273,12 @@ PR 0 (tokens + UI kit) ──┬─► PR 1 (shell) ──┬─► PR 2 (Brief)
 - **Clean break, no legacy** (settled): `Editor.tsx` and `NewProjectPage.tsx` are deleted, not gated
   behind a flag. The only sequencing care is re-homing the still-useful pieces (preview, timeline,
   create helper) before the deletions land — captured in the merge order.
-- **Stubbed generation handlers** (`Editor.tsx:221-251`) mean Step 4/6 can't fully run until the v1
-  generation/export routes are mounted. PR 4 wires the create+poll path (which works today via
-  `NewProjectPage`); the in-Studio editing/export actions land as those routes come online — don't
-  block the redesign on them, gate with graceful "coming online" states.
+- **The Editor's "route not mounted" stubs are stale, not real gaps.** `Editor.tsx`'s generate/
+  revise/export/asset handlers (`:217-251`) throw "unavailable until the v1 … route is mounted", but
+  those v1 routes **are** mounted and working. Because PR 1 deletes `Editor.tsx` and the new steps
+  call the real `v1Api` methods, this resolves itself — the steps wire to live endpoints, not stubs.
+  The only true backend work is **PR 9** (two missing `/workspaces/:id/{generation-runs,outputs}`
+  list routes). Audio alignment has no route and isn't surfaced by the wizard — leave it unbuilt.
 - **Theme buttons**: confirm whether Accent/Warm/Night are user-facing or dev-only. If dev-only, gate
   behind a settings/admin flag rather than the sidebar (item 6).
 - **Scope dial:** a first milestone of PR 0 + PR 1 + PR 2 + PR 5 + PR 8 already delivers the calmer,
