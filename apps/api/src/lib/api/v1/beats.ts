@@ -28,6 +28,7 @@ import { ApiError, validationError } from "./errors";
 import type { ApiResult } from "./generated-assets";
 import {
   createGeneratedAsset as defaultCreateGeneratedAsset,
+  enqueueGeneratedAssetJob as defaultEnqueueGeneratedAssetJob,
   getGeneratedAssetJob as defaultGetGeneratedAssetJob,
 } from "./generated-assets";
 import { V1Job } from "./jobs";
@@ -41,6 +42,7 @@ import {
 // real implementations; production never overrides them.
 interface BeatMediaDeps {
   createGeneratedAsset: typeof defaultCreateGeneratedAsset;
+  enqueueGeneratedAssetJob: typeof defaultEnqueueGeneratedAssetJob;
   getGeneratedAssetJob: typeof defaultGetGeneratedAssetJob;
   getCompositionPlan: typeof defaultGetCompositionPlan;
   updateAsset: typeof defaultUpdateAsset;
@@ -48,19 +50,22 @@ interface BeatMediaDeps {
 
 let deps: BeatMediaDeps = {
   createGeneratedAsset: defaultCreateGeneratedAsset,
+  enqueueGeneratedAssetJob: defaultEnqueueGeneratedAssetJob,
   getGeneratedAssetJob: defaultGetGeneratedAssetJob,
   getCompositionPlan: defaultGetCompositionPlan,
   updateAsset: defaultUpdateAsset,
 };
 
 export function setBeatMediaDepsForTests(overrides: Partial<BeatMediaDeps> | null): void {
-  deps = {
+  const next: BeatMediaDeps = {
     createGeneratedAsset: defaultCreateGeneratedAsset,
+    enqueueGeneratedAssetJob: defaultEnqueueGeneratedAssetJob,
     getGeneratedAssetJob: defaultGetGeneratedAssetJob,
     getCompositionPlan: defaultGetCompositionPlan,
     updateAsset: defaultUpdateAsset,
-    ...(overrides ?? {}),
   };
+  if (overrides) Object.assign(next, overrides);
+  deps = next;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -166,6 +171,30 @@ function assetIdsOf(job: V1Job): string[] {
   return Array.isArray(result?.assetIds) ? (result!.assetIds as string[]) : [];
 }
 
+async function buildBeatMediaBody(
+  auth: AuthContext,
+  projectId: string,
+  beatId: string,
+  body: unknown,
+  mediaKind: "keyframe" | "clip"
+): Promise<{ input: BeatMediaInput; generatorBody: Record<string, unknown> }> {
+  const input = parseBeatBody(body);
+  const prompt = await resolvePrompt(auth, projectId, beatId, input, mediaKind);
+
+  // Thread anchors as reference-asset conditioning for the provider; record them
+  // (plus the beatId) as provenance below. Anchors are immutable pooled assets,
+  // so they are the upstream dependency edges for this beat asset.
+  return {
+    input,
+    generatorBody: {
+      ...input.passthrough,
+      kind: mediaKind === "keyframe" ? "image" : "video",
+      prompt,
+      referenceAssetIds: input.anchorIds,
+    },
+  };
+}
+
 interface GenerateBeatMediaArgs {
   auth: AuthContext;
   projectId: string;
@@ -178,18 +207,13 @@ async function generateBeatMedia(
   mediaKind: "keyframe" | "clip"
 ): Promise<ApiResult> {
   const { auth, projectId, beatId, body } = args;
-  const input = parseBeatBody(body);
-  const prompt = await resolvePrompt(auth, projectId, beatId, input, mediaKind);
-
-  // Thread anchors as reference-asset conditioning for the provider; record them
-  // (plus the beatId) as provenance below. Anchors are immutable pooled assets,
-  // so they are the upstream dependency edges for this beat asset.
-  const generatorBody = {
-    ...input.passthrough,
-    kind: mediaKind === "keyframe" ? "image" : "video",
-    prompt,
-    referenceAssetIds: input.anchorIds,
-  };
+  const { input, generatorBody } = await buildBeatMediaBody(
+    auth,
+    projectId,
+    beatId,
+    body,
+    mediaKind
+  );
 
   const result = await deps.createGeneratedAsset({
     auth,
@@ -229,6 +253,27 @@ export function generateBeatKeyframe(args: BeatMediaRouteArgs): Promise<ApiResul
 
 export function generateBeatClip(args: BeatMediaRouteArgs): Promise<ApiResult> {
   return generateBeatMedia(args, "clip");
+}
+
+export async function enqueueBeatClip(args: BeatMediaRouteArgs): Promise<V1Job> {
+  const { auth, projectId, beatId, body } = args;
+  const { input, generatorBody } = await buildBeatMediaBody(
+    auth,
+    projectId,
+    beatId,
+    body,
+    "clip"
+  );
+
+  return deps.enqueueGeneratedAssetJob({
+    auth,
+    projectId,
+    body: {
+      ...generatorBody,
+      beatId,
+      anchorIds: input.anchorIds,
+    },
+  });
 }
 
 export interface GetBeatMediaJobArgs {
