@@ -1,0 +1,46 @@
+.feedbackField {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.feedbackLabel {
+  color: var(--text-strong);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.feedbackTextarea {
+  min-height: 112px;
+  resize: vertical;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+  padding: var(--space-3);
+}
+
+.feedbackTextarea::placeholder {
+  color: var(--muted);
+}
+
+.feedbackTextarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+.feedbackTextarea:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.feedbackHint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  margin: 0;
+}
