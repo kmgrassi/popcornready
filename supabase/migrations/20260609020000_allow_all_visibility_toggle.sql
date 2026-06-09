@@ -13,7 +13,7 @@ drop trigger if exists projects_visibility_tier on public.projects;
 comment on function public.enforce_visibility_tier() is
   'Tier->visibility guard (free tier cannot set content private). The '
   'assets_visibility_tier / projects_visibility_tier triggers were dropped in '
-  'migration 20260609000000 to make public/private available to all users; '
+  'migration 20260609020000 to make public/private available to all users; '
   're-attach them when billing tiers ship.';
 
 -- enforce_visibility_tier() did double duty on the assets trigger: besides tier
@@ -50,6 +50,7 @@ begin
 end;
 $$;
 
+drop trigger if exists assets_workspace_consistency on public.assets;
 create trigger assets_workspace_consistency
   before insert or update of workspace_id, project_id on public.assets
   for each row execute function public.enforce_asset_workspace_consistency();
