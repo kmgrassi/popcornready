@@ -154,6 +154,7 @@ export function createPersistedRunProgressEmitter(
 
         if (
           completed.isReviewGate &&
+          !completed.reviewedAt &&
           isGateableGenerationStageType(completed.type)
         ) {
           await store.updateRun(runId, {
