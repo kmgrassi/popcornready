@@ -14,6 +14,7 @@ import {
   formatBytes,
   formatCreatedAt,
 } from "./shared";
+import { PreviewPlaceholder } from "../studio/PreviewPlaceholder";
 
 interface PreviewPanelProps {
   Preview: React.ComponentType<{ timeline: Timeline | null; clips: Clip[] }>;
@@ -60,10 +61,18 @@ export function PreviewPanel({
   onRefreshCreatedVideos,
   showActions = true,
 }: PreviewPanelProps) {
+  const hasCut = !!timeline && timeline.segments.length > 0;
   return (
     <div className="col center">
       <h2 style={{ alignSelf: "flex-start" }}>Preview</h2>
-      <Preview timeline={timeline} clips={clips} />
+      {hasCut ? (
+        // A rough cut exists — hand off to the real player.
+        <Preview timeline={timeline} clips={clips} />
+      ) : (
+        // No cut yet: a polished placeholder (loading while generating)
+        // instead of a black void.
+        <PreviewPlaceholder loading={busy} />
+      )}
       {timeline && timeline.segments.length > 0 && (
         <div style={{ marginTop: 12, textAlign: "center" }}>
           <div className="muted" style={{ marginBottom: 8 }}>
