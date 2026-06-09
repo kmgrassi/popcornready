@@ -29,7 +29,7 @@ import {
 } from "@/lib/v1/generation-progress";
 import { randomUUID } from "crypto";
 import { AuthContext } from "./auth";
-import { ApiError, FieldError, validationError } from "./errors";
+import { ApiError, ApiErrorCode, FieldError, validationError } from "./errors";
 import { createJob, getJob, updateJob, V1Job } from "./jobs";
 import {
   GeneratedAssetProvenance,
@@ -77,6 +77,8 @@ interface ParsedRequest {
   durationSec: number;
   providerSeconds?: number;
   referenceAssetIds: string[];
+  beatId?: string;
+  anchorIds: string[];
   characterProfileIds: string[];
   characterReferenceIds: string[];
   consistencyMode: ReturnType<typeof parseConsistencyMode>;
@@ -259,6 +261,11 @@ function parseGeneratedAssetRequest(body: unknown): ParsedRequest {
     durationSec,
     providerSeconds: kind === "image" ? undefined : durationSec,
     referenceAssetIds: parseStringArray(body.referenceAssetIds),
+    beatId:
+      typeof body.beatId === "string" && body.beatId.trim()
+        ? body.beatId.trim()
+        : undefined,
+    anchorIds: parseStringArray(body.anchorIds),
     characterProfileIds,
     characterReferenceIds: parseStringArray(body.characterReferenceIds),
     consistencyMode,
@@ -497,6 +504,8 @@ async function runGeneration(
     referenceAssetIds: parsed.referenceAssetIds.length
       ? parsed.referenceAssetIds
       : undefined,
+    beatId: parsed.beatId,
+    anchorIds: parsed.anchorIds.length ? parsed.anchorIds : undefined,
     characterBinding,
     providerSettings,
     requestedDurationSec: parsed.durationSec,
@@ -559,6 +568,10 @@ export interface CreateGeneratedAssetArgs {
   progress?: RunStageHandle;
 }
 
+interface GeneratedAssetJobInput {
+  body: unknown;
+}
+
 const PROMPT_PREVIEW_MAX = 240;
 
 function clipPromptPreview(value: string): string {
@@ -571,17 +584,79 @@ export async function createGeneratedAsset(
   args: CreateGeneratedAssetArgs
 ): Promise<ApiResult> {
   const { auth, projectId, body, progress } = args;
+  const job = await enqueueGeneratedAssetJob({ auth, projectId, body });
+  const finished = await runGeneratedAssetJob({
+    auth,
+    projectId,
+    jobId: job.id,
+    progress,
+  });
+  if (finished.status === "failed") {
+    throw new ApiError(
+      (finished.error?.code as ApiErrorCode | undefined) || "job_failed",
+      finished.error?.message || "Asset generation failed."
+    );
+  }
+  return { status: 202, body: { job: finished } };
+}
+
+export async function enqueueGeneratedAssetJob(
+  args: Pick<CreateGeneratedAssetArgs, "auth" | "projectId" | "body">
+): Promise<V1Job> {
+  const { auth, projectId, body } = args;
 
   await getProject(auth.workspaceId, projectId); // throws not_found
-  const parsed = parseGeneratedAssetRequest(body);
+  parseGeneratedAssetRequest(body);
 
-  const job = await createJob({
+  return createJob({
     workspaceId: auth.workspaceId,
     projectId,
     type: "asset_generation",
+    status: "queued",
+    progress: { currentStep: "queued", percent: 0 },
+    input: { body } satisfies GeneratedAssetJobInput,
+    result: null,
+    error: null,
+  });
+}
+
+function generatedAssetJobInput(job: V1Job): GeneratedAssetJobInput {
+  const input = job.input as GeneratedAssetJobInput | null | undefined;
+  if (!input || !("body" in input)) {
+    throw new ApiError(
+      "job_failed",
+      `Generated-asset job is missing durable input: ${job.id}.`
+    );
+  }
+  return input;
+}
+
+export async function runGeneratedAssetJob(args: {
+  auth: AuthContext;
+  projectId: string;
+  jobId: string;
+  progress?: RunStageHandle;
+}): Promise<V1Job> {
+  const { auth, projectId, jobId, progress } = args;
+  await getProject(auth.workspaceId, projectId); // throws not_found
+
+  const job = await getJob(jobId);
+  if (
+    !job ||
+    job.workspaceId !== auth.workspaceId ||
+    job.projectId !== projectId ||
+    job.type !== "asset_generation"
+  ) {
+    throw new ApiError("not_found", `Generated-asset job not found: ${jobId}.`);
+  }
+  if (job.status === "succeeded" || job.status === "failed" || job.status === "canceled") {
+    return job;
+  }
+
+  const parsed = parseGeneratedAssetRequest(generatedAssetJobInput(job).body);
+  const running = await updateJob(job.id, {
     status: "running",
     progress: { currentStep: "generating_assets", percent: 10 },
-    result: null,
     error: null,
   });
 
@@ -599,11 +674,11 @@ export async function createGeneratedAsset(
         promptPreview: clipPromptPreview(parsed.prompt),
       })
     : null;
-  if (progress) await progress.attachJob(job.id);
+  if (progress) await progress.attachJob(running.id);
 
   try {
     const asset = await runGeneration(auth, projectId, parsed, item);
-    const finished = await updateJob(job.id, {
+    const finished = await updateJob(running.id, {
       status: "succeeded",
       progress: { currentStep: "saving_artifact", percent: 100 },
       result: { assetIds: [asset.id] },
@@ -615,7 +690,7 @@ export async function createGeneratedAsset(
         message: `Generated ${parsed.kind}.`,
       });
     }
-    return { status: 202, body: { job: finished } };
+    return finished;
   } catch (err) {
     const apiErr =
       err instanceof ApiError
@@ -624,7 +699,7 @@ export async function createGeneratedAsset(
             "job_failed",
             err instanceof Error ? err.message : "Asset generation failed."
           );
-    await updateJob(job.id, {
+    const failed = await updateJob(running.id, {
       status: "failed",
       error: { code: apiErr.code, message: apiErr.message },
     });
@@ -633,7 +708,7 @@ export async function createGeneratedAsset(
         toErrorSummary(apiErr, { fallbackCode: "job_failed" })
       );
     }
-    throw apiErr;
+    return failed;
   }
 }
 

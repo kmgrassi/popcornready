@@ -1,6 +1,7 @@
 import { AuthContext } from "./auth";
 import { ApiError, validationError } from "./errors";
-import { generateBeatClip, getBeatMediaJob } from "./beats";
+import { enqueueBeatClip, getBeatMediaJob } from "./beats";
+import { runGeneratedAssetJob } from "./generated-assets";
 import { V1Job } from "./jobs";
 
 export type MediaToolName = "generate_clip";
@@ -156,23 +157,12 @@ export async function startGenerateClipTool(args: {
   try {
     const input = parseGenerateClipInput(args.input);
     const { beatId, ...body } = input;
-    const result = await generateBeatClip({
+    const job = await enqueueBeatClip({
       auth: args.auth,
       projectId: args.projectId,
       beatId,
       body,
     });
-    const job = result.body.job as V1Job | undefined;
-    if (!job?.id) {
-      return {
-        status: "failed",
-        error: {
-          kind: "provider_failed",
-          message: "generate_clip did not return a pollable job.",
-          recoverable: true,
-        },
-      };
-    }
     return {
       status: "accepted",
       jobId: job.id,
@@ -191,6 +181,14 @@ export async function startGenerateClipTool(args: {
       },
     };
   }
+}
+
+export async function runGenerateClipToolJob(args: {
+  auth: AuthContext;
+  projectId: string;
+  jobId: string;
+}): Promise<V1Job> {
+  return runGeneratedAssetJob(args);
 }
 
 export async function resumeGenerateClipTool(args: {

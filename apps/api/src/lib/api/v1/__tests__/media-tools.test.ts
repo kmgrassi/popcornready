@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 
 import { AuthContext } from "../auth";
-import { ApiError } from "../errors";
 import type { ApiResult } from "../generated-assets";
 import type { V1Job } from "../jobs";
 import {
@@ -43,16 +42,16 @@ function apiJob(result: V1Job): ApiResult {
 afterEach(() => setBeatMediaDepsForTests(null));
 
 test("startGenerateClipTool starts the beat clip job and returns accepted(jobId)", async () => {
-  const generatorBodies: unknown[] = [];
+  const enqueuedBodies: unknown[] = [];
+  let generatorCalled = false;
   setBeatMediaDepsForTests({
-    createGeneratedAsset: async ({ body }) => {
-      generatorBodies.push(body);
-      return apiJob(job());
+    enqueueGeneratedAssetJob: async ({ body }) => {
+      enqueuedBodies.push(body);
+      return job({ status: "queued", input: { body } });
     },
-    updateAsset: async (_ws, _proj, _id, updater) => {
-      const asset = { provenance: { provider: "mock", prompt: "x" } };
-      updater(asset as never);
-      return asset as never;
+    createGeneratedAsset: async () => {
+      generatorCalled = true;
+      return apiJob(job());
     },
   });
 
@@ -72,7 +71,12 @@ test("startGenerateClipTool starts the beat clip job and returns accepted(jobId)
     jobId: "job_clip_1",
     resumesWhen: "job_terminal",
   });
-  assert.equal((generatorBodies[0] as Record<string, unknown>).kind, "video");
+  assert.equal((enqueuedBodies[0] as Record<string, unknown>).kind, "video");
+  assert.equal((enqueuedBodies[0] as Record<string, unknown>).beatId, "beat_1");
+  assert.deepEqual((enqueuedBodies[0] as Record<string, unknown>).anchorIds, [
+    "anchor_lab",
+  ]);
+  assert.equal(generatorCalled, false);
 });
 
 test("resumeGenerateClipTool returns accepted while the job is not terminal", async () => {
@@ -138,17 +142,21 @@ test("resumeGenerateClipTool maps provider quota failures to ToolError", async (
   assert.equal(result.error.retryAfterSec, 60);
 });
 
-test("startGenerateClipTool maps synchronous provider failures to ToolError", async () => {
+test("resumeGenerateClipTool maps provider failures to ToolError", async () => {
   setBeatMediaDepsForTests({
-    createGeneratedAsset: async () => {
-      throw new ApiError("job_failed", "Provider returned an invalid video.");
-    },
+    getGeneratedAssetJob: async () =>
+      apiJob(
+        job({
+          status: "failed",
+          error: { code: "job_failed", message: "Provider returned an invalid video." },
+        })
+      ),
   });
 
-  const result = await startGenerateClipTool({
+  const result = await resumeGenerateClipTool({
     auth,
     projectId: "proj_1",
-    input: { beatId: "beat_1", prompt: "The failed clip.", provider: "mock" },
+    jobId: "job_clip_1",
   });
 
   assert.equal(result.status, "failed");
@@ -157,11 +165,11 @@ test("startGenerateClipTool maps synchronous provider failures to ToolError", as
 });
 
 test("startGenerateClipTool validates the required beat id before spending", async () => {
-  let generatorCalled = false;
+  let enqueueCalled = false;
   setBeatMediaDepsForTests({
-    createGeneratedAsset: async () => {
-      generatorCalled = true;
-      return apiJob(job());
+    enqueueGeneratedAssetJob: async () => {
+      enqueueCalled = true;
+      return job();
     },
   });
 
@@ -173,5 +181,5 @@ test("startGenerateClipTool validates the required beat id before spending", asy
 
   assert.equal(result.status, "failed");
   assert.equal(result.error.kind, "invalid_input");
-  assert.equal(generatorCalled, false);
+  assert.equal(enqueueCalled, false);
 });

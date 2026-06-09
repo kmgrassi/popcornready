@@ -43,6 +43,7 @@ export interface V1Job {
   type: JobType;
   status: JobStatus;
   progress?: JobProgress;
+  input?: unknown;
   result?: unknown;
   error?: { code: string; message: string } | null;
   createdAt: string;
