@@ -28,7 +28,10 @@ import { requestContext } from "@/lib/supabase/request-context";
 export const LOCAL_WORKSPACE_NAME = "dev_workspace";
 export const LOCAL_ACTOR_ID = "local_dev";
 
-export type AuthMode = "local" | "supabase";
+// "hybrid" = production-style auth when a bearer token is present, local dev
+// "autopilot" identity when it is absent. Intended for local dev so logging in
+// behaves like production while unauthenticated access still works.
+export type AuthMode = "local" | "supabase" | "hybrid";
 
 export interface Actor {
   /** Domain identity. In supabase mode this is public.users.id (NEVER auth.uid()). */
@@ -45,7 +48,10 @@ export interface AuthContext {
 }
 
 export function authMode(): AuthMode {
-  return (process.env.AUTH_MODE || "local") === "local" ? "local" : "supabase";
+  const value = (process.env.AUTH_MODE || "local").toLowerCase();
+  if (value === "supabase") return "supabase";
+  if (value === "hybrid") return "hybrid";
+  return "local";
 }
 
 export function isLocalMode(): boolean {
@@ -77,15 +83,20 @@ async function supabaseAuthContext(
   };
 }
 
+async function localAuthContext(): Promise<AuthContext> {
+  const workspace = await ensureLocalWorkspace(LOCAL_WORKSPACE_NAME);
+  return {
+    mode: "local",
+    actor: { id: LOCAL_ACTOR_ID, type: "local" },
+    workspaceId: workspace.id,
+    isLocal: true,
+  };
+}
+
 export async function resolveAuth(req?: ApiRequestView): Promise<AuthContext> {
-  if (authMode() === "local") {
-    const workspace = await ensureLocalWorkspace(LOCAL_WORKSPACE_NAME);
-    return {
-      mode: "local",
-      actor: { id: LOCAL_ACTOR_ID, type: "local" },
-      workspaceId: workspace.id,
-      isLocal: true,
-    };
+  const mode = authMode();
+  if (mode === "local") {
+    return localAuthContext();
   }
 
   // Preferred path: authMiddleware already verified the caller and resolved the
@@ -95,10 +106,15 @@ export async function resolveAuth(req?: ApiRequestView): Promise<AuthContext> {
     return supabaseAuthContext(ctx.publicUserId, ctx.email);
   }
 
-  // Fallback: no middleware context (e.g. a direct handler invocation). Verify the
-  // bearer token and resolve the domain id ourselves, via the same canonical RPC.
+  // No verified context. Verify the bearer token and resolve the domain id
+  // ourselves (e.g. a direct handler invocation), via the same canonical RPC.
   const token = req ? bearerToken(req) : null;
   if (!token) {
+    // hybrid: an unauthenticated caller falls back to the local dev identity
+    // ("autopilot"). supabase: credentials are required.
+    if (mode === "hybrid") {
+      return localAuthContext();
+    }
     throw new ApiError("unauthorized", "Missing Supabase bearer token.");
   }
 
