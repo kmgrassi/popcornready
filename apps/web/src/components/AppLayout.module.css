@@ -42,39 +42,39 @@
   flex: 0 0 auto;
 }
 
-/* Workspace selector */
-.workspace {
-  display: grid;
-  gap: var(--space-2);
+/* New video — the one prominent sidebar CTA, sitting just under the brand. */
+.newVideo {
+  width: 100%;
   margin-bottom: var(--space-6);
 }
 
-.workspaceLabel {
-  margin: 0;
+/* Quiet workspace indicator — a single muted read-only pill, no longer a
+   prominent labelled <select> competing with the nav. (PR 0 owns a dedicated
+   CTA token; this intentionally stays on neutral tokens.) */
+.workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: var(--text-xs);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 700;
 }
 
-.workspaceSelect {
-  width: 100%;
-  min-height: 40px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-strong);
-  font-size: var(--text-md);
-  font-weight: 700;
+.workspaceDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.workspaceName {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.workspaceSelect:disabled {
-  opacity: 1;
-  cursor: default;
+  white-space: nowrap;
 }
 
 /* Nav */
@@ -128,17 +128,19 @@
   background: var(--accent);
 }
 
-/* Footer — secondary CTA so it does not compete with the page primary action. */
+/* Footer — Settings/Admin nav + a quiet workspace indicator. */
 .sidebarFooter {
   margin-top: auto;
   padding-top: var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
-.newVideo {
-  width: 100%;
+.footerNav {
+  display: grid;
+  gap: var(--space-1);
 }
 
 /* Content column */
@@ -281,6 +283,24 @@
   white-space: nowrap;
 }
 
+/* Settings rows inside the account menu — e.g. the theme switcher. */
+.accountSetting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.accountSettingLabel {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* The route content scroll region — each page owns its own <main>. */
 .routeFrame {
   flex: 1 1 auto;
@@ -301,12 +321,13 @@
     gap: var(--space-3);
   }
 
-  .workspace,
-  .nav {
-    flex: 1 1 100%;
+  .newVideo {
+    width: auto;
+    margin-bottom: 0;
   }
 
   .nav {
+    flex: 1 1 100%;
     grid-auto-flow: column;
     grid-auto-columns: max-content;
     overflow-x: auto;
@@ -319,12 +340,15 @@
   .sidebarFooter {
     margin-top: 0;
     padding-top: 0;
+    border-top: 0;
     flex-direction: row;
     align-items: center;
     flex: 1 1 100%;
+    justify-content: space-between;
   }
 
-  .newVideo {
-    width: auto;
+  .footerNav {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
   }
 }

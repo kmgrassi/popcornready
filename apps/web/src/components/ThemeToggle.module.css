@@ -1,0 +1,106 @@
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition),
+    border-color var(--transition);
+}
+
+.trigger:hover {
+  background: var(--surface);
+  color: var(--text-strong);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.triggerLabel {
+  color: var(--muted);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: var(--text-xs);
+}
+
+.triggerValue {
+  color: var(--text-strong);
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: 40;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 180px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+.option:hover {
+  background: var(--surface-2);
+  color: var(--text-strong);
+}
+
+.option:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.optionActive {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.optionDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+
+.optionActive .optionDot {
+  background: var(--accent);
+}
