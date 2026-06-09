@@ -27,7 +27,7 @@ test("toOpenAITool wraps the spec as an OpenAI function tool", () => {
   assert.deepEqual(tool.function.parameters, planShots.parameters);
 });
 
-test("sanitizeForOpenAI strips keywords OpenAI json_schema rejects", () => {
+test("sanitizeForOpenAI strips keywords OpenAI tool parameters reject", () => {
   const sanitized = sanitizeForOpenAI({
     type: "object",
     properties: {
@@ -124,6 +124,7 @@ test("chooseTool sends function tools + tool_choice auto and uses max_completion
   });
 
   assert.equal(sent.tool_choice, "auto");
+  assert.equal(sent.parallel_tool_calls, false);
   assert.equal(sent.tools[0].type, "function");
   assert.equal(sent.tools[0].function.name, "plan_shots");
   assert.ok("max_completion_tokens" in sent);
@@ -138,7 +139,17 @@ test("low/minimal effort routes to the fast model; medium/high/none use the prim
     fastModel: "gpt-5-mini",
     create: async (params: any) => {
       seen.push(params.model);
-      return { choices: [{ message: { content: "{}" } }] };
+      return {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                { function: { name: "return_result", arguments: "{}" } },
+              ],
+            },
+          },
+        ],
+      };
     },
   });
   for (const effort of ["minimal", "low", "medium", "high"] as const) {
@@ -154,7 +165,17 @@ test("reasoning_effort is sent for reasoning models (gpt-5) and omitted for gpt-
     model: "gpt-5",
     create: async (params) => {
       reasoning = params;
-      return { choices: [{ message: { content: "{}" } }] };
+      return {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                { function: { name: "return_result", arguments: "{}" } },
+              ],
+            },
+          },
+        ],
+      };
     },
   });
   await gpt5.structured({ cachedSystem: "s", user: "u", schema: {}, effort: "minimal" });
@@ -165,7 +186,17 @@ test("reasoning_effort is sent for reasoning models (gpt-5) and omitted for gpt-
     model: "gpt-4o",
     create: async (params) => {
       nonReasoning = params;
-      return { choices: [{ message: { content: "{}" } }] };
+      return {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                { function: { name: "return_result", arguments: "{}" } },
+              ],
+            },
+          },
+        ],
+      };
     },
   });
   await gpt4o.structured({ cachedSystem: "s", user: "u", schema: {}, effort: "high" });
@@ -177,17 +208,37 @@ test("reasoning_effort is sent for reasoning models (gpt-5) and omitted for gpt-
     model: "gpt-5",
     create: async (params) => {
       noEffort = params;
-      return { choices: [{ message: { content: "{}" } }] };
+      return {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                { function: { name: "return_result", arguments: "{}" } },
+              ],
+            },
+          },
+        ],
+      };
     },
   });
   await gpt5b.structured({ cachedSystem: "s", user: "u", schema: {} });
   assert.ok(!("reasoning_effort" in noEffort));
 });
 
-test("structured parses message content as JSON and throws on invalid output", async () => {
+test("structured requires return_result tool call and parses arguments", async () => {
   const ok = createOpenAiLlmClient({
     model: "gpt-5",
-    create: async () => ({ choices: [{ message: { content: '{"plan":1}' } }] }),
+    create: async () => ({
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              { function: { name: "return_result", arguments: '{"plan":1}' } },
+            ],
+          },
+        },
+      ],
+    }),
   });
   assert.deepEqual(
     await ok.structured({ cachedSystem: "s", user: "u", schema: {} }),
@@ -200,6 +251,38 @@ test("structured parses message content as JSON and throws on invalid output", a
   });
   await assert.rejects(
     () => bad.structured({ cachedSystem: "s", user: "u", schema: {} }),
-    /did not return valid JSON/
+    /did not call required tool/
   );
+});
+
+test("structured sends a required return_result function tool", async () => {
+  let sent: any;
+  const client = createOpenAiLlmClient({
+    model: "gpt-5",
+    create: async (params) => {
+      sent = params;
+      return {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                { function: { name: "return_result", arguments: '{"ok":true}' } },
+              ],
+            },
+          },
+        ],
+      };
+    },
+  });
+
+  await client.structured({
+    cachedSystem: "s",
+    user: "u",
+    schema: { type: "object", properties: { ok: { type: "boolean" } } },
+  });
+
+  assert.equal(sent.tool_choice.function.name, "return_result");
+  assert.equal(sent.parallel_tool_calls, false);
+  assert.equal(sent.tools[0].function.name, "return_result");
+  assert.ok(!("response_format" in sent));
 });

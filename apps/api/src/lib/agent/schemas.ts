@@ -1,4 +1,4 @@
-// Hand-written JSON Schemas for output_config.format. Kept here so every agent
+// Hand-written JSON Schemas for structured tool-call inputs. Kept here so every agent
 // shares the exact patch shape the timeline engine knows how to apply.
 
 const num = { type: "number" } as const;
