@@ -43,3 +43,34 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Review gate card — approve/reject for a paused mid-run gate. */
+.gate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.gateHeading {
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.gateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.reviewHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}

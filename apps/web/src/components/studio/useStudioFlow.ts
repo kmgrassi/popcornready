@@ -133,6 +133,13 @@ export interface StudioFlow {
   update(patch: Partial<BriefDraft>): void;
   /** Create the project + start the run, then switch state to 'generating'. */
   startGeneration(): Promise<void>;
+  /**
+   * Approve the active run's review gate and resume. No-op when not gated.
+   * Re-polls immediately so the generating view reflects the resumed run.
+   */
+  approveGate(note?: string): Promise<void>;
+  /** Reject the active run's review gate (regenerate the gated stage). No-op when not gated. */
+  rejectGate(note?: string): Promise<void>;
 }
 
 /**
@@ -156,9 +163,15 @@ function isTerminal(status: GenerationRun["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "canceled";
 }
 
-/** Once a run reaches a review gate or terminal success the shell shows review. */
+/**
+ * The shell shows the terminal `review` state only on a SUCCEEDED run. A mid-run
+ * review gate is NOT terminal — the run stays in `generating`, where the gate
+ * card exposes approve/reject (see `approveGate`/`rejectGate`). Treating a gate
+ * as "review-ready" stranded gated runs in a read-only panel with no way to
+ * continue.
+ */
 function isReviewReady(run: GenerationRun): boolean {
-  return Boolean(run.reviewGate) || run.status === "succeeded";
+  return run.status === "succeeded";
 }
 
 export interface UseStudioFlowOptions {
@@ -231,7 +244,8 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
 
   // Poll the active run while generating. Mirrors RunProgressPage: faster
   // cadence while running, slow while gated, pause when the tab is hidden, and
-  // resume on visibility. Flips to `review` on the first gate / on success.
+  // resume on visibility. Stays in `generating` while gated (the gate card
+  // handles approve/reject) and flips to `review` only on terminal success.
   const pollRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (state !== "generating" || !projectId || !run) return;
@@ -287,6 +301,41 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     };
   }, [state, projectId, run?.runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const resolveGate = useCallback(
+    async (action: "approve" | "reject", note?: string) => {
+      if (!projectId || !run?.runId || !run.reviewGate) return;
+      setError(undefined);
+      try {
+        const data = await v1Api.updateGenerationRun(
+          projectId,
+          run.runId,
+          action,
+          note ? { note } : undefined,
+        );
+        setRun(data.run);
+        setStages(data.stages);
+        // Re-poll immediately so the resumed run advances without waiting for
+        // the slow gated cadence.
+        pollRef.current?.();
+      } catch (gateError) {
+        setError(
+          gateError instanceof Error ? gateError.message : "Could not update the review gate.",
+        );
+        throw gateError;
+      }
+    },
+    [projectId, run?.runId, run?.reviewGate],
+  );
+
+  const approveGate = useCallback(
+    (note?: string) => resolveGate("approve", note),
+    [resolveGate],
+  );
+  const rejectGate = useCallback(
+    (note?: string) => resolveGate("reject", note),
+    [resolveGate],
+  );
+
   return useMemo(
     () => ({
       state,
@@ -301,7 +350,9 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       next,
       update,
       startGeneration,
+      approveGate,
+      rejectGate,
     }),
-    [state, step, brief, run, stages, projectId, error, goTo, back, next, update, startGeneration],
+    [state, step, brief, run, stages, projectId, error, goTo, back, next, update, startGeneration, approveGate, rejectGate],
   );
 }

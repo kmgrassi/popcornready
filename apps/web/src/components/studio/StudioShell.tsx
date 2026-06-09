@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import type { Project } from "@popcorn/shared/types";
+import {
+  GENERATION_STAGE_LABELS,
+  type GateableGenerationStageType,
+} from "@popcorn/shared/v1/types";
 import { DEFAULT_DURATION_POLICY } from "@popcorn/shared/audio-alignment";
 import { Button } from "../ui/Button";
 import { StatusChecklist } from "../ui/StatusChecklist";
@@ -48,6 +52,7 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
 
   if (flow.state === "generating") {
     const items = buildChecklistItems(flow.stages, flow.run?.status ?? "queued");
+    const gate = flow.run?.reviewGate ?? null;
     return (
       <main className={styles.shell}>
         <StudioStepper step={flow.step} />
@@ -58,6 +63,13 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
             it's ready.
           </p>
           <StatusChecklist items={items} />
+          {gate ? (
+            <GateCard
+              stageType={gate.stageType}
+              onApprove={() => flow.approveGate()}
+              onReject={() => flow.rejectGate()}
+            />
+          ) : null}
           {flow.error ? <p className="new-project-error">{flow.error}</p> : null}
         </section>
       </main>
@@ -128,10 +140,47 @@ function ActiveStep({
 }
 
 /**
+ * GateCard — approve/reject controls for a paused mid-run review gate. Keeps the
+ * gate actionable inside the `generating` view so gated runs aren't stranded.
+ * (A richer feedback box lands with PR 6 / the stepwise-story-generation scope.)
+ */
+function GateCard({
+  stageType,
+  onApprove,
+  onReject,
+}: {
+  stageType: GateableGenerationStageType;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className={styles.gate}>
+      <p className={styles.gateHeading}>
+        {GENERATION_STAGE_LABELS[stageType]} is ready for your review.
+      </p>
+      <div className={styles.gateActions}>
+        <Button variant="cta" onClick={onApprove}>
+          Approve &amp; continue
+        </Button>
+        <Button variant="secondary" onClick={onReject}>
+          Reject / regenerate
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * ReviewState — interim review layout. Reuses the existing PreviewPanel
  * (preview) and SidebarPanel (timeline) until PR 6 re-homes them under
  * `components/studio/`. Loads the studio project so the timeline renders real
  * segments once one exists.
+ *
+ * NOTE: full rough-cut loading (resolving the run's generated timeline/clips for
+ * `projectId`) is PR 6's scope and is also gated on the generation-engine media
+ * stages — today `getStudioProject()` projects `timeline: null`, so the panels
+ * fall back to the PR 5 placeholder. This state is only reached on terminal
+ * success, so it reads as "ready" rather than mid-run.
  */
 function ReviewState({ projectId }: { projectId?: string }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -157,6 +206,13 @@ function ReviewState({ projectId }: { projectId?: string }) {
 
   return (
     <section className={styles.review}>
+      <header className={styles.reviewHeader}>
+        <h2 className={styles.generatingHeading}>Your rough cut is ready</h2>
+        <p className="muted">
+          Review the preview and timeline below. Inline editing arrives with the
+          review step.
+        </p>
+      </header>
       <PreviewPanel
         Preview={PreviewPlayer}
         audioClips={[]}
