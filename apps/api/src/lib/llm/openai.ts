@@ -4,12 +4,25 @@ import {
   ChooseToolArgs,
   JsonSchema,
   LlmClient,
+  LlmEffort,
   StructuredArgs,
   StructuredVisionArgs,
   ToolChoiceResult,
   ToolSpec,
   parseStructuredText,
 } from "./types";
+
+// Reasoning models accept `reasoning_effort`; non-reasoning models (gpt-4o,
+// gpt-4.1) reject it, so only send it when the model is a reasoning one.
+const REASONING_MODEL = /^(gpt-5|o[1-9])/i;
+
+function reasoningParams(
+  model: string,
+  effort?: LlmEffort
+): Record<string, unknown> {
+  if (!effort || !REASONING_MODEL.test(model)) return {};
+  return { reasoning_effort: effort };
+}
 
 // Loose typing on the wire call keeps us resilient to SDK type-version drift and
 // lets us pass reasoning-model params (max_completion_tokens) the strict types
@@ -133,6 +146,7 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
         },
       },
       max_completion_tokens: args.maxTokens ?? 8000,
+      ...reasoningParams(model, args.effort),
     });
     const text = String(res?.choices?.[0]?.message?.content ?? "");
     return parseStructuredText<T>(text);
@@ -168,6 +182,7 @@ export function createOpenAiLlmClient(deps: OpenAiDeps): LlmClient {
         tools: args.tools.map(toOpenAITool),
         tool_choice: "auto",
         max_completion_tokens: args.maxTokens ?? 2000,
+        ...reasoningParams(model, args.effort),
       });
       return interpretOpenAiToolResponse(res, model);
     },

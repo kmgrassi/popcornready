@@ -129,6 +129,7 @@ Produce the edit plan.`;
     user,
     schema: planSchema,
     maxTokens: 2000,
+    effort: "high", // creative planning: goal -> structured storyboard/beats
   });
   // Honor the user's explicit aspect ratio choice.
   plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
@@ -180,6 +181,7 @@ Critique and revise this plan before media generation.`;
     user,
     schema: planCritiqueSchema,
     maxTokens: 4000,
+    effort: "medium", // judgement, but bounded
   });
 
   report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
@@ -231,6 +233,7 @@ Review source coverage and return a revised plan for the timeline selector.`;
     user,
     schema: uploadedFootagePlanReviewSchema,
     maxTokens: 4000,
+    effort: "medium", // judgement, but bounded
   });
 
   report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
@@ -277,6 +280,7 @@ Produce the edit decisions now.`;
     user,
     schema: editDecisionTimelineSchema,
     maxTokens: 8000,
+    effort: "medium", // match beats to clips + in/out points
   });
 
   const showCaptions =
@@ -350,7 +354,7 @@ Score it and propose improvement patches.`;
     scores: CriticReport["scores"];
     summary: string;
     patches: Patch[];
-  }>({ cachedSystem: sys, user, schema: criticSchema, maxTokens: 6000 });
+  }>({ cachedSystem: sys, user, schema: criticSchema, maxTokens: 6000, effort: "medium" });
 
   return {
     report: { scores: out.scores, summary: out.summary },
@@ -390,6 +394,7 @@ Produce patches and a summary.`;
     user,
     schema: reviseSchema,
     maxTokens: 6000,
+    effort: "medium", // chat note -> targeted timeline patches
   });
 }
 
@@ -433,5 +438,6 @@ spoken duration in seconds, and a one-line summary of what changed.`;
     user,
     schema: narrationRewriteSchema,
     maxTokens: 2000,
+    effort: "low", // text rewrite to a length target — not deep reasoning
   });
 }

@@ -83,7 +83,7 @@ Produce the composition beats and narration plan now.`;
   const out = await getLlmClient().structured<{
     beats: PlannedBeatProposal[];
     narration: { mode: "none" | "provided" | "generate"; script?: string };
-  }>({ cachedSystem: sys, user, schema: compositionSchema, maxTokens: 4000 });
+  }>({ cachedSystem: sys, user, schema: compositionSchema, maxTokens: 4000, effort: "high" });
 
   return {
     beats: out.beats,

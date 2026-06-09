@@ -7,11 +7,21 @@ import {
 import {
   ChooseToolArgs,
   LlmClient,
+  LlmEffort,
   StructuredArgs,
   StructuredVisionArgs,
   ToolChoiceResult,
   ToolSpec,
 } from "./types";
+
+// Anthropic output_config.effort is low|medium|high|max — there is no
+// "minimal", so map it to "low".
+function toAnthropicEffort(
+  effort?: LlmEffort
+): "low" | "medium" | "high" | undefined {
+  if (!effort) return undefined;
+  return effort === "minimal" ? "low" : effort;
+}
 
 type MessageCreate = (params: Record<string, unknown>) => Promise<any>;
 
@@ -77,10 +87,10 @@ export function createAnthropicLlmClient(deps: AnthropicDeps = {}): LlmClient {
     provider: "anthropic",
     model,
     structured<T>(args: StructuredArgs) {
-      return structuredCall<T>({ ...args, model });
+      return structuredCall<T>({ ...args, model, effort: toAnthropicEffort(args.effort) });
     },
     structuredVision<T>(args: StructuredVisionArgs) {
-      return structuredVisionCall<T>({ ...args, model });
+      return structuredVisionCall<T>({ ...args, model, effort: toAnthropicEffort(args.effort) });
     },
     async chooseTool(args: ChooseToolArgs) {
       const allowed = new Set(args.tools.map((tool) => tool.name));

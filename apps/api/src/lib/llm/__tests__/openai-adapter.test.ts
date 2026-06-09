@@ -131,6 +131,42 @@ test("chooseTool sends function tools + tool_choice auto and uses max_completion
   assert.equal(decision.type, "tool_call");
 });
 
+test("reasoning_effort is sent for reasoning models (gpt-5) and omitted for gpt-4o", async () => {
+  let reasoning: any;
+  const gpt5 = createOpenAiLlmClient({
+    model: "gpt-5",
+    create: async (params) => {
+      reasoning = params;
+      return { choices: [{ message: { content: "{}" } }] };
+    },
+  });
+  await gpt5.structured({ cachedSystem: "s", user: "u", schema: {}, effort: "minimal" });
+  assert.equal(reasoning.reasoning_effort, "minimal");
+
+  let nonReasoning: any;
+  const gpt4o = createOpenAiLlmClient({
+    model: "gpt-4o",
+    create: async (params) => {
+      nonReasoning = params;
+      return { choices: [{ message: { content: "{}" } }] };
+    },
+  });
+  await gpt4o.structured({ cachedSystem: "s", user: "u", schema: {}, effort: "high" });
+  assert.ok(!("reasoning_effort" in nonReasoning));
+
+  // No effort -> no reasoning_effort (provider default).
+  let noEffort: any;
+  const gpt5b = createOpenAiLlmClient({
+    model: "gpt-5",
+    create: async (params) => {
+      noEffort = params;
+      return { choices: [{ message: { content: "{}" } }] };
+    },
+  });
+  await gpt5b.structured({ cachedSystem: "s", user: "u", schema: {} });
+  assert.ok(!("reasoning_effort" in noEffort));
+});
+
 test("structured parses message content as JSON and throws on invalid output", async () => {
   const ok = createOpenAiLlmClient({
     model: "gpt-5",

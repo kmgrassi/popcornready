@@ -61,6 +61,7 @@ export const orchestratorModel: OrchestratorModel = async ({
     },
     tools,
     maxTokens,
+    effort: "medium", // pick the next single tool — modest reasoning
   });
 
   if (decision.type === "tool_call") {

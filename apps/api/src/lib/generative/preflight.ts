@@ -233,6 +233,7 @@ Review this content for possible issues. Then update the prompt and description
 to address the issues while preserving the creative intent.`,
       schema: preflightSchema,
       maxTokens: 4000,
+      effort: "minimal", // prompt cleanup for the generator — no deep reasoning
     });
 
     prompt = out.revisedPrompt.trim() || prompt;

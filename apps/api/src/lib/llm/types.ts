@@ -4,6 +4,13 @@
 
 export type LlmProvider = "openai" | "anthropic";
 
+// How hard the model should "think". Maps to OpenAI reasoning_effort and to
+// Anthropic output_config.effort. "minimal" ≈ non-reasoning (fast/cheap) — use
+// it for straightforward generation/extraction (e.g. cleaning a prompt); use
+// "high" only where the task needs real planning/judgement. Unset → the
+// provider default (treated as "medium").
+export type LlmEffort = "minimal" | "low" | "medium" | "high";
+
 export type JsonSchema = Record<string, unknown>;
 
 // A tool the model may choose to call, in a provider-neutral shape. Adapters
@@ -34,6 +41,7 @@ export interface StructuredArgs {
   user: string;
   schema: JsonSchema;
   maxTokens?: number;
+  effort?: LlmEffort;
 }
 
 export interface StructuredVisionImage {
@@ -50,6 +58,7 @@ export interface ChooseToolArgs {
   userPayload: unknown;
   tools: ToolSpec[];
   maxTokens?: number;
+  effort?: LlmEffort;
 }
 
 export interface LlmClient {
