@@ -201,7 +201,38 @@ export function AssetsPage() {
   const [kind, setKind] = useState<AssetKindFilter>("all");
   const [source, setSource] = useState<AssetSourceFilter>("all");
   const [state, setState] = useState<LoadState<WorkspaceAsset>>(initialState<WorkspaceAsset>);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const requestIdRef = useRef(0);
+
+  const toggleVisibility = useCallback(async (asset: WorkspaceAsset) => {
+    const id = asset.assetId ?? asset.id;
+    const previous = asset.visibility === "private" ? "private" : "public";
+    const next = previous === "private" ? "public" : "private";
+    setPendingIds((current) => new Set(current).add(id));
+    // Optimistic flip; revert on failure.
+    setState((current) => ({
+      ...current,
+      items: current.items.map((item) =>
+        (item.assetId ?? item.id) === id ? { ...item, visibility: next } : item
+      ),
+    }));
+    try {
+      await v1Api.setAssetVisibility(asset.projectId, id, next);
+    } catch {
+      setState((current) => ({
+        ...current,
+        items: current.items.map((item) =>
+          (item.assetId ?? item.id) === id ? { ...item, visibility: previous } : item
+        ),
+      }));
+    } finally {
+      setPendingIds((current) => {
+        const updated = new Set(current);
+        updated.delete(id);
+        return updated;
+      });
+    }
+  }, []);
 
   const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
@@ -259,15 +290,34 @@ export function AssetsPage() {
       {!state.loading && !state.error && state.items.length > 0 ? (
         <>
           <div className={styles.grid}>
-            {state.items.map((asset) => (
-              <Link className={styles.card} to={projectCollectionPath(asset.projectId, { assetId: asset.assetId ?? asset.id })} key={asset.assetId ?? asset.id}>
-                <AssetPreview asset={asset} />
-                <div className={styles.cardBody}>
-                  <div><span className={styles.rowTitle}>{asset.title ?? asset.filename ?? asset.id}</span><span className={styles.rowSub}>{asset.projectName}</span></div>
-                  <div className={styles.cardMeta}><span>{titleCase(asset.kind)}</span><span>{titleCase(asset.source === "upload" ? "uploaded" : asset.source)}</span><StatusChip status={asset.status} /></div>
+            {state.items.map((asset) => {
+              const id = asset.assetId ?? asset.id;
+              const isPrivate = asset.visibility === "private";
+              return (
+                <div className={styles.card} key={id}>
+                  <Link className={styles.cardLink} to={projectCollectionPath(asset.projectId, { assetId: id })}>
+                    <AssetPreview asset={asset} />
+                    <div className={styles.cardBody}>
+                      <div><span className={styles.rowTitle}>{asset.title ?? asset.filename ?? asset.id}</span><span className={styles.rowSub}>{asset.projectName}</span></div>
+                      <div className={styles.cardMeta}><span>{titleCase(asset.kind)}</span><span>{titleCase(asset.source === "upload" ? "uploaded" : asset.source)}</span><StatusChip status={asset.status} /></div>
+                    </div>
+                  </Link>
+                  <div className={styles.cardActions}>
+                    <span className={styles.visibilityLabel} data-private={isPrivate}>
+                      {isPrivate ? "Private" : "Public"}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={pendingIds.has(id)}
+                      onClick={() => void toggleVisibility(asset)}
+                    >
+                      {isPrivate ? "Make public" : "Make private"}
+                    </Button>
+                  </div>
                 </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
           <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
         </>

@@ -86,6 +86,7 @@ export interface V1Asset {
   filename: string;
   status: "ready" | "pending";
   source: AgentAssetSource;
+  visibility?: "public" | "private";
   remoteUrl?: string;
   storageKey?: string;
   durationSec?: number;
@@ -432,6 +433,7 @@ function mapAsset(row: AssetRow): V1Asset {
   if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
   if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
   if (row.provenance != null) asset.provenance = row.provenance;
+  if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
 }
 
@@ -815,6 +817,31 @@ export async function updateAsset(
   return mapAsset(data as AssetRow);
 }
 
+// Flip an asset's public/private visibility. Updates only the visibility column
+// (tenancy-scoped) so it never clobbers other fields. Tier gating is deferred —
+// the DB visibility-tier triggers were dropped (migration 20260609000000), so any
+// member of the workspace can set either value.
+export async function setAssetVisibility(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  visibility: "public" | "private"
+): Promise<V1Asset> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .update({ visibility, updated_at: new Date().toISOString() })
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .select("*")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, "setAssetVisibility");
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return mapAsset(data as AssetRow);
+}
+
 export async function updateAssetAnalysis(
   workspaceId: string,
   projectId: string,
@@ -852,6 +879,68 @@ export async function listAssets(
 
 interface AssetWithProjectRow extends AssetRow {
   projects?: { id: string; visibility: "public" | "private"; status: "active" | "deleted" };
+}
+
+// Workspace-scoped asset summary for the cross-project dashboard list.
+export interface WorkspaceAssetSummary {
+  id: string;
+  assetId: string;
+  projectId: string;
+  projectName: string;
+  kind: AssetKind;
+  status: "ready" | "pending";
+  source: string;
+  filename?: string;
+  description?: string;
+  durationSec?: number;
+  visibility: "public" | "private";
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface WorkspaceAssetJoinRow extends AssetRow {
+  projects?: { name: string; status: "active" | "deleted" };
+}
+
+export async function listWorkspaceAssets(
+  workspaceId: string,
+  opts: { kind?: AssetKind; source?: "uploaded" | "generated"; projectId?: string },
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<WorkspaceAssetSummary>> {
+  const db = getServiceSupabase();
+  let query = db
+    .from("assets")
+    .select("*, projects!inner(name, status)")
+    .eq("workspace_id", workspaceId)
+    .neq("projects.status", "deleted");
+  if (opts.kind) query = query.eq("kind", opts.kind);
+  if (opts.projectId) query = query.eq("project_id", opts.projectId);
+  // "generated" assets carry provenance; uploaded/imported ones do not.
+  if (opts.source === "generated") query = query.not("provenance", "is", null);
+  if (opts.source === "uploaded") query = query.is("provenance", null);
+
+  const { data, error } = await query;
+  throwOnError(error, "listWorkspaceAssets");
+  const all: WorkspaceAssetSummary[] = (data as WorkspaceAssetJoinRow[]).map((row) => {
+    const source = row.source as { type?: string } | null;
+    return {
+      id: row.id,
+      assetId: row.id,
+      projectId: row.project_id,
+      projectName: row.projects?.name ?? "Untitled project",
+      kind: row.kind,
+      status: row.status,
+      source: typeof source?.type === "string" ? source.type : "imported",
+      filename: row.filename,
+      description: row.description ?? undefined,
+      durationSec: row.duration_sec ?? undefined,
+      visibility: row.visibility ?? "public",
+      createdAt: iso(row.created_at),
+      updatedAt: iso(row.updated_at),
+    };
+  });
+  return paginate(all, limit, cursor);
 }
 
 export async function listPublicAssets(
