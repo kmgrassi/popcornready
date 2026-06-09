@@ -12,6 +12,7 @@ import {
   requireRun,
   type CreateGenerationRunBody,
 } from "@/lib/v1/generation-runs";
+import { resumeGenerationRun } from "@/lib/v1/generation/run-execution";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
@@ -93,10 +94,16 @@ generationRunsRouter.post(
 
     const store = getGenerationRunStore();
     const payload = await assemblePayload(store, runId);
-    requireRun(payload, runId, projectId);
+    const existing = requireRun(payload, runId, projectId);
 
     const approved = await approveReviewGate(store, runId, body ?? {});
-    return { status: 200, body: approved };
+    if (!existing.run.reviewGate) {
+      return { status: 200, body: approved };
+    }
+
+    await resumeGenerationRun({ runId, projectId, runStore: store });
+    const resumed = await assemblePayload(store, runId);
+    return { status: 202, body: requireRun(resumed, runId, projectId) };
   })
 );
 
@@ -111,8 +118,11 @@ generationRunsRouter.post(
     const payload = await assemblePayload(store, runId);
     requireRun(payload, runId, projectId);
 
-    const rejected = await rejectReviewGate(store, runId, body ?? {});
-    return { status: 200, body: rejected };
+    await rejectReviewGate(store, runId, body ?? {});
+
+    await resumeGenerationRun({ runId, projectId, runStore: store });
+    const resumed = await assemblePayload(store, runId);
+    return { status: 202, body: requireRun(resumed, runId, projectId) };
   })
 );
 

@@ -11,7 +11,11 @@ import {
   createGenerationJob,
   runGenerationJob,
 } from "../generation";
-import { createGenerationRunExecution } from "../generation/run-execution";
+import {
+  createGenerationRunExecution,
+  resumeGenerationRun,
+} from "../generation/run-execution";
+import { ApiError } from "../errors";
 import {
   RunProgressEmitter,
   RunStageHandle,
@@ -409,6 +413,106 @@ test("runGenerationJob persists evidence artifacts for normal run execution", as
       assert.equal(timelineArtifact?.kind, "timeline");
       assert.equal(planArtifact?.stageId, planStage!.stageId);
       assert.equal(timelineArtifact?.stageId, timelineStage!.stageId);
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("resumeGenerationRun dispatches the queued job attached to an existing run", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-run-resume-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runPayload = await createRunWithSeedStages({
+        store: runStore,
+        projectId: project.id,
+        body: { briefVersionId: brief.id },
+      });
+      const creativePlan = runPayload.stages.find(
+        (stage) => stage.type === "creative_plan"
+      );
+      assert.ok(creativePlan);
+      await runStore.updateStage(creativePlan.stageId, { jobIds: [job.id] });
+
+      const done = await resumeGenerationRun({
+        runId: runPayload.run.runId,
+        projectId: project.id,
+        store,
+        runStore,
+        deps: fakeDeps,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      assert.equal(done.id, job.id);
+      assert.equal(done.status, "succeeded");
+      const resumed = await assemblePayload(runStore, runPayload.run.runId);
+      assert.equal(resumed?.run.progressPercent, 100);
+      assert.equal(
+        resumed?.stages.find((stage) => stage.type === "creative_plan")?.jobIds[0],
+        job.id
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("resumeGenerationRun rejects an already running attached job", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+    await store.saveJob({ ...job, status: "running" });
+
+    const runDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "popcornready-run-resume-running-")
+    );
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runPayload = await createRunWithSeedStages({
+        store: runStore,
+        projectId: project.id,
+        body: { briefVersionId: brief.id },
+      });
+      const creativePlan = runPayload.stages.find(
+        (stage) => stage.type === "creative_plan"
+      );
+      assert.ok(creativePlan);
+      await runStore.updateStage(creativePlan.stageId, { jobIds: [job.id] });
+
+      await assert.rejects(
+        () =>
+          resumeGenerationRun({
+            runId: runPayload.run.runId,
+            projectId: project.id,
+            store,
+            runStore,
+            deps: fakeDeps,
+          }),
+        (err) =>
+          err instanceof ApiError &&
+          err.code === "job_not_cancelable" &&
+          err.details?.jobId === job.id
+      );
     } finally {
       await fs.rm(runDir, { recursive: true, force: true });
     }
