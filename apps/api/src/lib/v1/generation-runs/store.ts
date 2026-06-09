@@ -141,6 +141,7 @@ interface RunRow {
   status: GenerationRun["status"];
   review_gates: GenerationRun["reviewGates"] | null;
   review_gate: GenerationRun["reviewGate"] | null;
+  review_feedback: string | null;
   current_stage_type: GenerationRun["currentStageType"] | null;
   progress_percent: number | null;
   message: string | null;
@@ -162,6 +163,7 @@ function rowToRun(r: RunRow): GenerationRun {
   if (r.brief_version_id != null) run.briefVersionId = r.brief_version_id;
   if (r.review_gates != null) run.reviewGates = r.review_gates;
   if (r.review_gate != null) run.reviewGate = r.review_gate;
+  if (r.review_feedback != null) run.reviewFeedback = r.review_feedback;
   if (r.current_stage_type != null) run.currentStageType = r.current_stage_type;
   if (r.progress_percent != null) run.progressPercent = r.progress_percent;
   if (r.message != null) run.message = r.message;
@@ -179,6 +181,7 @@ function runToRow(run: GenerationRun): RunRow {
     status: run.status,
     review_gates: run.reviewGates ?? null,
     review_gate: run.reviewGate ?? null,
+    review_feedback: run.reviewFeedback ?? null,
     current_stage_type: run.currentStageType ?? null,
     progress_percent: run.progressPercent ?? null,
     message: run.message ?? null,

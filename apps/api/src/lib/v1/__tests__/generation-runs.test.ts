@@ -660,6 +660,34 @@ test("approveReviewGate rejects canceled runs", async () => {
   );
 });
 
+test("approveReviewGate stores a non-empty review note as forward feedback", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_approve_feedback",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const storyboardStage = created.stages.find((stage) => stage.type === "storyboard")!;
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const approved = await approveReviewGate(store, created.run.runId, {
+    note: "make the next step more playful",
+  });
+
+  assert.equal(approved.run.reviewGate, null);
+  assert.equal(approved.run.reviewFeedback, "make the next step more playful");
+  assert.equal(approved.run.currentStageType, storyboardStage.type);
+});
+
 test("rejectReviewGate resets the gated stage for regeneration and drops stale output", async () => {
   const created = await createRunWithSeedStages({
     store,
@@ -700,6 +728,7 @@ test("rejectReviewGate resets the gated stage for regeneration and drops stale o
 
   assert.equal(rejected.run.reviewGate, null);
   assert.equal(rejected.run.status, "running");
+  assert.equal(rejected.run.reviewFeedback, "too dark");
   const updatedStage = rejected.stages.find((stage) => stage.stageId === gateStage.stageId)!;
   assert.equal(updatedStage.status, "queued");
   assert.equal(updatedStage.progressPercent, 0);

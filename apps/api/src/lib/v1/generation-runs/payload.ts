@@ -42,6 +42,13 @@ export interface CreateRunArgs {
   body: CreateGenerationRunBody;
 }
 
+function parseReviewNote(body: unknown): string {
+  const parsed = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as { note?: unknown })
+    : {};
+  return typeof parsed.note === "string" ? parsed.note.trim() : "";
+}
+
 type StageSeed = {
   type: GenerationStageType;
 };
@@ -188,7 +195,8 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
 
 export async function approveReviewGate(
   store: GenerationRunsStore,
-  runId: string
+  runId: string,
+  body: unknown = {}
 ): Promise<GenerationRunPayload> {
   const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
   const { run, stages } = payload;
@@ -201,6 +209,7 @@ export async function approveReviewGate(
     return payload;
   }
 
+  const note = parseReviewNote(body);
   const gate = run.reviewGate;
   const stage = stages.find((s) => s.stageId === gate.stageId);
   if (!stage || stage.type !== gate.stageType) {
@@ -213,6 +222,7 @@ export async function approveReviewGate(
   const nextStage = stages.find((s) => s.order > stage.order && s.status === "queued");
   await store.updateRun(run.runId, {
     reviewGate: null,
+    ...(note ? { reviewFeedback: note } : {}),
     currentStageType: nextStage?.type ?? run.currentStageType,
     message: nextStage
       ? `Approved ${stage.label}; continuing to ${nextStage.label}.`
@@ -280,7 +290,7 @@ export async function rejectReviewGate(
   if (!stage || stage.type !== gate.stageType) {
     throw new ApiError("validation_failed", "The current review gate no longer matches a stage.");
   }
-  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
+  const note = parseReviewNote(parsed);
 
   // Force the stage back through generation instead of re-presenting rejected
   // output. The run re-enters awaiting_review only after the stage succeeds.
@@ -313,6 +323,7 @@ export async function rejectReviewGate(
     status: "running",
     currentStageType: stage.type,
     reviewGate: null,
+    ...(note ? { reviewFeedback: note } : {}),
     message: note
       ? `Regenerating ${stage.label} after feedback: ${note}`
       : `Regenerating ${stage.label} after review feedback.`,

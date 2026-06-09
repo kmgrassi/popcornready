@@ -28,6 +28,7 @@ import {
   createGenerationJob,
   runGenerationJob,
 } from "../generation";
+import { noopProgressEmitter } from "../generation-progress";
 import { V1Store, createStore } from "../store";
 import {
   AspectRatio,
@@ -229,6 +230,46 @@ test("asset-driven generation produces a timeline with provenance", async () => 
     ]);
     assert.ok(timeline!.provenance.criticReport, "critic report stored");
     assert.equal(timeline!.createdBy.jobId, job.id);
+  });
+});
+
+test("generation passes review feedback to creative planning and clears it after use", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_feedback" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_feedback"] },
+    });
+
+    let seenFeedback: string | null | undefined;
+    let cleared = false;
+    const deps: GenerationDeps = {
+      ...fakeDeps,
+      async planEdit(input) {
+        seenFeedback = input.feedback;
+        return fakeDeps.planEdit(input);
+      },
+    };
+    const progress = {
+      ...noopProgressEmitter,
+      async getReviewFeedback() {
+        return "make the hook about the surprise";
+      },
+      async clearReviewFeedback() {
+        cleared = true;
+      },
+    };
+
+    const done = await runGenerationJob(store, job.id, deps, progress);
+
+    assert.equal(done.status, "succeeded");
+    assert.equal(seenFeedback, "make the hook about the surprise");
+    assert.equal(cleared, true);
   });
 });
 

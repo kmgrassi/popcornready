@@ -86,7 +86,7 @@ generationRunsRouter.get(
 
 generationRunsRouter.post(
   "/projects/:projectId/generation-runs/:runId/approve",
-  mutation(async ({ auth }, params) => {
+  mutation(async ({ auth, body }, params) => {
     const projectId = requireParam(params, "projectId");
     const runId = requireParam(params, "runId");
     await requireProjectAccess(auth.workspaceId, projectId);
@@ -95,7 +95,7 @@ generationRunsRouter.post(
     const payload = await assemblePayload(store, runId);
     requireRun(payload, runId, projectId);
 
-    const approved = await approveReviewGate(store, runId);
+    const approved = await approveReviewGate(store, runId, body ?? {});
     return { status: 200, body: approved };
   })
 );
