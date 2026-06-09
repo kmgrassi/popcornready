@@ -330,6 +330,9 @@ export function createInlineEvalEmitter(
     return item?.stageId;
   }
 
+  const getReviewFeedback = inner.getReviewFeedback?.bind(inner);
+  const clearReviewFeedback = inner.clearReviewFeedback?.bind(inner);
+
   return {
     async beginStage(
       type: GenerationStageType,
@@ -339,5 +342,7 @@ export function createInlineEvalEmitter(
       return wrapStage(handle);
     },
     updateRun: (patch: StageUpdate) => inner.updateRun(patch),
+    ...(getReviewFeedback ? { getReviewFeedback } : {}),
+    ...(clearReviewFeedback ? { clearReviewFeedback } : {}),
   };
 }
