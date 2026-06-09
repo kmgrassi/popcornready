@@ -9,7 +9,11 @@ import {
   type WorkspaceGenerationRun,
   type WorkspaceOutput,
 } from "../lib/api-client";
-import "../styles/dashboard-collections.css";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Toolbar, ToolbarField } from "../components/ui/Toolbar";
+import { Button, ButtonLink } from "../components/ui/Button";
+import { EmptyState, ErrorState } from "../components/ui/StateCard";
+import styles from "./DashboardCollections.module.css";
 
 const PAGE_SIZE = 24;
 const RUN_STATUSES = ["all", "queued", "running", "succeeded", "failed", "canceled"] as const;
@@ -64,52 +68,43 @@ function projectCollectionPath(projectId: string, extraParams?: Record<string, s
   return `/projects?${params.toString()}`;
 }
 
+function statusChipClass(status: string) {
+  if (status === "running" || status === "processing") return styles.statusRunning;
+  if (status === "succeeded" || status === "ready") return styles.statusSucceeded;
+  if (status === "failed" || status === "canceled") return styles.statusFailed;
+  return "";
+}
+
 function StatusChip({ status }: { status: GenerationRunStatus | WorkspaceAsset["status"] }) {
-  return <span className={`dash-chip status-${status}`}>{titleCase(status)}</span>;
+  return <span className={`${styles.chip} ${statusChipClass(status)}`}>{titleCase(status)}</span>;
 }
 
 function DashboardFrame({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <main className="dashboard-page">
-      <div className="dashboard-head">
-        <div>
-          <p className="dashboard-kicker">Dashboard</p>
-          <h1>{title}</h1>
-          <p>{description}</p>
-        </div>
-        <Link className="dashboard-primary-action" to="/studio">New video</Link>
-      </div>
+    <div className={styles.page}>
+      <PageHeader
+        eyebrow="Dashboard"
+        title={title}
+        description={description}
+        action={
+          <ButtonLink variant="primary" to="/studio">
+            New video
+          </ButtonLink>
+        }
+      />
       {children}
-    </main>
-  );
-}
-
-function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void }) {
-  const apiError = error instanceof ApiClientError ? error : null;
-  return (
-    <div className="dashboard-state dashboard-error-state" role="alert">
-      <h2>Unable to load this view</h2>
-      <p>{error.message}</p>
-      {apiError ? (
-        <dl>
-          <div><dt>Code</dt><dd>{apiError.code}</dd></div>
-          {apiError.requestId ? <div><dt>Request</dt><dd>{apiError.requestId}</dd></div> : null}
-        </dl>
-      ) : null}
-      <button type="button" className="secondary" onClick={onRetry}>Retry</button>
     </div>
   );
 }
 
-function DashboardEmpty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
-  return <div className="dashboard-state"><h2>{title}</h2><p>{body}</p>{action}</div>;
-}
-
 function DashboardSkeleton({ variant = "rows" }: { variant?: "rows" | "grid" }) {
+  const isGrid = variant === "grid";
   return (
-    <div className={variant === "grid" ? "dashboard-grid" : "dashboard-list"} aria-hidden="true">
-      {Array.from({ length: variant === "grid" ? 8 : 5 }, (_, index) => (
-        <div className={`dashboard-skeleton ${variant}`} key={index}><span /><span /><span /></div>
+    <div className={isGrid ? styles.grid : styles.list} aria-hidden="true">
+      {Array.from({ length: isGrid ? 8 : 5 }, (_, index) => (
+        <div className={`${styles.skeleton} ${isGrid ? styles.skeletonGrid : ""}`} key={index}>
+          <span /><span /><span />
+        </div>
       ))}
     </div>
   );
@@ -117,7 +112,13 @@ function DashboardSkeleton({ variant = "rows" }: { variant?: "rows" | "grid" }) 
 
 function LoadMore({ hasMore, loading, onClick }: { hasMore: boolean; loading: boolean; onClick: () => void }) {
   if (!hasMore) return null;
-  return <div className="dashboard-load-more"><button type="button" className="secondary" disabled={loading} onClick={onClick}>{loading ? "Loading..." : "Load more"}</button></div>;
+  return (
+    <div className={styles.loadMore}>
+      <Button variant="secondary" disabled={loading} onClick={onClick}>
+        {loading ? "Loading..." : "Load more"}
+      </Button>
+    </div>
+  );
 }
 
 export function RunsPage() {
@@ -149,28 +150,40 @@ export function RunsPage() {
   }, [load]);
 
   return (
-    <DashboardFrame title="Runs" description="Every generation run in the active workspace, newest first.">
-      <div className="dashboard-toolbar">
-        <label>
-          <span>Status</span>
+    <DashboardFrame title="Runs" description="Track generation runs in this workspace.">
+      <Toolbar>
+        <ToolbarField label="Status">
           <select value={status} onChange={(event) => setStatus(event.target.value as RunStatusFilter)}>
             {RUN_STATUSES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}
           </select>
-        </label>
-      </div>
+        </ToolbarField>
+      </Toolbar>
       {state.loading ? <DashboardSkeleton /> : null}
-      {!state.loading && state.error ? <DashboardError error={state.error} onRetry={() => void load(null)} /> : null}
-      {!state.loading && !state.error && state.items.length === 0 ? <DashboardEmpty title="No runs match this filter" body="Start a new video or choose another status to see past generation work." action={<Link className="dashboard-link-button" to="/studio">Open studio</Link>} /> : null}
+      {!state.loading && state.error ? (
+        <ErrorState
+          title="Unable to load runs"
+          body="We couldn’t load generation runs for this workspace."
+          error={state.error}
+          onRetry={() => void load(null)}
+        />
+      ) : null}
+      {!state.loading && !state.error && state.items.length === 0 ? (
+        <EmptyState
+          title="No runs match this filter"
+          body="Start a new video or choose another status to see past generation work."
+          action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
+        />
+      ) : null}
       {!state.loading && !state.error && state.items.length > 0 ? (
         <>
-          <div className="dashboard-list">
+          <div className={styles.list}>
             {state.items.map((run) => (
-              <Link className="dashboard-run-row" to={`/projects/${encodeURIComponent(run.projectId)}/runs/${encodeURIComponent(run.runId)}`} key={run.runId}>
+              <Link className={styles.runRow} to={`/projects/${encodeURIComponent(run.projectId)}/runs/${encodeURIComponent(run.runId)}`} key={run.runId}>
                 <div>
-                  <span className="dashboard-row-title">{run.projectName}</span>
-                  <span className="dashboard-row-sub">{run.currentStageType ? titleCase(run.currentStageType) : "Preparing"} - updated {formatDate(run.updatedAt)}</span>
+                  <span className={styles.rowTitle}>{run.projectName}</span>
+                  <span className={styles.rowSub}>{run.currentStageType ? titleCase(run.currentStageType) : "Preparing"} - updated {formatDate(run.updatedAt)}</span>
                 </div>
-                <div className="dashboard-progress" aria-label={`${run.progressPercent ?? 0}% complete`}>
+                <div className={styles.progress} aria-label={`${run.progressPercent ?? 0}% complete`}>
                   <span style={{ width: `${Math.max(0, Math.min(100, run.progressPercent ?? 0))}%` }} />
                 </div>
                 <StatusChip status={run.status} />
@@ -215,22 +228,43 @@ export function AssetsPage() {
 
   return (
     <DashboardFrame title="Assets" description="Generated and uploaded media across all projects in this workspace.">
-      <div className="dashboard-toolbar two">
-        <label><span>Kind</span><select value={kind} onChange={(event) => setKind(event.target.value as AssetKindFilter)}>{ASSET_KINDS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
-        <label><span>Source</span><select value={source} onChange={(event) => setSource(event.target.value as AssetSourceFilter)}>{ASSET_SOURCES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
-      </div>
+      <Toolbar>
+        <ToolbarField label="Kind">
+          <select value={kind} onChange={(event) => setKind(event.target.value as AssetKindFilter)}>
+            {ASSET_KINDS.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}
+          </select>
+        </ToolbarField>
+        <ToolbarField label="Source">
+          <select value={source} onChange={(event) => setSource(event.target.value as AssetSourceFilter)}>
+            {ASSET_SOURCES.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}
+          </select>
+        </ToolbarField>
+      </Toolbar>
       {state.loading ? <DashboardSkeleton variant="grid" /> : null}
-      {!state.loading && state.error ? <DashboardError error={state.error} onRetry={() => void load(null)} /> : null}
-      {!state.loading && !state.error && state.items.length === 0 ? <DashboardEmpty title="No assets match this filter" body="Upload source media or generate assets in the studio to build the workspace library." action={<Link className="dashboard-link-button" to="/studio">Open studio</Link>} /> : null}
+      {!state.loading && state.error ? (
+        <ErrorState
+          title="Unable to load assets"
+          body="We couldn’t load media assets for this workspace."
+          error={state.error}
+          onRetry={() => void load(null)}
+        />
+      ) : null}
+      {!state.loading && !state.error && state.items.length === 0 ? (
+        <EmptyState
+          title="No assets match this filter"
+          body="Upload source media or generate assets in the studio to build the workspace library."
+          action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
+        />
+      ) : null}
       {!state.loading && !state.error && state.items.length > 0 ? (
         <>
-          <div className="dashboard-grid">
+          <div className={styles.grid}>
             {state.items.map((asset) => (
-              <Link className="dashboard-asset-card" to={projectCollectionPath(asset.projectId, { assetId: asset.assetId ?? asset.id })} key={asset.assetId ?? asset.id}>
+              <Link className={styles.card} to={projectCollectionPath(asset.projectId, { assetId: asset.assetId ?? asset.id })} key={asset.assetId ?? asset.id}>
                 <AssetPreview asset={asset} />
-                <div className="dashboard-card-body">
-                  <div><span className="dashboard-row-title">{asset.title ?? asset.filename ?? asset.id}</span><span className="dashboard-row-sub">{asset.projectName}</span></div>
-                  <div className="dashboard-card-meta"><span>{titleCase(asset.kind)}</span><span>{titleCase(asset.source === "upload" ? "uploaded" : asset.source)}</span><StatusChip status={asset.status} /></div>
+                <div className={styles.cardBody}>
+                  <div><span className={styles.rowTitle}>{asset.title ?? asset.filename ?? asset.id}</span><span className={styles.rowSub}>{asset.projectName}</span></div>
+                  <div className={styles.cardMeta}><span>{titleCase(asset.kind)}</span><span>{titleCase(asset.source === "upload" ? "uploaded" : asset.source)}</span><StatusChip status={asset.status} /></div>
                 </div>
               </Link>
             ))}
@@ -244,9 +278,9 @@ export function AssetsPage() {
 
 function AssetPreview({ asset }: { asset: WorkspaceAsset }) {
   const src = asset.thumbnailUrl ?? asset.url;
-  if (src && asset.kind === "image") return <img className="dashboard-media" src={src} alt="" loading="lazy" />;
-  if (src && asset.kind === "video") return <video className="dashboard-media" src={src} muted playsInline preload="metadata" />;
-  return <div className="dashboard-media dashboard-media-empty"><span>{titleCase(asset.kind)}</span></div>;
+  if (src && asset.kind === "image") return <img className={styles.media} src={src} alt="" loading="lazy" />;
+  if (src && asset.kind === "video") return <video className={styles.media} src={src} muted playsInline preload="metadata" />;
+  return <div className={`${styles.media} ${styles.mediaEmpty}`}><span>{titleCase(asset.kind)}</span></div>;
 }
 
 export function OutputsPage() {
@@ -279,21 +313,34 @@ export function OutputsPage() {
   return (
     <DashboardFrame title="Outputs" description="Finished exported videos from every project in the active workspace.">
       {state.loading ? <DashboardSkeleton variant="grid" /> : null}
-      {!state.loading && state.error ? <DashboardError error={state.error} onRetry={() => void load(null)} /> : null}
-      {!state.loading && !state.error && state.items.length === 0 ? <DashboardEmpty title="No finished outputs yet" body="Exports appear here after a video finishes rendering successfully." action={<Link className="dashboard-link-button" to="/studio">Create a video</Link>} /> : null}
+      {!state.loading && state.error ? (
+        <ErrorState
+          title="Unable to load outputs"
+          body="We couldn’t load exported videos for this workspace."
+          error={state.error}
+          onRetry={() => void load(null)}
+        />
+      ) : null}
+      {!state.loading && !state.error && state.items.length === 0 ? (
+        <EmptyState
+          title="No finished outputs yet"
+          body="Exports appear here after a video finishes rendering successfully."
+          action={<ButtonLink variant="secondary" to="/studio">Create a video</ButtonLink>}
+        />
+      ) : null}
       {!state.loading && !state.error && state.items.length > 0 ? (
         <>
-          <div className="dashboard-grid outputs">
+          <div className={`${styles.grid} ${styles.gridOutputs}`}>
             {state.items.map((output) => {
               const playbackUrl = output.playbackUrl ?? output.url;
               return (
-                <Link className="dashboard-output-card" to={projectCollectionPath(output.projectId, { timelineId: output.timelineId })} key={output.artifactId}>
-                  <div className="dashboard-output-media">
-                    {playbackUrl ? <video className="dashboard-media" src={playbackUrl} poster={output.thumbnailUrl} controls preload="metadata" /> : output.thumbnailUrl ? <img className="dashboard-media" src={output.thumbnailUrl} alt="" loading="lazy" /> : <div className="dashboard-media dashboard-media-empty"><span>Output</span></div>}
+                <Link className={styles.card} to={projectCollectionPath(output.projectId, { timelineId: output.timelineId })} key={output.artifactId}>
+                  <div className={styles.outputMedia}>
+                    {playbackUrl ? <video className={styles.media} src={playbackUrl} poster={output.thumbnailUrl} controls preload="metadata" /> : output.thumbnailUrl ? <img className={styles.media} src={output.thumbnailUrl} alt="" loading="lazy" /> : <div className={`${styles.media} ${styles.mediaEmpty}`}><span>Output</span></div>}
                   </div>
-                  <div className="dashboard-card-body">
-                    <div><span className="dashboard-row-title">{output.projectName}</span><span className="dashboard-row-sub">Exported {formatDate(output.createdAt)}</span></div>
-                    <div className="dashboard-card-meta">{output.format ? <span>{output.format.toUpperCase()}</span> : null}{formatDuration(output.durationSec) ? <span>{formatDuration(output.durationSec)}</span> : null}{output.timelineId ? <span>Timeline</span> : <span>Project</span>}</div>
+                  <div className={styles.cardBody}>
+                    <div><span className={styles.rowTitle}>{output.projectName}</span><span className={styles.rowSub}>Exported {formatDate(output.createdAt)}</span></div>
+                    <div className={styles.cardMeta}>{output.format ? <span>{output.format.toUpperCase()}</span> : null}{formatDuration(output.durationSec) ? <span>{formatDuration(output.durationSec)}</span> : null}{output.timelineId ? <span>Timeline</span> : <span>Project</span>}</div>
                   </div>
                 </Link>
               );

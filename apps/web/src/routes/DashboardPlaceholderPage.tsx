@@ -1,4 +1,6 @@
-import { Link } from "react-router-dom";
+import { PageHeader } from "../components/ui/PageHeader";
+import { ButtonLink } from "../components/ui/Button";
+import styles from "./DashboardPlaceholderPage.module.css";
 
 const PAGE_COPY = {
   dashboard: {
@@ -38,15 +40,17 @@ export function DashboardPlaceholderPage({
   const copy = PAGE_COPY[kind];
 
   return (
-    <main className="dashboard-page">
-      <section className="dashboard-empty-state">
-        <span className="dashboard-eyebrow">{copy.eyebrow}</span>
-        <h1>{copy.title}</h1>
-        <p>{copy.body}</p>
-        <Link className="dashboard-primary-action" to="/studio">
-          New video
-        </Link>
-      </section>
-    </main>
+    <div className={styles.page}>
+      <PageHeader
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        description={copy.body}
+        action={
+          <ButtonLink variant="primary" to="/studio">
+            New video
+          </ButtonLink>
+        }
+      />
+    </div>
   );
 }
