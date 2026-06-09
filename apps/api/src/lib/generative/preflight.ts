@@ -1,4 +1,4 @@
-import { structuredCall } from "../anthropic";
+import { getLlmClient } from "../llm";
 import {
   Clip,
   EditPlan,
@@ -189,7 +189,7 @@ directions, bracketed instructions, or provider instructions in revisedPrompt.`;
             )
             .join("\n\n");
 
-    const out = await structuredCall<{
+    const out = await getLlmClient().structured<{
       summary: string;
       issues: GenerationPreflightIssue[];
       revisedPrompt: string;
@@ -233,6 +233,7 @@ Review this content for possible issues. Then update the prompt and description
 to address the issues while preserving the creative intent.`,
       schema: preflightSchema,
       maxTokens: 4000,
+      effort: "minimal", // prompt cleanup for the generator — no deep reasoning
     });
 
     prompt = out.revisedPrompt.trim() || prompt;

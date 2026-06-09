@@ -21,6 +21,12 @@ export interface StructuredCallArgs {
   user: string;
   schema: Record<string, unknown>;
   maxTokens?: number;
+  // Override the Claude model (defaults to MODEL). Used by the llm/ adapter so
+  // ANTHROPIC_MODEL can select a model without editing this file.
+  model?: string;
+  // Thinking depth (output_config.effort). Defaults to "high" for direct
+  // callers; the llm/ adapter sets it per call from the wrapper effort.
+  effort?: "low" | "medium" | "high" | "max";
 }
 
 export interface StructuredVisionImage {
@@ -51,9 +57,11 @@ export async function structuredCall<T>({
   user,
   schema,
   maxTokens = 8000,
+  model = MODEL,
+  effort = "high",
 }: StructuredCallArgs): Promise<T> {
   const res: any = await client().messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system: [
       {
@@ -63,7 +71,7 @@ export async function structuredCall<T>({
       },
     ],
     output_config: {
-      effort: "high",
+      effort,
       format: { type: "json_schema", schema },
     },
     messages: [{ role: "user", content: user }],
@@ -84,6 +92,8 @@ export async function structuredVisionCall<T>({
   schema,
   images,
   maxTokens = 4000,
+  model = MODEL,
+  effort = "high",
 }: StructuredVisionCallArgs): Promise<T> {
   const imageBlocks = await Promise.all(
     images.map(async (image) => {
@@ -101,7 +111,7 @@ export async function structuredVisionCall<T>({
   );
 
   const res: any = await client().messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system: [
       {
@@ -111,7 +121,7 @@ export async function structuredVisionCall<T>({
       },
     ],
     output_config: {
-      effort: "high",
+      effort,
       format: { type: "json_schema", schema },
     },
     messages: [

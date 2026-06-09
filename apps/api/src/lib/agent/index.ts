@@ -1,4 +1,4 @@
-import { structuredCall } from "../anthropic";
+import { getLlmClient } from "../llm";
 import {
   Clip,
   CriticReport,
@@ -124,11 +124,12 @@ ${storyContextForPrompt(input.storyContext)}
 
 Produce the edit plan.`;
 
-  const plan = await structuredCall<EditPlan>({
+  const plan = await getLlmClient().structured<EditPlan>({
     cachedSystem: sys,
     user,
     schema: planSchema,
     maxTokens: 2000,
+    effort: "high", // creative planning: goal -> structured storyboard/beats
   });
   // Honor the user's explicit aspect ratio choice.
   plan.aspectRatio = input.aspectRatio as EditPlan["aspectRatio"];
@@ -175,11 +176,12 @@ ${planText(input.plan)}
 
 Critique and revise this plan before media generation.`;
 
-  const report = await structuredCall<PlanCritiqueReport>({
+  const report = await getLlmClient().structured<PlanCritiqueReport>({
     cachedSystem: sys,
     user,
     schema: planCritiqueSchema,
     maxTokens: 4000,
+    effort: "medium", // judgement, but bounded
   });
 
   report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
@@ -226,11 +228,12 @@ ${planText(input.plan)}
 
 Review source coverage and return a revised plan for the timeline selector.`;
 
-  const report = await structuredCall<UploadedFootagePlanReview>({
+  const report = await getLlmClient().structured<UploadedFootagePlanReview>({
     cachedSystem: sys,
     user,
     schema: uploadedFootagePlanReviewSchema,
     maxTokens: 4000,
+    effort: "medium", // judgement, but bounded
   });
 
   report.revisedPlan.targetLengthSec = input.plan.targetLengthSec;
@@ -262,7 +265,7 @@ ${storyPlanText(input.plan)}
 
 Produce the edit decisions now.`;
 
-  const raw = await structuredCall<{
+  const raw = await getLlmClient().structured<{
     showCaptions?: boolean;
     decisions: {
       beatId: string;
@@ -277,6 +280,7 @@ Produce the edit decisions now.`;
     user,
     schema: editDecisionTimelineSchema,
     maxTokens: 8000,
+    effort: "medium", // match beats to clips + in/out points
   });
 
   const showCaptions =
@@ -346,11 +350,11 @@ ${timelineForPrompt(input.timeline, input.clips)}
 
 Score it and propose improvement patches.`;
 
-  const out = await structuredCall<{
+  const out = await getLlmClient().structured<{
     scores: CriticReport["scores"];
     summary: string;
     patches: Patch[];
-  }>({ cachedSystem: sys, user, schema: criticSchema, maxTokens: 6000 });
+  }>({ cachedSystem: sys, user, schema: criticSchema, maxTokens: 6000, effort: "medium" });
 
   return {
     report: { scores: out.scores, summary: out.summary },
@@ -385,11 +389,12 @@ User request: "${input.message}"
 
 Produce patches and a summary.`;
 
-  return structuredCall<{ summary: string; patches: Patch[] }>({
+  return getLlmClient().structured<{ summary: string; patches: Patch[] }>({
     cachedSystem: sys,
     user,
     schema: reviseSchema,
     maxTokens: 6000,
+    effort: "medium", // chat note -> targeted timeline patches
   });
 }
 
@@ -424,7 +429,7 @@ Target length: about ${targetWordCount} words.
 Rewrite the narration to fit, then report the rewritten script, your estimated
 spoken duration in seconds, and a one-line summary of what changed.`;
 
-  return structuredCall<{
+  return getLlmClient().structured<{
     script: string;
     estimatedDurationSec: number;
     summary: string;
@@ -433,5 +438,6 @@ spoken duration in seconds, and a one-line summary of what changed.`;
     user,
     schema: narrationRewriteSchema,
     maxTokens: 2000,
+    effort: "low", // text rewrite to a length target — not deep reasoning
   });
 }

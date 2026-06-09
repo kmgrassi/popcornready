@@ -1,4 +1,4 @@
-import { client, MODEL } from "../anthropic";
+import { getLlmClient } from "../llm";
 import { ToolRegistry } from "./registry";
 import {
   OrchestratorModelDecision,
@@ -21,13 +21,8 @@ export type OrchestratorModel = (
   input: ModelTurnInput
 ) => Promise<OrchestratorModelDecision>;
 
-function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
-  return {
-    name: tool.name,
-    description: tool.description,
-    input_schema: tool.inputSchema,
-  };
-}
+const SYSTEM_PROMPT =
+  "You are the Popcorn Ready video-generation orchestrator. Decide the next single server-owned tool to call. The server owns validation, persistence, jobs, authorization, provider execution, and stage state. Call at most one tool.";
 
 function requireToolName(value: unknown): ToolName {
   if (typeof value === "string" && TOOL_NAME_SET.has(value)) {
@@ -36,58 +31,51 @@ function requireToolName(value: unknown): ToolName {
   throw new Error(`Model requested an unknown tool: ${String(value)}`);
 }
 
-export const anthropicOrchestratorModel: OrchestratorModel = async ({
+// One orchestrator turn: the configured LLM (OpenAI by default, Anthropic when
+// LLM_PROVIDER=anthropic) picks the next single tool, or finishes with a
+// summary. Tool definitions are passed provider-neutral; each adapter maps them
+// to that provider's function-/tool-calling shape.
+export const orchestratorModel: OrchestratorModel = async ({
   projectId,
   inputSummary,
   priorResults = [],
   registry,
-  maxTokens = 2000,
+  // Headroom so reasoning models (e.g. gpt-5) have budget left for the tool call
+  // after thinking; non-reasoning models only use what they need.
+  maxTokens = 4000,
 }) => {
-  const tools = [...registry.values()].map(toAnthropicTool);
-  const res: any = await client().messages.create({
-    model: MODEL,
-    max_tokens: maxTokens,
-    system:
-      "You are the Popcorn Ready video-generation orchestrator. Decide the next single server-owned tool to call. The server owns validation, persistence, jobs, authorization, provider execution, and stage state. Call at most one tool.",
-    tools,
-    tool_choice: { type: "auto" },
-    messages: [
-      {
-        role: "user",
-        content: JSON.stringify({
-          projectId,
-          inputSummary,
-          priorResults,
-          instruction:
-            "Choose exactly one next tool if work remains. If all work is complete, answer with a concise text summary and no tool call.",
-        }),
-      },
-    ],
-  } as any);
+  const tools = [...registry.values()].map((tool: ToolDefinition) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.inputSchema,
+  }));
 
-  const content = Array.isArray(res.content) ? res.content : [];
-  const toolUses = content.filter((block: any) => block?.type === "tool_use");
-  if (toolUses.length > 1) {
-    throw new Error("Orchestrator model returned more than one tool call.");
-  }
-  if (toolUses.length === 1) {
-    const toolUse = toolUses[0];
+  const decision = await getLlmClient().chooseTool({
+    system: SYSTEM_PROMPT,
+    userPayload: {
+      projectId,
+      inputSummary,
+      priorResults,
+      instruction:
+        "Choose exactly one next tool if work remains. If all work is complete, answer with a concise text summary and no tool call.",
+    },
+    tools,
+    maxTokens,
+    effort: "medium", // pick the next single tool — modest reasoning
+  });
+
+  if (decision.type === "tool_call") {
     return {
       type: "tool_call",
-      toolName: requireToolName(toolUse.name),
-      input:
-        typeof toolUse.input === "object" && toolUse.input !== null
-          ? toolUse.input
-          : {},
-      model: res.model ?? MODEL,
+      toolName: requireToolName(decision.toolName),
+      input: decision.input,
+      model: decision.model,
     };
   }
 
-  const summary =
-    content
-      .filter((block: any) => block?.type === "text")
-      .map((block: any) => String(block.text || ""))
-      .join("")
-      .trim() || "No tool call requested.";
-  return { type: "done", summary, model: res.model ?? MODEL };
+  return {
+    type: "done",
+    summary: decision.text || "No tool call requested.",
+    model: decision.model,
+  };
 };

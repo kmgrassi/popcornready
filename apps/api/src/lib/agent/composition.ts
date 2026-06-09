@@ -1,4 +1,4 @@
-import { structuredCall } from "../anthropic";
+import { getLlmClient } from "../llm";
 import { Clip, CompositionMode, StoryContext } from "@popcorn/shared/types";
 import { clipCatalog } from "@popcorn/timeline/timeline";
 import { storyContextForPrompt } from "@popcorn/shared/story-context";
@@ -80,10 +80,10 @@ ${storyContextForPrompt(input.storyContext)}
 
 Produce the composition beats and narration plan now.`;
 
-  const out = await structuredCall<{
+  const out = await getLlmClient().structured<{
     beats: PlannedBeatProposal[];
     narration: { mode: "none" | "provided" | "generate"; script?: string };
-  }>({ cachedSystem: sys, user, schema: compositionSchema, maxTokens: 4000 });
+  }>({ cachedSystem: sys, user, schema: compositionSchema, maxTokens: 4000, effort: "high" });
 
   return {
     beats: out.beats,

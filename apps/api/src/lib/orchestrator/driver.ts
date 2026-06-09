@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { isOrchestratorToolLoopEnabled } from "./feature-flag";
-import { anthropicOrchestratorModel, OrchestratorModel } from "./model";
+import { orchestratorModel, OrchestratorModel } from "./model";
 import { createToolRegistry, executeRegisteredTool, ToolRegistry } from "./registry";
 import {
   OrchestratorRun,
@@ -103,7 +103,7 @@ export async function runToolLoopTurn({
   inputSummary,
   priorResults = [],
   registry = createToolRegistry(),
-  model = anthropicOrchestratorModel,
+  model = orchestratorModel,
   env = process.env,
 }: RunToolLoopTurnInput): Promise<ToolLoopTurnResult> {
   if (!isOrchestratorToolLoopEnabled(env)) {
