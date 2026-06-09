@@ -7,6 +7,7 @@ import { ApiError as AgentApiError, toErrorEnvelope } from "@/lib/agent-api/runt
 import type { Artifact, Job, JobType } from "@/lib/agent-api/types";
 import { type ExportOptions, runExportJob, runRevisionJob } from "@/lib/agent-api/workers";
 import type { ApiResult, HandlerCtx } from "@/lib/api/v1/handler";
+import type { Project } from "@popcorn/shared/types";
 import {
   type AssembleRequest,
   resolveAssemble,
@@ -14,6 +15,7 @@ import {
   runTimelineCritique,
 } from "@/lib/v1/assemble";
 import { resolveActorFromRequest } from "@/lib/v1/actor";
+import { assetToClip } from "@/lib/v1/generation/prepare";
 import { createLogger } from "@/lib/v1/logger";
 import { redactMessage } from "@/lib/v1/redact";
 import { getStore } from "@/lib/v1/store";
@@ -24,6 +26,7 @@ import {
   type Job as V1Job,
   type JobType as V1JobType,
   SCHEMA,
+  type VersionedTimeline,
 } from "@popcorn/shared/v1/types";
 
 export const timelinesRouter = Router();
@@ -99,7 +102,70 @@ function parseExportOptions(body: unknown): ExportOptions {
         ? (input.durationPolicy as ExportOptions["durationPolicy"])
         : undefined,
     maxDeltaSec: typeof input.maxDeltaSec === "number" ? input.maxDeltaSec : undefined,
+    showCaptions: typeof input.showCaptions === "boolean" ? input.showCaptions : undefined,
   };
+}
+
+async function requireV1Project(
+  store: V1Store,
+  workspaceId: string,
+  projectId: string
+) {
+  const project = await store.getProject(projectId);
+  if (!project || project.workspaceId !== workspaceId || project.status === "deleted") {
+    throw new AgentApiError("not_found", 404, `Project not found: ${projectId}`);
+  }
+  return project;
+}
+
+async function requireV1TimelineProject(
+  store: V1Store,
+  input: { workspaceId: string; projectId: string; timelineId: string }
+): Promise<{ project: Project; timeline: VersionedTimeline }> {
+  const v1Project = await requireV1Project(store, input.workspaceId, input.projectId);
+  const timeline = await store.getTimeline(input.timelineId);
+  if (!timeline || timeline.projectId !== input.projectId) {
+    throw new AgentApiError("timeline_not_found", 404, "Timeline not found.", {
+      timelineId: input.timelineId,
+    });
+  }
+
+  const referencedClipIds = new Set(timeline.segments.map((segment) => segment.clipId));
+  const clips = (await store.listAssets(input.projectId))
+    .filter((asset) => referencedClipIds.has(asset.id))
+    .map(assetToClip);
+
+  return {
+    timeline,
+    project: {
+      id: v1Project.id,
+      goal: v1Project.name,
+      plan: null,
+      timeline: {
+        aspectRatio: timeline.aspectRatio,
+        fps: timeline.fps,
+        ...(timeline.showCaptions === undefined ? {} : { showCaptions: timeline.showCaptions }),
+        segments: timeline.segments,
+      },
+      clips,
+      critic: timeline.provenance.criticReport,
+      chat: [],
+      updatedAt: timeline.createdAt,
+    },
+  };
+}
+
+async function latestTimelineForProject(
+  store: V1Store,
+  workspaceId: string,
+  projectId: string
+): Promise<VersionedTimeline | null> {
+  const project = await store.getProject(projectId);
+  if (!project || project.workspaceId !== workspaceId || project.status === "deleted") {
+    throw new ApiError("not_found", `Project not found: ${projectId}`);
+  }
+  const timelines = await store.listTimelinesForProject(projectId);
+  return timelines[0] ?? null;
 }
 
 async function createRevision(
@@ -156,13 +222,19 @@ async function getRevision(
 }
 
 async function createExport(
-  { body, req, requestId }: HandlerCtx,
+  { auth, body, req, requestId }: HandlerCtx,
   params: RouteParams
 ): Promise<ApiResult> {
   try {
     const projectId = param(params, "projectId");
     const timelineId = param(params, "timelineId");
     const options = parseExportOptions(body);
+    const store = getStore();
+    const { project } = await requireV1TimelineProject(store, {
+      workspaceId: auth.workspaceId,
+      projectId,
+      timelineId,
+    });
 
     const { job, created } = await agentApiStore.createOrGetJob({
       type: "export",
@@ -175,7 +247,6 @@ async function createExport(
 
     try {
       await agentApiStore.setStep(job.id, "rendering_export");
-      const project = await loadProject(projectId);
       const { artifact } = runExportJob({ project, timelineId, options });
       await agentApiStore.saveArtifact(artifact);
       const finished = await agentApiStore.succeed(job.id, {
@@ -487,7 +558,21 @@ async function getTimelineCritique(
   return { status: 200, body: { job } };
 }
 
+async function getLatestTimeline(
+  { auth }: HandlerCtx,
+  params: RouteParams
+): Promise<ApiResult> {
+  const projectId = v1Param(params, "projectId");
+  const store = getStore();
+  const timeline = await latestTimelineForProject(store, auth.workspaceId, projectId);
+  return { status: 200, body: { timeline } };
+}
+
 timelinesRouter.post("/projects/:projectId/timelines", mutation(createAssemble));
+timelinesRouter.get(
+  "/projects/:projectId/timelines/latest",
+  route(getLatestTimeline)
+);
 timelinesRouter.get(
   "/projects/:projectId/timelines/assemble/:jobId",
   route(getAssemble)

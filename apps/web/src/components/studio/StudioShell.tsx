@@ -74,6 +74,7 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
   if (flow.state === "review") {
     const stepProps = {
       draft: flow.brief,
+      projectId: flow.projectId,
       update: flow.update,
       next: flow.next,
       back: flow.back,
@@ -130,6 +131,7 @@ function ActiveStep({
 }) {
   const stepProps = {
     draft: flow.brief,
+    projectId: flow.projectId,
     update: flow.update,
     next: flow.next,
     back: flow.back,
