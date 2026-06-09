@@ -27,6 +27,14 @@ const STATUS_MARK: Record<ChecklistStatus, string> = {
   failed: "!",
 };
 
+/** Spoken status, so assistive tech conveys the same lifecycle the color/icon does. */
+const STATUS_LABEL: Record<ChecklistStatus, string> = {
+  pending: "Not started",
+  active: "In progress",
+  done: "Done",
+  failed: "Failed",
+};
+
 /**
  * StatusChecklist — a calm vertical progress list (PR 0).
  *
@@ -39,12 +47,19 @@ export function StatusChecklist({ items, className }: StatusChecklistProps) {
   return (
     <ul className={[styles.list, className].filter(Boolean).join(" ")}>
       {items.map((item) => (
-        <li key={item.id} className={[styles.item, styles[item.status]].join(" ")}>
+        <li
+          key={item.id}
+          className={[styles.item, styles[item.status]].join(" ")}
+          aria-current={item.status === "active" ? "step" : undefined}
+        >
           <span className={styles.marker} aria-hidden="true">
             {STATUS_MARK[item.status]}
           </span>
           <span className={styles.body}>
             <span className={styles.label}>{item.label}</span>
+            {/* Programmatic status — visually hidden, but announced by screen
+                readers since the marker icon/color is aria-hidden. */}
+            <span className={styles.srOnly}>{STATUS_LABEL[item.status]}</span>
             {item.detail ? <span className={styles.detail}>{item.detail}</span> : null}
           </span>
         </li>
