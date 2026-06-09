@@ -1,4 +1,4 @@
-import { structuredCall } from "../anthropic";
+import { getLlmClient } from "../llm";
 import {
   Clip,
   EditPlan,
@@ -189,7 +189,7 @@ directions, bracketed instructions, or provider instructions in revisedPrompt.`;
             )
             .join("\n\n");
 
-    const out = await structuredCall<{
+    const out = await getLlmClient().structured<{
       summary: string;
       issues: GenerationPreflightIssue[];
       revisedPrompt: string;

@@ -21,6 +21,9 @@ export interface StructuredCallArgs {
   user: string;
   schema: Record<string, unknown>;
   maxTokens?: number;
+  // Override the Claude model (defaults to MODEL). Used by the llm/ adapter so
+  // ANTHROPIC_MODEL can select a model without editing this file.
+  model?: string;
 }
 
 export interface StructuredVisionImage {
@@ -51,9 +54,10 @@ export async function structuredCall<T>({
   user,
   schema,
   maxTokens = 8000,
+  model = MODEL,
 }: StructuredCallArgs): Promise<T> {
   const res: any = await client().messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system: [
       {
@@ -84,6 +88,7 @@ export async function structuredVisionCall<T>({
   schema,
   images,
   maxTokens = 4000,
+  model = MODEL,
 }: StructuredVisionCallArgs): Promise<T> {
   const imageBlocks = await Promise.all(
     images.map(async (image) => {
@@ -101,7 +106,7 @@ export async function structuredVisionCall<T>({
   );
 
   const res: any = await client().messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system: [
       {

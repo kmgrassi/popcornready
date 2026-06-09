@@ -1,4 +1,4 @@
-import { structuredCall } from "../anthropic";
+import { getLlmClient } from "../llm";
 import {
   Clip,
   CriticReport,
@@ -124,7 +124,7 @@ ${storyContextForPrompt(input.storyContext)}
 
 Produce the edit plan.`;
 
-  const plan = await structuredCall<EditPlan>({
+  const plan = await getLlmClient().structured<EditPlan>({
     cachedSystem: sys,
     user,
     schema: planSchema,
@@ -175,7 +175,7 @@ ${planText(input.plan)}
 
 Critique and revise this plan before media generation.`;
 
-  const report = await structuredCall<PlanCritiqueReport>({
+  const report = await getLlmClient().structured<PlanCritiqueReport>({
     cachedSystem: sys,
     user,
     schema: planCritiqueSchema,
@@ -226,7 +226,7 @@ ${planText(input.plan)}
 
 Review source coverage and return a revised plan for the timeline selector.`;
 
-  const report = await structuredCall<UploadedFootagePlanReview>({
+  const report = await getLlmClient().structured<UploadedFootagePlanReview>({
     cachedSystem: sys,
     user,
     schema: uploadedFootagePlanReviewSchema,
@@ -262,7 +262,7 @@ ${storyPlanText(input.plan)}
 
 Produce the edit decisions now.`;
 
-  const raw = await structuredCall<{
+  const raw = await getLlmClient().structured<{
     showCaptions?: boolean;
     decisions: {
       beatId: string;
@@ -346,7 +346,7 @@ ${timelineForPrompt(input.timeline, input.clips)}
 
 Score it and propose improvement patches.`;
 
-  const out = await structuredCall<{
+  const out = await getLlmClient().structured<{
     scores: CriticReport["scores"];
     summary: string;
     patches: Patch[];
@@ -385,7 +385,7 @@ User request: "${input.message}"
 
 Produce patches and a summary.`;
 
-  return structuredCall<{ summary: string; patches: Patch[] }>({
+  return getLlmClient().structured<{ summary: string; patches: Patch[] }>({
     cachedSystem: sys,
     user,
     schema: reviseSchema,
@@ -424,7 +424,7 @@ Target length: about ${targetWordCount} words.
 Rewrite the narration to fit, then report the rewritten script, your estimated
 spoken duration in seconds, and a one-line summary of what changed.`;
 
-  return structuredCall<{
+  return getLlmClient().structured<{
     script: string;
     estimatedDurationSec: number;
     summary: string;
