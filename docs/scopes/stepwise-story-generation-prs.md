@@ -59,9 +59,14 @@ These are the seams between workstreams; build against them as stubs.
 
 - **API**
   - `POST /projects/:projectId/generation-runs/:runId/approve` — body `{ note?: string }` (new
-    optional). Side effect: clears the gate, advances `currentStageType`, **and kicks resume**.
+    optional). Side effect: clears the gate, advances `currentStageType`, **persists a non-empty
+    `note` as run `review_feedback`** (forward guidance the *next* stage consumes — symmetric with
+    reject so a note typed on "Approve & continue" is never silently dropped), **and kicks resume**.
   - `POST …/:runId/reject` — body `{ stageType?, note?: string }` (already typed). Side effect:
     resets the gated stage to `queued`, **persists `note` as run `review_feedback`**, **and kicks resume**.
+  - **Feedback is single-channel and symmetric:** both paths write the same `review_feedback`
+    field; the difference is only *which* stage runs next (reject re-runs the gated stage, approve
+    advances). Either path with an empty/absent note leaves `review_feedback` untouched.
   - Both return the full run payload. Resume runs forward until the next gate/terminal state
     (mirror the entrypoint's await-then-202; frontend keeps polling `GET …/:runId`).
 - **Data**: `generation_runs.review_feedback text` (nullable). `GenerationRun.reviewFeedback?: string | null`
@@ -103,12 +108,15 @@ Carry the note into the model.
 - **Files:** new migration `supabase/migrations/<ts>_run_review_feedback.sql`
   (`alter table public.generation_runs add column review_feedback text;` — additive, applies via
   `supabase db push`, no reset), `packages/shared/src/v1/types.ts` (`reviewFeedback`),
-  `generation-runs/store.ts` (column ↔ field mapping), `payload.ts rejectReviewGate` (store note),
+  `generation-runs/store.ts` (column ↔ field mapping), `payload.ts` — store a non-empty note in
+  **both** `rejectReviewGate` **and** `approveReviewGate` (same `review_feedback` field, so a note
+  typed on approve isn't dropped),
   `generation.ts` creative_plan (read `run.reviewFeedback` → pass to `planEdit`, then clear),
   `agent/index.ts planEdit` (accept `feedback`, add a "User feedback on the previous attempt: …"
   line to the prompt).
 - **Done when:** rejecting `creative_plan` with a note produces a visibly different plan that
-  reflects the note; `review_feedback` is cleared after consumption.
+  reflects the note; an approve note biases the next stage the same way; `review_feedback` is
+  cleared after consumption.
 
 ### D — Feedback box UI *(independent frontend)*
 - **Files:** `components/progress/ProgressView.tsx` (add a `<textarea>` to the gate card; change
