@@ -1,11 +1,10 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import {
   AppLayout,
   AuthenticatedAppLayout,
   RootLayout,
 } from "./components/AppLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
-import { useAuth } from "./components/auth/AuthProvider";
 import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { StoryboardPage } from "./routes/StoryboardPage";
@@ -31,7 +30,7 @@ export function App() {
     <Routes>
       <Route element={<RootLayout />}>
         <Route element={<AppLayout />}>
-          <Route index element={<LandingRoute />} />
+          <Route index element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
         </Route>
@@ -100,14 +99,4 @@ function Placeholder({ name }: { name: string }) {
       <p className="muted">{name} is migrating from Next to Vite SPA.</p>
     </main>
   );
-}
-
-function LandingRoute() {
-  const { status } = useAuth();
-
-  if (status === "disabled" || status === "authenticated") {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return <HomePage />;
 }
