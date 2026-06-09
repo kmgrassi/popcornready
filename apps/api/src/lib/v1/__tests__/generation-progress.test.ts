@@ -12,6 +12,7 @@ import {
   runGenerationJob,
 } from "../generation";
 import { createGenerationRunExecution } from "../generation/run-execution";
+import { resumeGenerationRun } from "../generation/resume-run";
 import {
   RunProgressEmitter,
   RunStageHandle,
@@ -21,9 +22,11 @@ import {
 } from "../generation-progress";
 import {
   assemblePayload,
+  approveReviewGate,
   createGenerationRunsStore,
   createPersistedRunProgressEmitter,
   createRunWithSeedStages,
+  rejectReviewGate,
 } from "../generation-runs";
 import { createFileJudgmentStore } from "../../eval/judgment-store";
 import { V1Store, createStore } from "../store";
@@ -511,6 +514,141 @@ test("runGenerationJob honors storyboard review gates", async () => {
         payload!.stages.find((stage) => stage.type === "timeline_assembly")?.status,
         "queued"
       );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approve resume skips succeeded stages and loads persisted outputs", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+    let planCalls = 0;
+
+    const countedDeps: GenerationDeps = {
+      ...fakeDeps,
+      async planEdit(input) {
+        planCalls += 1;
+        return fakeDeps.planEdit(input);
+      },
+    };
+    const noReplanDeps: GenerationDeps = {
+      ...fakeDeps,
+      async planEdit() {
+        throw new Error("creative_plan should be loaded, not recomputed");
+      },
+    };
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-resume-skip-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runExecution = await createGenerationRunExecution({
+        projectId: project.id,
+        briefVersionId: brief.id,
+        body: { briefVersionId: brief.id, reviewGates: ["creative_plan"] },
+        runStore,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      const paused = await runGenerationJob(
+        store,
+        job.id,
+        countedDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      assert.equal(paused.status, "queued");
+      assert.equal(planCalls, 1);
+
+      await approveReviewGate(runStore, runExecution.runId);
+      const resumed = await resumeGenerationRun({
+        runId: runExecution.runId,
+        jobStore: store,
+        runStore,
+        deps: noReplanDeps,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      assert.equal(resumed.status, "succeeded");
+      assert.equal(planCalls, 1);
+      const payload = await assemblePayload(runStore, runExecution.runId);
+      assert.equal(payload?.run.reviewGate, null);
+      assert.equal(
+        payload?.stages.find((stage) => stage.type === "storyboard")?.status,
+        "succeeded"
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("reject resume passes review feedback into regenerated creative plan", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+    let regeneratedFeedback: string | null | undefined;
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-reject-note-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runExecution = await createGenerationRunExecution({
+        projectId: project.id,
+        briefVersionId: brief.id,
+        body: { briefVersionId: brief.id, reviewGates: ["creative_plan"] },
+        runStore,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      await runGenerationJob(
+        store,
+        job.id,
+        fakeDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      await rejectReviewGate(runStore, runExecution.runId, {
+        stageType: "creative_plan",
+        note: "Make the hook about the chef, not the product.",
+      });
+
+      const resumeDeps: GenerationDeps = {
+        ...fakeDeps,
+        async planEdit(input) {
+          regeneratedFeedback = input.feedback;
+          return fakeDeps.planEdit(input);
+        },
+      };
+      const resumed = await resumeGenerationRun({
+        runId: runExecution.runId,
+        jobStore: store,
+        runStore,
+        deps: resumeDeps,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      assert.equal(resumed.status, "queued");
+      assert.equal(regeneratedFeedback, "Make the hook about the chef, not the product.");
+      const payload = await assemblePayload(runStore, runExecution.runId);
+      assert.equal(payload?.run.reviewFeedback, null);
+      assert.equal(payload?.run.reviewGate?.stageType, "creative_plan");
     } finally {
       await fs.rm(runDir, { recursive: true, force: true });
     }

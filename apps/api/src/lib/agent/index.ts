@@ -100,6 +100,7 @@ export async function planEdit(input: {
   style: string;
   aspectRatio: string;
   storyContext?: StoryContext | null;
+  feedback?: string | null;
 }): Promise<EditPlan> {
   const sys = `${PREAMBLE}
 
@@ -119,6 +120,7 @@ collections.`;
 Target length: ${input.targetLengthSec}s
 Style: ${input.style}
 Aspect ratio: ${input.aspectRatio}
+${input.feedback ? `User feedback on the previous attempt: ${input.feedback}\n` : ""}
 Story context:
 ${storyContextForPrompt(input.storyContext)}
 

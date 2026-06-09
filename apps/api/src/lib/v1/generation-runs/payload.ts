@@ -188,7 +188,8 @@ export async function createRunWithSeedStages(args: CreateRunArgs): Promise<Gene
 
 export async function approveReviewGate(
   store: GenerationRunsStore,
-  runId: string
+  runId: string,
+  body: unknown = {}
 ): Promise<GenerationRunPayload> {
   const payload = requireExistingPayload(await assemblePayload(store, runId), runId);
   const { run, stages } = payload;
@@ -200,6 +201,10 @@ export async function approveReviewGate(
   if (!run.reviewGate) {
     return payload;
   }
+  const parsed = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as { note?: unknown })
+    : {};
+  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
 
   const gate = run.reviewGate;
   const stage = stages.find((s) => s.stageId === gate.stageId);
@@ -217,6 +222,7 @@ export async function approveReviewGate(
     message: nextStage
       ? `Approved ${stage.label}; continuing to ${nextStage.label}.`
       : `Approved ${stage.label}.`,
+    ...(note ? { reviewFeedback: note } : {}),
   });
 
   return requireExistingPayload(await assemblePayload(store, runId), runId);
@@ -313,6 +319,7 @@ export async function rejectReviewGate(
     status: "running",
     currentStageType: stage.type,
     reviewGate: null,
+    ...(note ? { reviewFeedback: note } : {}),
     message: note
       ? `Regenerating ${stage.label} after feedback: ${note}`
       : `Regenerating ${stage.label} after review feedback.`,

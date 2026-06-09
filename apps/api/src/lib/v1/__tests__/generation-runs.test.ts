@@ -70,6 +70,7 @@ test("review gate fields are optional and persist when present", async () => {
   const enteredAt = new Date().toISOString();
 
   await store.updateRun(run.runId, {
+    reviewFeedback: "Make the ending warmer.",
     reviewGate: {
       stageType: "creative_plan",
       stageId: stage.stageId,
@@ -83,6 +84,7 @@ test("review gate fields are optional and persist when present", async () => {
   const payload = await assemblePayload(store, run.runId);
   assert.ok(payload);
   assert.deepEqual(payload!.run.reviewGates, ["creative_plan"]);
+  assert.equal(payload!.run.reviewFeedback, "Make the ending warmer.");
   assert.deepEqual(payload!.run.reviewGate, {
     stageType: "creative_plan",
     stageId: stage.stageId,
@@ -91,6 +93,37 @@ test("review gate fields are optional and persist when present", async () => {
   });
   assert.equal(payload!.stages[0].isReviewGate, true);
   assert.equal(payload!.stages[0].reviewedAt, reviewedAt);
+});
+
+test("approveReviewGate persists non-empty feedback notes", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_approve_note",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  await store.updateStage(gateStage.stageId, {
+    status: "succeeded",
+    completedAt: new Date().toISOString(),
+  });
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "creative_plan",
+    reviewGate: {
+      stageType: "creative_plan",
+      stageId: gateStage.stageId,
+      state: "awaiting_review",
+      enteredAt: new Date().toISOString(),
+    },
+  });
+
+  const approved = await approveReviewGate(store, created.run.runId, {
+    note: "Keep the voiceover playful.",
+  });
+
+  assert.equal(approved.run.reviewGate, null);
+  assert.equal(approved.run.reviewFeedback, "Keep the voiceover playful.");
+  assert.equal(approved.run.currentStageType, "storyboard");
 });
 
 test("updateRun applies patch, bumps updatedAt, preserves identity fields", async () => {
