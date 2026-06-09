@@ -1,12 +1,12 @@
 // Maps the engine's GenerationStageType vocabulary onto the calm, human
-// checklist the `generating` state shows. PR 4 enriches this (per-item detail,
-// conditional anchor stage); this is the working baseline.
+// checklist the `generating` state shows.
 //
 // Several stage types collapse onto one human step (storyboard +
 // asset_generation → "Selecting clips"; quality_review + export → "Generating
 // preview"), so the checklist stays short and reassuring.
 
 import type {
+  GenerationRun,
   GenerationRunStatus,
   GenerationStage,
   GenerationStageType,
@@ -18,6 +18,10 @@ interface ChecklistStepDef {
   id: string;
   label: string;
   stageTypes: GenerationStageType[];
+}
+
+export interface StudioChecklistItem extends ChecklistItem {
+  stages: GenerationStage[];
 }
 
 export const CHECKLIST_STEPS: ChecklistStepDef[] = [
@@ -42,43 +46,75 @@ function statusFromStage(status: GenerationRunStatus): ChecklistStatus {
   }
 }
 
+export function describeStatus(status: GenerationRunStatus): string {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "running":
+      return "In progress";
+    case "succeeded":
+      return "Done";
+    case "failed":
+      return "Failed";
+    case "canceled":
+      return "Canceled";
+  }
+}
+
 /**
  * Build checklist items from the run's reported stages. Data-driven: it only
  * reflects stages the run actually reports, so a future conditional stage
- * (e.g. a character anchor) surfaces under "Selecting clips" with no extra UI.
+ * (e.g. a character anchor reported by the engine) surfaces through its stage
+ * label/detail with no character-specific UI.
  * When the run reports no stages yet (just queued), the steps read as pending
  * with the first one active so the screen never looks stalled.
  */
 export function buildChecklistItems(
   stages: GenerationStage[],
   runStatus: GenerationRunStatus,
-): ChecklistItem[] {
-  const byType = new Map<GenerationStageType, GenerationStage>();
-  for (const stage of stages) byType.set(stage.type, stage);
+  run?: GenerationRun,
+): StudioChecklistItem[] {
+  const orderedStages = [...stages].sort((a, b) => a.order - b.order);
 
   let firstUnresolved = true;
-  return CHECKLIST_STEPS.map((stepDef): ChecklistItem => {
-    const backing = stepDef.stageTypes
-      .map((type) => byType.get(type))
-      .filter((stage): stage is GenerationStage => Boolean(stage));
+  return CHECKLIST_STEPS.map((stepDef): StudioChecklistItem => {
+    const backing = orderedStages.filter((stage) =>
+      stepDef.stageTypes.includes(stage.type),
+    );
 
     let status: ChecklistStatus;
-    if (backing.length === 0) {
+    if (stepDef.id === "ready" && runStatus === "succeeded") {
+      status = "done";
+    } else if (backing.length === 0) {
       // No stage reported for this step yet. While the run is still active,
       // mark the earliest unresolved step as active so progress reads forward.
       const runActive = runStatus === "queued" || runStatus === "running";
-      status = runActive && firstUnresolved ? "active" : "pending";
+      if (runStatus === "failed" && firstUnresolved) {
+        status = "failed";
+      } else {
+        status = runActive && firstUnresolved ? "active" : "pending";
+      }
     } else if (backing.some((s) => s.status === "failed")) {
       status = "failed";
     } else if (backing.every((s) => s.status === "succeeded")) {
       status = "done";
-    } else if (backing.some((s) => s.status === "running")) {
+    } else if (
+      backing.some((s) => s.status === "running") ||
+      backing.some((s) => s.type === run?.currentStageType) ||
+      backing.some((s) => s.stageId === run?.reviewGate?.stageId)
+    ) {
       status = "active";
     } else {
       status = statusFromStage(backing[0].status);
     }
 
     if (status !== "done") firstUnresolved = false;
-    return { id: stepDef.id, label: stepDef.label, status };
+    return {
+      id: stepDef.id,
+      label: stepDef.label,
+      status,
+      stages: backing,
+      detail: backing.length > 0 ? undefined : "Waiting for the run to report this stage.",
+    };
   });
 }
