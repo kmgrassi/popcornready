@@ -12,7 +12,8 @@ A high-level map of the Postgres (Supabase) schema for agents: what each table i
 - **Tenancy + RLS:** every app row walks back to an owning **workspace** via
   `workspace_members`; policies key on `current_app_user_id()` (the domain user),
   not `auth.uid()`. Some content is also publicly readable when `visibility='public'`.
-  Eval tables are service-role only. See `docs/supabase-identity-and-rls.md`.
+  Eval suite tables are service-role only; inline `judgments` follow generation-run
+  owner/public-read policies. See `docs/supabase-identity-and-rls.md`.
 
 See also [`repository-structure.md`](repository-structure.md) for where the DB
 layer sits in the codebase.
@@ -115,7 +116,13 @@ assembled timeline, …), so an evaluator can read it as evidence.
 
 ---
 
-## 5. Eval framework (offline + inline; service-role only)
+## 5. Eval framework (offline + inline)
+
+Eval suite metadata/results are service-role only (`eval_suites`, `eval_cases`,
+`eval_runs`, `expectation_results`, and offline suite `judgments`). Inline
+`judgments` set `generation_run_id`, so project owners can read/write them through
+`judgments_owner`, and public generation runs expose them through
+`judgments_public_read`.
 
 **`eval_suites`** — a named collection of eval cases.
 `id, name, description, created_at`
