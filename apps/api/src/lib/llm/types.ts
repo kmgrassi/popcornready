@@ -4,11 +4,11 @@
 
 export type LlmProvider = "openai" | "anthropic";
 
-// How hard the model should "think". Maps to OpenAI reasoning_effort and to
-// Anthropic output_config.effort. "minimal" ≈ non-reasoning (fast/cheap) — use
-// it for straightforward generation/extraction (e.g. cleaning a prompt); use
-// "high" only where the task needs real planning/judgement. Unset → the
-// provider default (treated as "medium").
+// How hard the model should "think". Maps to OpenAI reasoning_effort.
+// Anthropic currently uses provider defaults for tool-calling turns. "minimal"
+// routes to the fast model for straightforward generation/extraction (e.g.
+// cleaning a prompt); use "high" only where the task needs real planning/
+// judgement. Unset -> the provider default (treated as "medium").
 export type LlmEffort = "minimal" | "low" | "medium" | "high";
 
 export type JsonSchema = Record<string, unknown>;
@@ -64,19 +64,9 @@ export interface ChooseToolArgs {
 export interface LlmClient {
   readonly provider: LlmProvider;
   readonly model: string;
-  // JSON-schema-constrained structured output (planEdit/critique/revise/…).
+  // Structured result via a required tool call (planEdit/critique/revise/...).
   structured<T>(args: StructuredArgs): Promise<T>;
   structuredVision<T>(args: StructuredVisionArgs): Promise<T>;
   // One tool-calling turn: pick the next tool, or finish with text.
   chooseTool(args: ChooseToolArgs): Promise<ToolChoiceResult>;
-}
-
-export function parseStructuredText<T>(text: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(
-      "Model did not return valid JSON. Raw output: " + text.slice(0, 500)
-    );
-  }
 }

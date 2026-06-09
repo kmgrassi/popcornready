@@ -1,9 +1,4 @@
-import {
-  client as anthropicClient,
-  MODEL,
-  structuredCall,
-  structuredVisionCall,
-} from "../anthropic";
+import { client as anthropicClient, MODEL } from "../anthropic";
 import {
   ChooseToolArgs,
   LlmClient,
@@ -13,15 +8,6 @@ import {
   ToolChoiceResult,
   ToolSpec,
 } from "./types";
-
-// Anthropic output_config.effort is low|medium|high|max — there is no
-// "minimal", so map it to "low".
-function toAnthropicEffort(
-  effort?: LlmEffort
-): "low" | "medium" | "high" | undefined {
-  if (!effort) return undefined;
-  return effort === "minimal" ? "low" : effort;
-}
 
 type MessageCreate = (params: Record<string, unknown>) => Promise<any>;
 
@@ -42,6 +28,23 @@ export function toAnthropicTool(spec: ToolSpec): Record<string, unknown> {
     description: spec.description,
     input_schema: spec.parameters,
   };
+}
+
+const STRUCTURED_RESULT_TOOL = "return_result";
+
+function resultFromAnthropicToolUse<T>(res: any): T {
+  const content = Array.isArray(res?.content) ? res.content : [];
+  const toolUse = content.find(
+    (block: any) => block?.type === "tool_use" && block?.name === STRUCTURED_RESULT_TOOL
+  );
+  if (!toolUse) {
+    throw new Error(`Model did not call required tool: ${STRUCTURED_RESULT_TOOL}`);
+  }
+  const input = toolUse.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`Model returned invalid tool input for ${STRUCTURED_RESULT_TOOL}.`);
+  }
+  return input as T;
 }
 
 // Pure response parsing — unit-tested without a network call.
@@ -90,23 +93,59 @@ export function createAnthropicLlmClient(deps: AnthropicDeps = {}): LlmClient {
       anthropicClient().messages.create(params as any)) as MessageCreate;
     return createMessage;
   };
+  const structuredImpl = async <T>(
+    args: StructuredArgs,
+    userContent: unknown
+  ): Promise<T> => {
+    const callModel = pickModel(args.effort);
+    const res = await ensureCreate()({
+      model: callModel,
+      max_tokens: args.maxTokens ?? 8000,
+      system: [
+        {
+          type: "text",
+          text: args.cachedSystem,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      tools: [
+        {
+          name: STRUCTURED_RESULT_TOOL,
+          description: "Return the structured result for this task.",
+          input_schema: args.schema,
+        },
+      ],
+      tool_choice: { type: "tool", name: STRUCTURED_RESULT_TOOL },
+      messages: [{ role: "user", content: userContent }],
+    });
+    return resultFromAnthropicToolUse<T>(res);
+  };
 
   return {
     provider: "anthropic",
     model,
     structured<T>(args: StructuredArgs) {
-      return structuredCall<T>({
-        ...args,
-        model: pickModel(args.effort),
-        effort: toAnthropicEffort(args.effort),
-      });
+      return structuredImpl<T>(args, args.user);
     },
-    structuredVision<T>(args: StructuredVisionArgs) {
-      return structuredVisionCall<T>({
-        ...args,
-        model: pickModel(args.effort),
-        effort: toAnthropicEffort(args.effort),
-      });
+    async structuredVision<T>(args: StructuredVisionArgs) {
+      const { promises: fs } = await import("fs");
+      const imageBlocks = await Promise.all(
+        args.images.map(async (image) => {
+          const bytes = await fs.readFile(image.path);
+          return {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: image.mediaType,
+              data: bytes.toString("base64"),
+            },
+          };
+        })
+      );
+      return structuredImpl<T>(args, [
+        { type: "text", text: args.user },
+        ...imageBlocks,
+      ]);
     },
     async chooseTool(args: ChooseToolArgs) {
       const allowed = new Set(args.tools.map((tool) => tool.name));

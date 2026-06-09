@@ -90,6 +90,33 @@ test("low/minimal effort routes chooseTool to the fast model", async () => {
   assert.deepEqual(seen, ["claude-haiku", "claude-x"]);
 });
 
+test("structured routes to the fast model and delegates required tool-call helper", async () => {
+  const seen: string[] = [];
+  const client = createAnthropicLlmClient({
+    model: "claude-x",
+    fastModel: "claude-haiku",
+    createMessage: async (params: any) => {
+      seen.push(params.model);
+      return {
+        content: [
+          { type: "tool_use", name: "return_result", input: { ok: true } },
+        ],
+      };
+    },
+  });
+
+  assert.deepEqual(
+    await client.structured({
+      cachedSystem: "s",
+      user: "u",
+      schema: { type: "object", properties: { ok: { type: "boolean" } } },
+      effort: "minimal",
+    }),
+    { ok: true }
+  );
+  assert.deepEqual(seen, ["claude-haiku"]);
+});
+
 test("chooseTool sends input_schema tools + tool_choice auto and maps the result", async () => {
   let sent: any;
   const client = createAnthropicLlmClient({

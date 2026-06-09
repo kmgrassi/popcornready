@@ -32,20 +32,26 @@ export interface StructuredVisionCallArgs extends StructuredCallArgs {
   images: StructuredVisionImage[];
 }
 
-function parseStructuredText<T>(text: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(
-      "Model did not return valid JSON. Raw output: " + text.slice(0, 500)
-    );
+const STRUCTURED_RESULT_TOOL = "return_result";
+
+function resultFromToolUse<T>(res: any): T {
+  const content = Array.isArray(res?.content) ? res.content : [];
+  const toolUse = content.find(
+    (block: any) => block?.type === "tool_use" && block?.name === STRUCTURED_RESULT_TOOL
+  );
+  if (!toolUse) {
+    throw new Error(`Model did not call required tool: ${STRUCTURED_RESULT_TOOL}`);
   }
+  const input = toolUse.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`Model returned invalid tool input for ${STRUCTURED_RESULT_TOOL}.`);
+  }
+  return input as T;
 }
 
-// One structured JSON vision call. Uses output_config.format to constrain the
-// response to the given JSON schema, so we can JSON.parse the text block safely.
-// Cast to any keeps this resilient to SDK type-version drift while the runtime
-// fully supports output_config on Opus 4.7.
+// One structured vision call. The model must call `return_result`; its input is
+// the typed output object. Cast to any keeps this resilient to SDK type-version
+// drift.
 export async function structuredVisionCall<T>({
   cachedSystem,
   user,
@@ -78,10 +84,14 @@ export async function structuredVisionCall<T>({
         cache_control: { type: "ephemeral" },
       },
     ],
-    output_config: {
-      effort: "high",
-      format: { type: "json_schema", schema },
-    },
+    tools: [
+      {
+        name: STRUCTURED_RESULT_TOOL,
+        description: "Return the structured result for this task.",
+        input_schema: schema,
+      },
+    ],
+    tool_choice: { type: "tool", name: STRUCTURED_RESULT_TOOL },
     messages: [
       {
         role: "user",
@@ -90,11 +100,5 @@ export async function structuredVisionCall<T>({
     ],
   } as any);
 
-  const text: string =
-    (res.content || [])
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text)
-      .join("") || "";
-
-  return parseStructuredText<T>(text);
+  return resultFromToolUse<T>(res);
 }

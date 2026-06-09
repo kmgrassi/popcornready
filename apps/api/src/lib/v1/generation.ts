@@ -626,7 +626,13 @@ export async function runGenerationJob(
     const rawMessage = err instanceof Error ? err.message : "Generation failed.";
     let code: ErrorCode = "internal_error";
     if (err instanceof ApiError) code = err.code;
-    else if (rawMessage.includes("did not return valid JSON")) code = "model_output_invalid";
+    else if (
+      rawMessage.includes("did not return valid JSON") ||
+      rawMessage.includes("did not call required tool") ||
+      rawMessage.includes("invalid tool")
+    ) {
+      code = "model_output_invalid";
+    }
     // Redact before persisting so any provider response leaking into the error
     // message (Authorization headers, raw upstream JSON bodies) never lands in
     // the job record or the API response.
