@@ -30,11 +30,18 @@ import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
   type CompositionPlan as ContractCompositionPlan,
+  type GenerationRun,
+  type GenerationRunStatus,
   type Job,
   type JobStatus,
   type JobType,
   SCHEMA as CONTRACT_SCHEMA,
 } from "@popcorn/shared/v1/types";
+import {
+  getGenerationRunStore,
+  type GenerationRunsStore,
+} from "../../v1/generation-runs/store";
+import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
 import {
   AgentAssetSource,
   AgentAssetContext,
@@ -941,6 +948,163 @@ export async function listWorkspaceAssets(
     };
   });
   return paginate(all, limit, cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-scoped cross-project lists (dashboard nav: Projects/Runs, Outputs)
+// ---------------------------------------------------------------------------
+// These aggregate per-project records across every active project in a
+// workspace, mirroring listWorkspaceAssets' tenancy model: the workspace's
+// projects are the RLS-scoped set, and each list joins the owning project's
+// name onto every row so the dashboard can render "<project> — <run/output>"
+// without a second lookup. The project enumeration is injectable so the
+// aggregation can be unit-tested without Supabase (the route always uses the
+// real, RLS-scoped listProjects).
+
+interface WorkspaceProjectRef {
+  id: string;
+  name: string;
+}
+
+// Enumerate the workspace's active projects as {id, name} refs. Pulls the full
+// set (the per-project run/output reads dominate the cost, and pagination is
+// applied to the flattened result, not the project list).
+async function listWorkspaceProjectRefs(
+  workspaceId: string
+): Promise<WorkspaceProjectRef[]> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("id, name")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted");
+  throwOnError(error, "listWorkspaceProjectRefs");
+  return ((data as { id: string; name: string }[]) ?? []).map((row) => ({
+    id: row.id,
+    name: row.name ?? "Untitled project",
+  }));
+}
+
+// A generation run plus its owning project's name, for the cross-project
+// Projects/Runs view. The wire shape is `GenerationRun & { projectName }`,
+// matching the web client's WorkspaceGenerationRun.
+export interface WorkspaceGenerationRunSummary extends GenerationRun {
+  projectName: string;
+}
+
+export interface ListWorkspaceGenerationRunsDeps {
+  listProjects: (workspaceId: string) => Promise<WorkspaceProjectRef[]>;
+  runStore: GenerationRunsStore;
+}
+
+export async function listWorkspaceGenerationRuns(
+  workspaceId: string,
+  opts: { status?: GenerationRunStatus; projectId?: string },
+  limit: number,
+  cursor: string | null,
+  deps: ListWorkspaceGenerationRunsDeps = {
+    listProjects: listWorkspaceProjectRefs,
+    runStore: getGenerationRunStore(),
+  }
+): Promise<PageResult<WorkspaceGenerationRunSummary>> {
+  const projects = await deps.listProjects(workspaceId);
+  const scoped = opts.projectId
+    ? projects.filter((p) => p.id === opts.projectId)
+    : projects;
+
+  const perProject = await Promise.all(
+    scoped.map(async (project) => {
+      const runs = await deps.runStore.listRunsForProject(project.id);
+      return runs.map((run) => ({ ...run, projectName: project.name }));
+    })
+  );
+
+  let all = perProject.flat();
+  if (opts.status) {
+    all = all.filter((run) => run.status === opts.status);
+  }
+  // paginate() keys on { id, createdAt }; runs expose runId, so adapt the cursor
+  // shape to the run's id without leaking an extra field into the wire output.
+  const paged = paginate(
+    all.map((run) => ({ ...run, id: run.runId })),
+    limit,
+    cursor
+  );
+  return {
+    items: paged.items.map(({ id: _id, ...run }) => {
+      void _id;
+      return run;
+    }),
+    nextCursor: paged.nextCursor,
+  };
+}
+
+// A rendered/export artifact plus its owning project's name, for the Outputs
+// view (where Created Videos relocate). Maps the agent-api export Artifact onto
+// the web client's WorkspaceOutput shape.
+export interface WorkspaceOutputSummary {
+  artifactId: string;
+  projectId: string;
+  projectName: string;
+  timelineId?: string;
+  url?: string;
+  durationSec?: number;
+  format?: string;
+  createdAt: string;
+}
+
+export interface ListWorkspaceOutputsDeps {
+  listProjects: (workspaceId: string) => Promise<WorkspaceProjectRef[]>;
+  artifactStore: Pick<AgentApiStore, "listArtifactsForProject">;
+}
+
+export async function listWorkspaceOutputs(
+  workspaceId: string,
+  opts: { projectId?: string },
+  limit: number,
+  cursor: string | null,
+  deps: ListWorkspaceOutputsDeps = {
+    listProjects: listWorkspaceProjectRefs,
+    artifactStore: agentApiStore,
+  }
+): Promise<PageResult<WorkspaceOutputSummary>> {
+  const projects = await deps.listProjects(workspaceId);
+  const scoped = opts.projectId
+    ? projects.filter((p) => p.id === opts.projectId)
+    : projects;
+
+  const perProject = await Promise.all(
+    scoped.map(async (project) => {
+      const artifacts = await deps.artifactStore.listArtifactsForProject(
+        project.id
+      );
+      return artifacts.map<WorkspaceOutputSummary>((artifact) => ({
+        artifactId: artifact.id,
+        projectId: project.id,
+        projectName: project.name,
+        timelineId: artifact.timelineId,
+        url: artifact.url ?? undefined,
+        durationSec: artifact.durationSec,
+        format: artifact.renderPlan?.format,
+        createdAt: artifact.createdAt,
+      }));
+    })
+  );
+
+  const all = perProject.flat();
+  // paginate() keys on { id, createdAt }; outputs expose artifactId.
+  const paged = paginate(
+    all.map((output) => ({ ...output, id: output.artifactId })),
+    limit,
+    cursor
+  );
+  return {
+    items: paged.items.map(({ id: _id, ...output }) => {
+      void _id;
+      return output;
+    }),
+    nextCursor: paged.nextCursor,
+  };
 }
 
 export async function listPublicAssets(

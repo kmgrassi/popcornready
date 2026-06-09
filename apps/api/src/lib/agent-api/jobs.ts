@@ -129,6 +129,15 @@ export class AgentApiStore {
     const state = await this.read();
     return state.artifacts.find((a) => a.id === id) ?? null;
   }
+
+  // Every export artifact produced for a project, newest-first. Backs the
+  // workspace-scoped Outputs aggregation (cross-project list for the dashboard).
+  async listArtifactsForProject(projectId: string): Promise<Artifact[]> {
+    const state = await this.read();
+    return state.artifacts
+      .filter((a) => a.projectId === projectId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
 }
 
 // Default store used by the route handlers. Tests construct their own store
