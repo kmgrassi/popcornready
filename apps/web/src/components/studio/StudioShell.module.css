@@ -1,0 +1,45 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 24px);
+  padding: var(--space-5, 24px);
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.cta {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+}
+
+.generating {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  max-width: 560px;
+}
+
+.generatingHeading {
+  margin: 0;
+  font-size: var(--title-lg, 1.5rem);
+  color: var(--text);
+}
+
+.review {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-5, 24px);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .review {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

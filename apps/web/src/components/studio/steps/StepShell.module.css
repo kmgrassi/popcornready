@@ -1,0 +1,47 @@
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  max-width: 720px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--title-lg, 1.5rem);
+  color: var(--text);
+}
+
+.description {
+  margin: 0;
+  color: var(--muted);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-3, 12px);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: var(--text-sm, 0.875rem);
+  background: var(--panel-2, var(--panel));
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  margin-top: var(--space-2, 8px);
+}
