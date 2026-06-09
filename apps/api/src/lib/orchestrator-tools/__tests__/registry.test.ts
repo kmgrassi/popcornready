@@ -4,7 +4,11 @@ import test from "node:test";
 import type { AuthContext } from "@/lib/api/v1/auth";
 import type { EditPlan } from "@popcorn/shared/types";
 import { createDefaultToolRegistry } from "../default-registry";
-import { createPlanShotsTool, type PlanShotsOutput } from "../plan-shots";
+import {
+  createPlanShotsTool,
+  persistedEditPlanSchema,
+  type PlanShotsOutput,
+} from "../plan-shots";
 import { ToolRegistry } from "../registry";
 import type { ToolCallResult } from "../types";
 
@@ -55,6 +59,20 @@ test("default registry exposes plan_shots metadata", () => {
   assert.equal(definition.execution, "sync");
   assert.equal(definition.inputSchema.type, "object");
   assert.equal(definition.outputSchema.type, "object");
+});
+
+test("plan_shots output schema describes the post-processed plan ids", () => {
+  const scenes = persistedEditPlanSchema.properties.scenes as {
+    items: { properties: Record<string, unknown>; required: string[] };
+  };
+  const beats = scenes.items.properties.beats as {
+    items: { properties: Record<string, unknown>; required: string[] };
+  };
+
+  assert.ok(scenes.items.properties.id);
+  assert.ok(scenes.items.required.includes("id"));
+  assert.ok(beats.items.properties.id);
+  assert.ok(beats.items.required.includes("id"));
 });
 
 test("plan_shots validates input before calling the agent", async () => {

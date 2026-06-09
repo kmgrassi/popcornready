@@ -1,5 +1,4 @@
 import { planEdit as realPlanEdit } from "@/lib/agent";
-import { planSchema } from "@/lib/agent/schemas";
 import type { EditPlan, StoryContext } from "@popcorn/shared/types";
 import type { ToolDefinition } from "./types";
 import { ToolInputError } from "./types";
@@ -25,6 +24,50 @@ const defaultDeps: PlanShotsDeps = {
 };
 
 const ASPECT_RATIOS = new Set(["9:16", "16:9", "1:1"]);
+const num = { type: "number" } as const;
+const str = { type: "string" } as const;
+
+const persistedBeatSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: str,
+    name: str,
+    durationSec: num,
+    intent: str,
+  },
+  required: ["id", "name", "durationSec", "intent"],
+};
+
+const persistedSceneSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: str,
+    name: str,
+    setting: str,
+    mood: str,
+    characterIds: { type: "array", items: str },
+    anchorAssetId: str,
+    beats: { type: "array", items: persistedBeatSchema },
+  },
+  required: ["id", "name", "beats"],
+};
+
+export const persistedEditPlanSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    targetLengthSec: num,
+    style: str,
+    aspectRatio: { type: "string", enum: ["9:16", "16:9", "1:1"] },
+    scenes: {
+      type: "array",
+      items: persistedSceneSchema,
+    },
+  },
+  required: ["targetLengthSec", "style", "aspectRatio", "scenes"],
+};
 
 export const planShotsInputSchema = {
   type: "object",
@@ -43,7 +86,7 @@ export const planShotsOutputSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    plan: planSchema,
+    plan: persistedEditPlanSchema,
   },
   required: ["plan"],
 };
