@@ -46,6 +46,28 @@ test("parseBrief accepts a minimal valid brief", () => {
   assert.equal(brief.aspectRatio, "9:16");
 });
 
+test("parseBrief preserves advanced story direction fields", () => {
+  const brief = parseBrief({
+    goal: "Punchy teaser",
+    targetLengthSec: 15,
+    aspectRatio: "9:16",
+    hookQuestion: "Why does this feel hard?",
+    strongestVisual: "A before and after demo.",
+    oneBigIdea: "The workflow is one guided loop.",
+    caveat: "Do not imply raw video editing.",
+    payoff: "The viewer understands how the agent builds a rough cut.",
+  });
+
+  assert.equal(brief.hookQuestion, "Why does this feel hard?");
+  assert.equal(brief.strongestVisual, "A before and after demo.");
+  assert.equal(brief.oneBigIdea, "The workflow is one guided loop.");
+  assert.equal(brief.caveat, "Do not imply raw video editing.");
+  assert.equal(
+    brief.payoff,
+    "The viewer understands how the agent builds a rough cut."
+  );
+});
+
 test("parseBrief reports all invalid fields with paths", () => {
   const err = expectApiError(
     () => parseBrief({ goal: "", targetLengthSec: 9000, aspectRatio: "4:3" }),
@@ -67,11 +89,27 @@ test("parseBrief rejects non-string optional text fields", () => {
         aspectRatio: "1:1",
         audience: 42,
         style: { not: "a string" },
+        hookQuestion: false,
+        strongestVisual: 12,
+        oneBigIdea: ["idea"],
+        caveat: { text: "no" },
+        payoff: 99,
       }),
     "validation_failed"
   );
   const paths = (err.details?.fields || []).map((f) => f.path).sort();
-  assert.deepEqual(paths, ["brief.audience", "brief.style"].sort());
+  assert.deepEqual(
+    paths,
+    [
+      "brief.audience",
+      "brief.style",
+      "brief.hookQuestion",
+      "brief.strongestVisual",
+      "brief.oneBigIdea",
+      "brief.caveat",
+      "brief.payoff",
+    ].sort()
+  );
 });
 
 test("parseBrief validates nested narration mode", () => {

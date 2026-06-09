@@ -52,6 +52,11 @@ export interface VideoBriefInput {
   audience?: string;
   style?: string;
   format?: StoryContext["format"];
+  hookQuestion?: string;
+  strongestVisual?: string;
+  oneBigIdea?: string;
+  caveat?: string;
+  payoff?: string;
   narration?: {
     mode: "none" | "generate" | "provided_text" | "provided_asset";
     script?: string;

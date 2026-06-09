@@ -86,6 +86,11 @@ export interface VideoBrief {
   audience?: string;
   style?: string;
   format?: VideoFormat;
+  hookQuestion?: string;
+  strongestVisual?: string;
+  oneBigIdea?: string;
+  caveat?: string;
+  payoff?: string;
   narration?: NarrationInput;
   constraints?: BriefConstraints;
 }
@@ -671,6 +676,23 @@ export function parseBrief(input: unknown, pathPrefix = "brief"): VideoBrief {
   // as validation_failed rather than being silently coerced to undefined.
   const audience = optionalString(input.audience, `${pathPrefix}.audience`, fields);
   const style = optionalString(input.style, `${pathPrefix}.style`, fields);
+  const hookQuestion = optionalString(
+    input.hookQuestion,
+    `${pathPrefix}.hookQuestion`,
+    fields
+  );
+  const strongestVisual = optionalString(
+    input.strongestVisual,
+    `${pathPrefix}.strongestVisual`,
+    fields
+  );
+  const oneBigIdea = optionalString(
+    input.oneBigIdea,
+    `${pathPrefix}.oneBigIdea`,
+    fields
+  );
+  const caveat = optionalString(input.caveat, `${pathPrefix}.caveat`, fields);
+  const payoff = optionalString(input.payoff, `${pathPrefix}.payoff`, fields);
 
   throwIfInvalid(fields);
 
@@ -682,6 +704,11 @@ export function parseBrief(input: unknown, pathPrefix = "brief"): VideoBrief {
     style,
     platform,
     format,
+    hookQuestion,
+    strongestVisual,
+    oneBigIdea,
+    caveat,
+    payoff,
     narration,
     constraints,
   };
