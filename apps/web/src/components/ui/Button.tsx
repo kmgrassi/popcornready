@@ -2,8 +2,10 @@ import type { ButtonHTMLAttributes } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 import styles from "./Button.module.css";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
-export type ButtonSize = "sm" | "md";
+// `cta` is the single prominent popcorn-yellow call-to-action (PR 0). Use it
+// for the one dominant action on a screen; `primary` remains the accent fill.
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "cta";
+export type ButtonSize = "sm" | "md" | "lg";
 
 interface ButtonStyleProps {
   variant?: ButtonVariant;

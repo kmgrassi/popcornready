@@ -1,0 +1,100 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--section-gap);
+}
+
+.marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.detail {
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
+/* Pending — quiet, not yet started */
+.pending .label {
+  color: var(--muted);
+}
+
+/* Active — current step, accent ring + pulse */
+.active .marker {
+  border-color: var(--cta);
+  background: var(--cta);
+  color: var(--cta-contrast);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.active .label {
+  color: var(--text-strong);
+}
+
+/* Done — green check */
+.done .marker {
+  border-color: var(--good);
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+}
+
+/* Failed — danger */
+.failed .marker {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.failed .label {
+  color: var(--danger-text);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--ring-color);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--ring-color);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active .marker {
+    animation: none;
+  }
+}

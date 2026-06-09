@@ -42,6 +42,14 @@
   font-size: var(--text-sm);
 }
 
+/* lg — for the dominant CTA on a screen (PR 0). */
+.lg {
+  min-height: 48px;
+  padding: 0 var(--space-6);
+  font-size: var(--text-lg);
+  border-radius: var(--radius-md);
+}
+
 /* Primary — gold/accent fill, dark text */
 .primary {
   background: var(--accent);
@@ -70,6 +78,25 @@
   border-color: var(--accent-border);
   color: var(--text-strong);
   transform: translateY(-1px);
+}
+
+/* CTA — the single prominent popcorn-yellow action (PR 0). */
+.cta {
+  background: var(--cta);
+  color: var(--cta-contrast);
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.cta:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.cta:active:not(:disabled) {
+  filter: brightness(0.97);
+  transform: translateY(0);
 }
 
 /* Ghost — transparent until hover */

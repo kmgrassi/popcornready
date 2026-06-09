@@ -46,6 +46,17 @@
   --title-sm: 18px;
   --title-md: 22px;
   --title-lg: 28px;
+  /* Page-title / step-heading scale for the guided studio (PR 0). Larger than
+   * --title-lg so the active step / empty-state headline dominates the view. */
+  --title-xl: 36px;
+
+  /* Section-spacing convention (PR 0): an 8/12/16 rhythm for stacking sections,
+   * cards, and form rows. Use these semantic aliases instead of raw --space-*
+   * so layout spacing reads as intent, not magnitude. They map onto the 4px
+   * scale: tight=8, default=12, loose=16. */
+  --section-gap-tight: var(--space-2); /* 8px  — within a group */
+  --section-gap: var(--space-3); /* 12px — between rows / controls */
+  --section-gap-loose: var(--space-4); /* 16px — between sections / cards */
 
   /* Layout */
   --content-max: 1120px;
@@ -68,6 +79,14 @@
   --danger-text: #ffb1a0;
   --danger-soft: rgba(255, 106, 61, 0.1);
   --danger-border: rgba(255, 106, 61, 0.42);
+
+  /* Primary CTA (PR 0): the single popcorn-yellow call-to-action color and the
+   * text color that sits on top of it. There is one CTA per screen — the
+   * Button `cta` variant and any hero action consume these, never a raw hex.
+   * Per-theme values are defined alongside the palette in globals.css; these
+   * are the dark-default fallback. */
+  --cta: #ffc23d;
+  --cta-contrast: #1a0d07;
 }
 
 /* Per-theme danger tuning. Only the new tokens are declared here — the base

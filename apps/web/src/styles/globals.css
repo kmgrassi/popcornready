@@ -2,13 +2,18 @@
   --bg: #0d0f12;
   --panel: #15181d;
   --panel-2: #1c2026;
-  --border: #2a2f37;
-  --text: #e7e9ec;
-  --muted: #9aa3ad;
+  /* Softer border — pulled toward --panel-2 so panels read as raised surfaces,
+   * not hard-outlined boxes (PR 0). */
+  --border: #232830;
+  --text: #f1f3f6;
+  --muted: #a8b0ba;
   --accent: #ff6a3d;
   --accent-2: #4da3ff;
   --good: #4ad295;
   --button-text: #1a0d07;
+  /* Primary CTA — popcorn-yellow + the text color on top of it (PR 0). */
+  --cta: #ffc23d;
+  --cta-contrast: #1a0d07;
   --nav-bg: rgba(13, 15, 18, 0.82);
   --accent-soft: rgba(255, 106, 61, 0.1);
   --accent-border: rgba(255, 106, 61, 0.3);
@@ -20,13 +25,17 @@
   --bg: #f7f5ef;
   --panel: #ffffff;
   --panel-2: #f2eee4;
-  --border: #d7d0c0;
-  --text: #211b14;
-  --muted: #6a6257;
+  /* Softer border pulled toward --panel-2 to kill the brown-on-cream outlines. */
+  --border: #e3ddcf;
+  /* Lift contrast: near-black ink for body, deeper warm gray for muted. */
+  --text: #1a140d;
+  --muted: #5a5247;
   --accent: #dca51b;
   --accent-2: #be4b25;
   --good: #1c9b62;
   --button-text: #251600;
+  --cta: #f5b81e;
+  --cta-contrast: #2a1a00;
   --nav-bg: rgba(247, 245, 239, 0.92);
   --accent-soft: rgba(220, 165, 27, 0.14);
   --accent-border: rgba(190, 75, 37, 0.18);
@@ -38,13 +47,17 @@
   --bg: #fbf0c7;
   --panel: #fff9e5;
   --panel-2: #f4dfa8;
-  --border: #d4a946;
-  --text: #24170a;
-  --muted: #6e5931;
+  /* Softer border toward --panel-2 — was a harsh amber line. */
+  --border: #ebcf84;
+  /* Lift contrast against the warm cream surfaces. */
+  --text: #1e1206;
+  --muted: #5e4a25;
   --accent: #e0a91f;
   --accent-2: #c94c22;
   --good: #1c9b62;
   --button-text: #251600;
+  --cta: #f2ad12;
+  --cta-contrast: #2a1900;
   --nav-bg: rgba(251, 240, 199, 0.9);
   --accent-soft: rgba(224, 169, 31, 0.17);
   --accent-border: rgba(201, 76, 34, 0.22);
@@ -56,13 +69,17 @@
   --bg: #12110e;
   --panel: #1c1912;
   --panel-2: #272115;
-  --border: #403621;
-  --text: #f4efe4;
-  --muted: #b3a994;
+  /* Softer border pulled toward --panel-2 so dark panels don't read as boxed. */
+  --border: #322a1a;
+  /* Lift contrast off the dark-brown surfaces. */
+  --text: #f8f3e8;
+  --muted: #c2b9a4;
   --accent: #e3ad2b;
   --accent-2: #ff784e;
   --good: #61d19a;
   --button-text: #241600;
+  --cta: #f0b733;
+  --cta-contrast: #241600;
   --nav-bg: rgba(18, 17, 14, 0.86);
   --accent-soft: rgba(227, 173, 43, 0.13);
   --accent-border: rgba(227, 173, 43, 0.28);
