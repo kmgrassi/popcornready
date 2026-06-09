@@ -14,6 +14,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import { canAccessAdminSurface } from "./auth/AdminRoute";
 import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
 import ThemeToggle from "./ThemeToggle";
@@ -23,10 +24,14 @@ import styles from "./AppLayout.module.css";
 
 const STORAGE_KEY = "popcorn-ready-theme";
 const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
-const DASHBOARD_NAV = [
+
+// Primary workspace nav. Ordered around the creation flow: Home → Studio
+// (create) → Projects/Assets/Outputs (the library). Runs are reachable from
+// inside Projects, so they no longer take a top-level slot.
+const PRIMARY_NAV = [
   { label: "Home", to: "/dashboard" },
+  { label: "Studio", to: "/studio" },
   { label: "Projects", to: "/projects" },
-  { label: "Runs", to: "/runs" },
   { label: "Assets", to: "/assets" },
   { label: "Outputs", to: "/outputs" },
 ];
@@ -35,7 +40,6 @@ const TOPNAV = [
   { label: "Studio", to: "/studio" },
   { label: "Storyboard", to: "/storyboard" },
   { label: "Evals", to: "/evals" },
-  { label: "Admin", to: "/admin" },
 ];
 
 function applyStoredTheme() {
@@ -136,6 +140,12 @@ export function AuthenticatedAppLayout() {
       ? "Local mode"
       : me?.authMode ?? "Hosted mode";
   const canSignOut = auth.configured && auth.status === "authenticated";
+  const showAdmin = canAccessAdminSurface(auth);
+  // Admins get the workbench; everyone else lands on workspace Settings. Both
+  // are the "Settings/Admin" footer slot in the simplified sidebar.
+  const settingsNav = showAdmin
+    ? { label: "Admin", to: "/admin" }
+    : { label: "Settings", to: "/settings" };
 
   async function signOut() {
     if (!canSignOut) return;
@@ -172,23 +182,12 @@ export function AuthenticatedAppLayout() {
           <span>Popcorn Ready</span>
         </Link>
 
-        <div className={styles.workspace}>
-          <label className={styles.workspaceLabel} htmlFor="workspace-select">
-            Workspace
-          </label>
-          <select
-            id="workspace-select"
-            className={styles.workspaceSelect}
-            value={workspaceLabel}
-            disabled
-            aria-label="Active workspace"
-          >
-            <option value={workspaceLabel}>{workspaceLabel}</option>
-          </select>
-        </div>
+        <ButtonLink className={styles.newVideo} variant="primary" to="/studio">
+          New video
+        </ButtonLink>
 
         <nav className={styles.nav} aria-label="Dashboard">
-          {DASHBOARD_NAV.map((item) => (
+          {PRIMARY_NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -203,10 +202,26 @@ export function AuthenticatedAppLayout() {
         </nav>
 
         <div className={styles.sidebarFooter}>
-          <ButtonLink className={styles.newVideo} variant="secondary" to="/studio">
-            New video
-          </ButtonLink>
-          <ThemeToggle />
+          <nav className={styles.footerNav} aria-label="Settings">
+            <NavLink
+              to={settingsNav.to}
+              className={({ isActive }) =>
+                isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
+              }
+            >
+              {settingsNav.label}
+            </NavLink>
+          </nav>
+
+          {/* Quieter workspace indicator — a single read-only pill, no longer a
+              prominent labelled <select> competing with the nav. */}
+          <div
+            className={styles.workspace}
+            title={`Active workspace: ${workspaceLabel}`}
+          >
+            <span className={styles.workspaceDot} aria-hidden="true" />
+            <span className={styles.workspaceName}>{workspaceLabel}</span>
+          </div>
         </div>
       </aside>
 
@@ -239,6 +254,10 @@ export function AuthenticatedAppLayout() {
               <summary>{accountLabel}</summary>
               <div className={styles.accountPanel}>
                 <span className={styles.accountWorkspace}>{workspaceLabel}</span>
+                <div className={styles.accountSetting}>
+                  <span className={styles.accountSettingLabel}>Appearance</span>
+                  <ThemeToggle />
+                </div>
                 {canSignOut ? (
                   <Button
                     variant="secondary"
