@@ -72,6 +72,14 @@ function nextRunState(run: OrchestratorRun, result: ToolCallResult): Orchestrato
     };
   }
   if (result.status === "failed") {
+    if (result.error.recoverable) {
+      return {
+        ...run,
+        status: "running",
+        waitingOn: undefined,
+        updatedAt,
+      };
+    }
     return {
       ...run,
       status: "failed",

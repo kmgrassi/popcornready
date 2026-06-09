@@ -154,6 +154,81 @@ test("model done response marks the run succeeded without a tool invocation", as
   assert.equal(result.turn.toolCalls.length, 0);
 });
 
+test("recoverable tool failures leave the run available for self-heal", async () => {
+  const registry = createToolRegistry({
+    generate_clip: {
+      execute: async () => ({
+        status: "failed",
+        error: {
+          kind: "precondition_unmet",
+          message: "Beat needs a character anchor first.",
+          recoverable: true,
+          suggestedNextTools: [
+            {
+              tool: "generate_anchor",
+              inputHint: { characterId: "char_1" },
+            },
+          ],
+        },
+      }),
+    },
+  });
+
+  const result = await runToolLoopTurn({
+    run: runFixture(),
+    workspaceId: "ws_1",
+    inputSummary: "generate the opening clip",
+    registry,
+    env: { POPCORN_ORCHESTRATOR_TOOL_LOOP: "1" },
+    model: async () => ({
+      type: "tool_call",
+      toolName: "generate_clip",
+      input: { beatId: "beat_1" },
+      model: "test-model",
+    }),
+  });
+
+  assert.equal(result.status, "completed_turn");
+  assert.equal(result.run.status, "running");
+  assert.equal(result.run.waitingOn, undefined);
+  assert.equal(result.turn.terminalReason, "error");
+  assert.equal(result.turn.toolCalls[0].status, "failed");
+  assert.equal(result.turn.toolCalls[0].error?.recoverable, true);
+});
+
+test("unrecoverable tool failures fail the run", async () => {
+  const registry = createToolRegistry({
+    generate_clip: {
+      execute: async () => ({
+        status: "failed",
+        error: {
+          kind: "policy_violation",
+          message: "Request is blocked.",
+          recoverable: false,
+        },
+      }),
+    },
+  });
+
+  const result = await runToolLoopTurn({
+    run: runFixture(),
+    workspaceId: "ws_1",
+    inputSummary: "generate the opening clip",
+    registry,
+    env: { POPCORN_ORCHESTRATOR_TOOL_LOOP: "1" },
+    model: async () => ({
+      type: "tool_call",
+      toolName: "generate_clip",
+      input: { beatId: "beat_1" },
+      model: "test-model",
+    }),
+  });
+
+  assert.equal(result.status, "completed_turn");
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.turn.terminalReason, "error");
+});
+
 test("driver refuses to start a new model turn while the run is waiting", async () => {
   await assert.rejects(
     () =>
