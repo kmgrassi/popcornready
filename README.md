@@ -47,7 +47,10 @@ structured timeline model (`src/lib/types.ts`) and then renders it deterministic
 
 ## Architecture & direction
 
-The codebase is a Next.js monolith today, but it's **moving to a monorepo split**:
+The codebase is a **pnpm + Turbo monorepo** (the original Next.js monolith in
+`src/` is being removed). See
+[`docs/repository-structure.md`](docs/repository-structure.md) for the full
+directory map. The split:
 
 - **Frontend** — Vite + React Router v7 (data mode) SPA → Netlify.
 - **Backend** — Express API → Railway (logic, the generation/job stack, Supabase).

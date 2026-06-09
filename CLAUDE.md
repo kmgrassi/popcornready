@@ -35,6 +35,10 @@ Identity rules: [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-r
 
 ## Where things live
 
+- **Full directory map (active monorepo vs legacy `src/`):**
+  [`docs/repository-structure.md`](docs/repository-structure.md) — read this first.
+  The `src/*` bullets below describe the **legacy Next monolith**, which is being
+  removed; the active code lives in `apps/web`, `apps/api`, and `packages/*`.
 - Live generation: `src/app/api/oneshot/` (sync) + `src/lib/runs/execute.ts`.
 - Versioned/job stack: `src/lib/v1/`, `src/lib/api/v1/`, `src/app/api/v1/`.
 - The agent (LLM) functions: `src/lib/agent/` (`planEdit`, `critiquePlan`,
