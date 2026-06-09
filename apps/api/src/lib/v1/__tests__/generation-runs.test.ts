@@ -614,6 +614,37 @@ test("persisted progress emitter pauses a run after a gated stage succeeds", asy
   assert.equal(payload!.stages[1].status, "succeeded");
 });
 
+test("persisted progress emitter does not pause an approved gate during resume", async () => {
+  const created = await createRunWithSeedStages({
+    store,
+    projectId: "proj_resume_approved",
+    body: { reviewGates: ["creative_plan"] },
+  });
+  const gateStage = created.stages.find((stage) => stage.type === "creative_plan")!;
+  const reviewedAt = new Date().toISOString();
+  await store.updateStage(gateStage.stageId, {
+    status: "succeeded",
+    reviewedAt,
+  });
+  await store.updateRun(created.run.runId, {
+    status: "running",
+    currentStageType: "storyboard",
+    reviewGate: null,
+  });
+
+  const emitter = createPersistedRunProgressEmitter(store, created.run.runId);
+  await (await emitter.beginStage("creative_plan")).succeed();
+
+  const payload = await assemblePayload(store, created.run.runId);
+  assert.ok(payload);
+  assert.equal(payload!.run.reviewGate, null);
+  assert.equal(payload!.run.currentStageType, "creative_plan");
+  assert.equal(
+    payload!.stages.find((stage) => stage.type === "creative_plan")?.reviewedAt,
+    reviewedAt
+  );
+});
+
 test("persisted progress emitter does not pause YOLO runs or skipped gates", async () => {
   const yolo = await createRunWithSeedStages({
     store,
