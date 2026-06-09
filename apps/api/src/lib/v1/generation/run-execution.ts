@@ -15,7 +15,10 @@ import {
 } from "../generation-runs/store";
 import type { GenerationRunsStore } from "../generation-runs/store";
 import type { RunExecutionOptions } from "../generation";
-import type { GenerationStageType } from "@popcorn/shared/v1/types";
+import type {
+  GateableGenerationStageType,
+  GenerationStageType,
+} from "@popcorn/shared/v1/types";
 
 interface CreateGenerationRunExecutionArgs {
   projectId: string;
@@ -57,6 +60,46 @@ async function requireStageId(
   return stage.stageId;
 }
 
+async function loadStageOutput(
+  store: GenerationRunsStore,
+  runId: string,
+  stageType: GenerationStageType
+): ReturnType<NonNullable<RunExecutionOptions["loadStageOutput"]>> {
+  const stages = await store.listStagesForRun(runId);
+  const stage = stages.find((candidate) => candidate.type === stageType);
+  if (!stage) return null;
+  if (stage.status !== "succeeded") return { status: stage.status };
+
+  const artifactId = stage.artifactIds.at(-1);
+  if (!artifactId) return { status: stage.status };
+
+  const artifact = await store.getStageArtifact(artifactId);
+  if (!artifact) {
+    throw new Error(
+      `generation stage artifact not found for ${stageType} on run ${runId}: ${artifactId}`
+    );
+  }
+  return {
+    status: stage.status,
+    artifactId: artifact.artifactId,
+    content: artifact.content,
+  };
+}
+
+async function checkPendingReviewGate(
+  store: GenerationRunsStore,
+  runId: string
+): ReturnType<NonNullable<RunExecutionOptions["checkPendingReviewGate"]>> {
+  const run = await store.getRun(runId);
+  const gate = run?.reviewGate;
+  if (!gate || gate.state !== "awaiting_review") return null;
+  return {
+    runId,
+    stageId: gate.stageId,
+    stageType: gate.stageType as GateableGenerationStageType,
+  };
+}
+
 export async function createGenerationRunExecution(
   args: CreateGenerationRunExecutionArgs
 ): Promise<GenerationRunExecution> {
@@ -94,6 +137,8 @@ export async function createGenerationRunExecution(
         });
         return { artifactId: artifact.artifactId };
       },
+      loadStageOutput: (input) => loadStageOutput(runStore, runId, input.stageType),
+      checkPendingReviewGate: () => checkPendingReviewGate(runStore, runId),
     },
   };
 }

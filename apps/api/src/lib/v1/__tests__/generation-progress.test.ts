@@ -21,6 +21,7 @@ import {
 } from "../generation-progress";
 import {
   assemblePayload,
+  approveReviewGate,
   createGenerationRunsStore,
   createPersistedRunProgressEmitter,
   createRunWithSeedStages,
@@ -458,6 +459,101 @@ test("runGenerationJob pauses after a persisted gated stage instead of advancing
       assert.equal(
         payload!.stages.find((stage) => stage.type === "timeline_assembly")?.status,
         "queued"
+      );
+    } finally {
+      await fs.rm(runDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("runGenerationJob resumes by loading succeeded stages instead of recomputing them", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const brief = await seedBrief(store, project.id);
+    await seedAsset(store, project.id, { id: "asset_1" });
+
+    const job = await createGenerationJob({
+      store,
+      actor: resolveActor(),
+      projectId: project.id,
+      body: { briefVersionId: brief.id, assetIds: ["asset_1"] },
+    });
+
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "popcornready-run-resume-"));
+    try {
+      const runStore = createGenerationRunsStore(runDir);
+      const runExecution = await createGenerationRunExecution({
+        projectId: project.id,
+        briefVersionId: brief.id,
+        body: {
+          briefVersionId: brief.id,
+          reviewGates: ["creative_plan", "storyboard"],
+        },
+        runStore,
+        judgmentStore: createFileJudgmentStore(runDir),
+      });
+
+      let planCalls = 0;
+      let storyboardCalls = 0;
+      const countingDeps: GenerationDeps = {
+        ...fakeDeps,
+        async planEdit(input) {
+          planCalls += 1;
+          return fakeDeps.planEdit(input);
+        },
+        async generateStoryboardTiles(input) {
+          storyboardCalls += 1;
+          return fakeDeps.generateStoryboardTiles(input);
+        },
+      };
+
+      const pausedAtPlan = await runGenerationJob(
+        store,
+        job.id,
+        countingDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      assert.equal(pausedAtPlan.status, "queued");
+      assert.equal(planCalls, 1);
+      assert.equal(storyboardCalls, 0);
+
+      const stillAwaitingApproval = await runGenerationJob(
+        store,
+        job.id,
+        countingDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      assert.equal(stillAwaitingApproval.status, "queued");
+      assert.equal(planCalls, 1, "pending review gate should not recompute creative_plan");
+      assert.equal(storyboardCalls, 0, "pending review gate should not advance downstream");
+
+      const pendingPayload = await assemblePayload(runStore, runExecution.runId);
+      assert.equal(pendingPayload?.run.reviewGate?.stageType, "creative_plan");
+
+      await approveReviewGate(runStore, runExecution.runId);
+
+      const pausedAtStoryboard = await runGenerationJob(
+        store,
+        job.id,
+        countingDeps,
+        runExecution.progress,
+        runExecution.execution
+      );
+      assert.equal(pausedAtStoryboard.status, "queued");
+      assert.equal(planCalls, 1, "creative_plan should be loaded from its artifact");
+      assert.equal(storyboardCalls, 1, "storyboard should run after the approved gate");
+
+      const payload = await assemblePayload(runStore, runExecution.runId);
+      assert.equal(payload?.run.reviewGate?.stageType, "storyboard");
+      assert.equal(
+        payload?.stages.find((stage) => stage.type === "creative_plan")?.status,
+        "succeeded"
+      );
+      assert.equal(
+        payload?.stages.find((stage) => stage.type === "storyboard")?.status,
+        "succeeded"
       );
     } finally {
       await fs.rm(runDir, { recursive: true, force: true });
