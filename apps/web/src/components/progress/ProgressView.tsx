@@ -28,7 +28,7 @@ interface ProgressViewProps {
     error?: string | null;
     feedbackNote?: string;
     onFeedbackNoteChange?: (note: string) => void;
-    onApprove: () => void;
+    onApprove: (note: string) => void;
     onReject: (note: string) => void;
     onCancel: () => void;
   };
@@ -143,7 +143,9 @@ export function ProgressView({
     }
   }
 
-  const onApprove = reviewActions?.onApprove ?? approveFallback;
+  const onApprove = reviewActions
+    ? () => reviewActions.onApprove(feedbackNote)
+    : approveFallback;
 
   return (
     <div className="progress-shell">

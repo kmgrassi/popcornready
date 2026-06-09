@@ -123,7 +123,9 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
               stageType: payload.run.reviewGate.stageType,
               ...(trimmedNote ? { note: trimmedNote } : {}),
             }
-          : undefined;
+          : action === "approve" && trimmedNote
+            ? { note: trimmedNote }
+            : undefined;
       const data = await v1Api.updateGenerationRun(projectId, runId, action, body);
       applyPayload(data);
       if (action === "approve" || action === "reject") {
@@ -182,7 +184,7 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
               error: actionError,
               feedbackNote: reviewFeedbackNote,
               onFeedbackNoteChange: setReviewFeedbackNote,
-              onApprove: () => void runAction("approve"),
+              onApprove: (note) => void runAction("approve", note),
               onReject: (note) => void runAction("reject", note),
               onCancel: () => void runAction("cancel"),
             }
