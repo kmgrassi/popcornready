@@ -10,9 +10,10 @@ import {
   parseAssetInventory,
   parsePagination,
   parseRegisterAsset,
+  parseSetAssetVisibility,
   parseUpdateAssetContext,
 } from "@/lib/api/v1/schemas";
-import { getAsset, listAssets } from "@/lib/api/v1/store";
+import { getAsset, listAssets, setAssetVisibility } from "@/lib/api/v1/store";
 
 export const assetsRouter = Router();
 
@@ -79,6 +80,22 @@ assetsRouter.patch(
     const assetId = requiredParam(params, "assetId");
     const input = parseUpdateAssetContext(body);
     const asset = await updateAssetContext(auth, projectId, assetId, input);
+    return { status: 200, body: { asset } };
+  })
+);
+
+assetsRouter.patch(
+  "/projects/:projectId/assets/:assetId/visibility",
+  mutation(async ({ auth, body }, params) => {
+    const projectId = requiredParam(params, "projectId");
+    const assetId = requiredParam(params, "assetId");
+    const { visibility } = parseSetAssetVisibility(body);
+    const asset = await setAssetVisibility(
+      auth.workspaceId,
+      projectId,
+      assetId,
+      visibility
+    );
     return { status: 200, body: { asset } };
   })
 );

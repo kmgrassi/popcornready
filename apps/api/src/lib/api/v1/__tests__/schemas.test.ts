@@ -8,9 +8,21 @@ import {
   parseCreateProject,
   parsePagination,
   parseRegisterAsset,
+  parseSetAssetVisibility,
   parseUpdateAssetContext,
   parseUpdateProjectPlan,
 } from "../schemas";
+
+test("parseSetAssetVisibility accepts public and private", () => {
+  assert.equal(parseSetAssetVisibility({ visibility: "public" }).visibility, "public");
+  assert.equal(parseSetAssetVisibility({ visibility: "private" }).visibility, "private");
+});
+
+test("parseSetAssetVisibility rejects missing or invalid values", () => {
+  expectApiError(() => parseSetAssetVisibility({}), "validation_failed");
+  expectApiError(() => parseSetAssetVisibility({ visibility: "hidden" }), "validation_failed");
+  expectApiError(() => parseSetAssetVisibility(null), "validation_failed");
+});
 
 function expectApiError(fn: () => unknown, code: string): ApiError {
   try {

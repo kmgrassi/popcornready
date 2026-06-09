@@ -11,10 +11,12 @@ import { miscCapabilitiesRouter } from "./misc-capabilities.js";
 import { planRouter } from "./plan.js";
 import { projectsRouter } from "./projects.js";
 import { timelinesRouter } from "./timelines.js";
+import { workspacesRouter } from "./workspaces.js";
 
 export function mountProtectedV1Routes(v1: Router) {
   v1.use(meRouter);
   v1.use(projectsRouter);
+  v1.use(workspacesRouter);
   v1.use(assetsRouter);
   v1.use(beatsRouter);
   v1.use(briefRouter);
