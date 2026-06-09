@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import {
   AppLayout,
   AuthenticatedAppLayout,
@@ -16,7 +16,6 @@ import { AssetsPage, OutputsPage, RunsPage } from "./routes/DashboardCollections
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LoginPage } from "./routes/LoginPage";
-import { NewProjectPage } from "./routes/NewProjectPage";
 import { SignupPage } from "./routes/SignupPage";
 import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
@@ -44,7 +43,9 @@ export function App() {
             path="/projects"
             element={<DashboardPlaceholderPage kind="projects" />}
           />
-          <Route path="/projects/new" element={<NewProjectPage />} />
+          {/* The standalone create wizard is retired — Studio owns the full
+              flow. Preserve any /projects/new deep links as a redirect. */}
+          <Route path="/projects/new" element={<Navigate to="/studio" replace />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/outputs" element={<OutputsPage />} />
