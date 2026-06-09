@@ -161,6 +161,17 @@ New decisions for this implementation:
   (no CloudFront key → fall back to S3 presign → unsigned) is preserved via
   `canSignCloudFront()` checks, not try/catch-around-require.
 
+Resolved in PR review (see §10 for the one-line rationale each):
+
+- **Private delivery = S3 presigned GET first**; CloudFront-signed is a later
+  config-only upgrade.
+- **Privatize issues a CloudFront invalidation** for the key (moderate public
+  TTL as backstop), so a privatized object leaves the edge near-immediately.
+- **Direct browser→S3 upload is in scope** — presigned PUT + multipart for large
+  video, alongside server-mediated `PutObject` for generated assets.
+- **Thumbnails inherit their parent asset** — same bucket, sibling key, no
+  separate visibility flag; they move with the parent on reconcile.
+
 ---
 
 ## 1. The ported storage module
@@ -176,6 +187,7 @@ New directory `apps/api/src/lib/storage/` (cohesive, feature-named files per
 | `s3-presign.ts` | port of `s3Signing.ts` — presigned GET + parse-from-URL |
 | `object-store.ts` | port of `storage.repository.ts` — `putObject`, `getObject`, `copyObject`, `deleteObject`, `objectUrl` (stable), `signedObjectUrl` (CloudFront→S3-presign→unsigned), `ensureBucket` |
 | `asset-urls.ts` | **new** — `resolveAssetUrl(asset)` / `resolveAssetUrls(assets[])`, the one place that maps a row to a delivery URL (the adapted decision point) |
+| `uploads.ts` | **new** — direct browser→S3 upload: mint presigned PUT / multipart-init + the `complete` finalizer that creates the asset row |
 | `visibility-move.ts` | **new** — `reconcileAssetStorage()` (byte move, `storage_bucket` only) + `setAssetVisibility()` / `setProjectVisibility()` (flag change + reconcile; the project toggle preserves per-asset flags) |
 | `local-store.ts` | the `STORAGE_BACKEND=local` implementation (disk), so the public interface is backend-agnostic |
 
@@ -204,30 +216,50 @@ assets-private  ──(origin)──►  CloudFront (signed) OR S3 ──►  si
   CloudFront domain) + key. Unsigned, cacheable. The `assets-public` bucket is
   origin-locked to CloudFront via OAC (Origin Access Control); it is not
   world-listable, only fetch-by-key through the CDN.
-- **Private delivery:** `signedObjectUrl(key, ttl)` — CloudFront-signed if a
-  private distribution + signing keys are configured, else S3 presigned GET,
-  else (dev) unsigned direct. Default TTL 300s.
+- **Private delivery (chosen): S3 presigned GET** — `signedObjectUrl(key, ttl)`,
+  default TTL 300s. The ported layer also supports CloudFront-signed delivery
+  (private distribution + signing keys) as a later config-only upgrade if
+  private re-fetch volume warrants; dev falls back to unsigned direct.
 
 ---
 
 ## 3. Write path (storing bytes)
 
-When an asset's bytes are produced/uploaded (the generated-asset pipeline and
-`registerAsset`):
+Bytes reach a bucket two ways; both end at the same row shape — `storage_key` +
+`storage_bucket` set, `url` left null.
 
-1. Compute **effective visibility** for the new asset (asset visibility — from
-   `defaultVisibilityForWorkspace` — AND its project's visibility).
-2. `bucket = resolveBucket(effectiveVisibility)`; `key = {ws}/{proj}/{assetId}/{filename}`.
-3. `putObject(bucket, key, bytes, contentType)`.
-4. Persist `storage_key = key`, `storage_bucket = bucket` on the asset row;
-   leave `url` null.
+**Common rule.** For a new asset, compute **effective visibility** (asset
+visibility — from `defaultVisibilityForWorkspace` — AND its project's
+visibility), pick `bucket = resolveBucket(effectiveVisibility)`, and use
+`key = {ws}/{proj}/{assetId}/{filename}` with `ContentType` set. The DB tier
+trigger still guarantees a free-owned workspace can only ever land in
+`assets-public`.
+
+**(a) Server-mediated** (generated-asset pipeline, small uploads): the API holds
+the bytes and calls `putObject(bucket, key, bytes, contentType)`, then persists
+`storage_key`/`storage_bucket`.
+
+**(b) Direct browser→S3** (user uploads, incl. large video) — *in scope*:
+
+1. Client calls `POST .../assets/upload-url` with
+   `{ filename, contentType, size, visibility? }`. The API authorizes the
+   project, reserves an `assetId`, computes the target bucket from effective
+   visibility, and mints a **presigned PUT** scoped to that exact `key` — or,
+   for large files, **initiates a multipart upload** and presigns the parts —
+   returning the URL(s). The bucket is itself a guard: a free/public project can
+   only ever be handed a presigned PUT into `assets-public`.
+2. Client uploads bytes **directly to S3** (no API byte path; sidesteps the
+   Railway request/memory limits that server-mediated upload of large video
+   would hit).
+3. Client calls `POST .../assets/:assetId/complete` (with multipart ETags if
+   applicable); the API verifies the object exists, then finalizes the asset row
+   (`status=ready`, `storage_key`, `storage_bucket`, visibility).
 
 `remote_url` assets are unchanged (passthrough; not copied into our buckets in
-this scope — ingestion/mirroring of remote bytes is existing behavior).
+this scope).
 
-> Note: `addAsset()` already stamps visibility; this scope adds the byte upload
-> + `storage_bucket` write alongside it. The tier trigger still guarantees a
-> free-owned workspace can only ever land in `assets-public`.
+> `addAsset()` already stamps visibility; this scope adds the byte upload +
+> `storage_bucket` write alongside it.
 
 ---
 
@@ -304,13 +336,13 @@ Thin endpoints (full shapes belong to the endpoint scope; minimum to exercise):
 - `PATCH /projects/:projectId` `{ visibility }` → `setProjectVisibility` (eager
   reconcile of all its assets, flags preserved).
 
-**CloudFront cache on privatize (must-handle):** after deleting a public object,
-edge caches and any holder of the old stable URL can still fetch a cached copy
-until TTL expiry. The privatize path must either (a) issue a CloudFront
-**invalidation** for the key, or (b) we accept a bounded public-cache window
-governed by a short public TTL. Decision flagged in Open Questions; default
-recommendation is **invalidate on privatize** (privatize is rare; correctness
-beats invalidation cost).
+**CloudFront cache on privatize (resolved: invalidate).** After deleting a
+public object, edge caches and any holder of the old stable URL can still fetch
+a cached copy until TTL expiry. So the privatize path **issues a CloudFront
+invalidation for the key** (a moderate public TTL is the backstop). Invalidation
+cost is negligible because privatize is rare, and correctness beats the cost for
+a privacy feature. This applies to both `setAssetVisibility(..,'private')` and
+the per-asset moves inside a project-privatize cascade.
 
 ---
 
@@ -336,7 +368,9 @@ New env (read in `lib/storage/config.ts`, validated when `STORAGE_BACKEND=s3`):
 **Infra provisioning (ops, tracked but not code):**
 - Create `assets-public` (CloudFront + OAC, public read via CDN only, long TTL)
   and `assets-private` (private; signed access).
-- Bucket CORS for the web origin (and for any future direct upload).
+- Bucket CORS for the web origin (**required** — direct presigned-PUT/multipart
+  upload is in scope; allow `PUT`/`POST` + the multipart headers from the web
+  origin).
 - Distribution domains → `S3_PUBLIC_URL_BASE`; signing key-pair → CF envs.
 
 ---
@@ -363,13 +397,18 @@ exist. Data backfill only:
   `object-store`) + `local-store`; `STORAGE_BACKEND` flag. Unit tests against
   LocalStack/MinIO (or mocked SDK). Not yet wired into assets → **no behavior
   change.**
-- **PR2 — Write path.** On asset create/generate, `putObject` to the
-  effective-visibility bucket and set `storage_key`/`storage_bucket`. Backfill
-  script for any existing rows.
-- **PR3 — Read path.** `asset-urls.resolveAssetUrl` + wire into workspace asset
+- **PR2 — Write path (server-mediated).** On asset create/generate, `putObject`
+  to the effective-visibility bucket and set `storage_key`/`storage_bucket`.
+  Backfill script for any existing rows.
+- **PR3 — Direct browser→S3 upload.** `uploads.ts`: `POST .../assets/upload-url`
+  (presigned PUT + multipart-init/presign-parts) and
+  `POST .../assets/:id/complete`; bucket CORS for the web origin. Lets large
+  video bypass the API byte path.
+- **PR4 — Read path.** `asset-urls.resolveAssetUrl` + wire into workspace asset
   list, discovery, and run-output payloads. (Now the dashboard/discover actually
   show media.)
-- **PR4 — Visibility toggle + eager cascade.** `visibility-move.ts` +
+- **PR5 — Visibility toggle + eager cascade.** `visibility-move.ts`
+  (`reconcileAssetStorage` + `setAssetVisibility`/`setProjectVisibility`) +
   `PATCH .../assets/:id` and `PATCH /projects/:id` visibility endpoints +
   CloudFront invalidation on privatize.
 - **PR0/ops (parallel).** Provision buckets + CloudFront + envs in AWS/Railway;
@@ -391,17 +430,22 @@ exist. Data backfill only:
 
 ---
 
-## 10. Open questions
+## 10. Resolved decisions (from review)
 
-- **CloudFront invalidation vs short public TTL on privatize** (§5). Recommend
-  invalidate-on-privatize; confirm cost tolerance and TTL.
-- **Private delivery: CloudFront-signed vs S3-presigned.** Both supported by the
-  ported layer; choose whether `assets-private` gets its own signed CloudFront
-  distribution (better latency/caching for re-fetches) or stays S3-presigned
-  (simpler). Default: S3-presigned first, add a signed distribution later.
-- **Direct browser→S3 presigned PUT upload** for large video (vs server-mediated
-  `PutObject`). Out of scope here; flagged for the upload endpoint scope, but the
-  bucket/key/CORS decisions above are made to allow it without rework.
-- **Thumbnail/poster objects** — where derived thumbnails live and whether they
-  inherit the parent asset's visibility (assumed: same bucket as parent, same
-  key prefix). Confirm when the thumbnail pipeline lands.
+The questions raised during scoping are now resolved:
+
+1. **Privatize → invalidate.** On public→private, after deleting the public
+   object, issue a **CloudFront invalidation** for the key (moderate public TTL
+   as backstop). Privacy-correct; negligible cost since privatize is rare. (§5)
+2. **Private delivery = S3 presigned GET first.** Simplest; the ported layer can
+   upgrade to a signed CloudFront distribution later via config if private
+   re-fetch volume warrants — not a rewrite. (§2, §4)
+3. **Direct browser→S3 upload is in scope.** Presigned PUT + multipart for large
+   video, alongside server-mediated `PutObject` for generated assets; buckets get
+   CORS for the web origin. (§3, PR3)
+4. **Thumbnails inherit their parent.** Same bucket, sibling key
+   (`{ws}/{proj}/{assetId}/thumb.*`), no separate visibility flag; they move with
+   the parent on reconcile. Revisit when the thumbnail pipeline lands. (§2/§3)
+
+Remaining genuinely-open items live in adjacent scopes (billing→tier; discovery
+& visibility UI; the consume/bookmark endpoints; attribution/licensing).
