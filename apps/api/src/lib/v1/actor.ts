@@ -25,7 +25,9 @@ const LOCAL_ACTOR: Actor = {
 };
 
 export function isLocalMode(): boolean {
-  return (process.env.AUTH_MODE || "local") === "local";
+  // local and hybrid both use the deterministic dev identity on this legacy
+  // agent surface; only strict supabase mode goes through hosted auth.
+  return (process.env.AUTH_MODE || "local").toLowerCase() !== "supabase";
 }
 
 // Test-only synchronous resolver (see LOCAL_ACTOR). Request-aware code paths use

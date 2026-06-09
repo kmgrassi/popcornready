@@ -20,7 +20,7 @@
 
 import type { NextFunction, Request, Response } from "express";
 import { ApiError, type ApiErrorCode } from "../core/errors.js";
-import { isLocalMode } from "../lib/api/v1/auth.js";
+import { authMode } from "../lib/api/v1/auth.js";
 import {
   buildUserScopedSupabase,
   resolveAppUserId,
@@ -44,6 +44,10 @@ function bearerToken(req: Request): string | null {
   return value.slice("bearer ".length).trim() || null;
 }
 
+function hasAuthorizationHeader(req: Request): boolean {
+  return req.get("authorization") != null;
+}
+
 function sendError(
   res: Response,
   requestId: string,
@@ -62,17 +66,28 @@ export async function authMiddleware(
   next: NextFunction
 ): Promise<void> {
   const requestId = req.requestId;
+  const mode = authMode();
 
   // Local dev: no Supabase. resolveAuth() injects the deterministic dev identity.
-  if (isLocalMode()) {
+  if (mode === "local") {
     next();
     return;
   }
 
   try {
     const accessToken = bearerToken(req);
-    // 403: nothing to authenticate (harper convention; see spec §4).
     if (!accessToken) {
+      if (hasAuthorizationHeader(req)) {
+        sendError(res, requestId, "unauthorized", "Invalid or expired session.");
+        return;
+      }
+      // hybrid: unauthenticated callers fall through to the local dev identity
+      // ("autopilot"); resolveAuth() supplies it. supabase: nothing to
+      // authenticate (harper convention; see spec §4).
+      if (mode === "hybrid") {
+        next();
+        return;
+      }
       sendError(res, requestId, "forbidden", "Missing credentials.");
       return;
     }

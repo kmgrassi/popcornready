@@ -93,6 +93,11 @@ export function AppLayout() {
   );
 }
 
+// In local dev (`vite dev`) an unauthenticated visitor still gets the dashboard
+// via the API's hybrid "autopilot" identity; logging in takes over with the real
+// session. Production builds (DEV=false) always require login.
+const DEV_AUTOPILOT = import.meta.env.DEV;
+
 export function AuthenticatedAppLayout() {
   const auth = useAuth();
   const location = useLocation();
@@ -101,9 +106,10 @@ export function AuthenticatedAppLayout() {
   const [meError, setMeError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (auth.status === "loading" || auth.status === "unauthenticated") {
-      return;
-    }
+    if (auth.status === "loading") return;
+    // Unauthenticated: skip in production (we redirect to /login below), but in
+    // dev autopilot still load /me so the local workspace identity populates.
+    if (auth.status === "unauthenticated" && !DEV_AUTOPILOT) return;
 
     let cancelled = false;
 
@@ -164,7 +170,7 @@ export function AuthenticatedAppLayout() {
     );
   }
 
-  if (auth.status === "unauthenticated") {
+  if (auth.status === "unauthenticated" && !DEV_AUTOPILOT) {
     return (
       <Navigate
         to="/login"
