@@ -40,6 +40,11 @@ function briefInputFromDraft(draft: BriefDraft): VideoBriefInput {
     format: draft.format,
     style: draft.style,
     audience: draft.audience.trim() || undefined,
+    hookQuestion: draft.hook.trim() || undefined,
+    strongestVisual: draft.bestVisual.trim() || undefined,
+    oneBigIdea: draft.bigIdea.trim() || undefined,
+    caveat: draft.accuracyNote.trim() || undefined,
+    payoff: draft.payoff.trim() || undefined,
     constraints:
       requiredBeats.length > 0 || draft.payoff.trim() || draft.callToAction.trim()
         ? {

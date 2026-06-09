@@ -18,6 +18,11 @@ export function briefToStoryContext(brief: VideoBriefInput): StoryContext {
   if (brief.audience) partial.audience = brief.audience;
   if (brief.platform) partial.platform = brief.platform;
   if (brief.format) partial.format = brief.format;
+  if (brief.hookQuestion) partial.hookQuestion = brief.hookQuestion;
+  if (brief.strongestVisual) partial.strongestVisual = brief.strongestVisual;
+  if (brief.oneBigIdea) partial.oneBigIdea = brief.oneBigIdea;
+  if (brief.caveat) partial.caveat = brief.caveat;
+  if (brief.payoff) partial.payoff = brief.payoff;
   if (brief.constraints?.callToAction) {
     partial.callToAction = brief.constraints.callToAction;
   }

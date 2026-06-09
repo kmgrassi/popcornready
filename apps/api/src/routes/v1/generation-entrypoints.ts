@@ -156,6 +156,11 @@ function promptBriefFromBody(body: unknown) {
         audience: body.audience,
         platform: body.platform,
         format: body.format,
+        hookQuestion: body.hookQuestion,
+        strongestVisual: body.strongestVisual,
+        oneBigIdea: body.oneBigIdea,
+        caveat: body.caveat,
+        payoff: body.payoff,
         narration: body.narration,
         constraints: body.constraints,
       };
