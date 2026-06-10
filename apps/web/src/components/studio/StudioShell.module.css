@@ -74,3 +74,93 @@
   gap: var(--space-1);
   margin-bottom: var(--space-4);
 }
+
+.startScreen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.draftPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.draftHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.draftHeader h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--title-sm);
+}
+
+.draftError {
+  margin: 0;
+  color: var(--danger);
+}
+
+.draftList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.draftRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.draftOpen {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.draftOpen:hover .draftTitle {
+  color: var(--accent);
+}
+
+.draftTitle {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draftMeta {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .draftRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

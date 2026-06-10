@@ -171,6 +171,17 @@ test("listWorkspaceOutputs aggregates export artifacts and maps to the wire shap
   const artifacts = [
     makeArtifact("p1", { id: "a1", createdAt: "2026-01-01T00:00:00.000Z" }),
     makeArtifact("p2", { id: "a2", createdAt: "2026-01-02T00:00:00.000Z" }),
+    makeArtifact("p2", {
+      id: "a3",
+      status: "pending_render",
+      url: null,
+      createdAt: "2026-01-03T00:00:00.000Z",
+    }),
+    makeArtifact("p1", {
+      id: "a4",
+      status: "failed",
+      createdAt: "2026-01-04T00:00:00.000Z",
+    }),
   ];
   const deps: ListWorkspaceOutputsDeps = {
     listProjects: async () => [
@@ -190,7 +201,7 @@ test("listWorkspaceOutputs aggregates export artifacts and maps to the wire shap
 
   assert.equal(nextCursor, null);
   assert.equal(items.length, 2);
-  // Newest-first.
+  // Only ready export artifacts are dashboard outputs, newest-first.
   assert.equal(items[0].artifactId, "a2");
   assert.equal(items[0].projectName, "Beta");
   assert.equal(items[0].format, "mp4");
@@ -224,30 +235,54 @@ test("listWorkspaceOutputs scopes by projectId and tolerates a null url", async 
   assert.equal(items[0].url, undefined);
 });
 
-test("getWorkspaceDashboardSummary returns launchpad counts and capped newest activity", async () => {
+test("getWorkspaceDashboardSummary counts and caps dashboard state", async () => {
   const runs = [
     makeRun("p1", {
       runId: "r1",
       status: "running",
       currentStageType: "asset_generation",
       progressPercent: 40,
-      updatedAt: "2026-01-03T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:30:00.000Z",
     }),
-    makeRun("p2", {
+    makeRun("p1", {
       runId: "r2",
       status: "queued",
-      updatedAt: "2026-01-04T00:00:00.000Z",
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:30:00.000Z",
     }),
     makeRun("p2", {
       runId: "r3",
+      status: "running",
+      createdAt: "2026-01-03T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r4",
+      status: "running",
+      createdAt: "2026-01-04T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r5",
+      status: "running",
+      createdAt: "2026-01-05T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r6",
+      status: "running",
+      createdAt: "2026-01-06T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r7",
       status: "succeeded",
-      updatedAt: "2026-01-05T00:00:00.000Z",
+      createdAt: "2026-01-07T00:00:00.000Z",
     }),
   ];
-  const artifacts = [
-    makeArtifact("p1", { id: "a1", createdAt: "2026-01-01T00:00:00.000Z" }),
-    makeArtifact("p2", { id: "a2", createdAt: "2026-01-02T00:00:00.000Z" }),
-  ];
+  const artifacts = Array.from({ length: 7 }, (_, idx) =>
+    makeArtifact(idx % 2 === 0 ? "p1" : "p2", {
+      id: `a${idx + 1}`,
+      createdAt: `2026-02-0${idx + 1}T00:00:00.000Z`,
+    })
+  );
   const deps: GetWorkspaceDashboardSummaryDeps = {
     listProjects: async () => [
       { id: "p1", name: "Alpha" },
@@ -262,19 +297,19 @@ test("getWorkspaceDashboardSummary returns launchpad counts and capped newest ac
   assert.equal(summary.schemaVersion, "dashboard.v1");
   assert.deepEqual(summary.counts, {
     projects: 2,
-    activeRuns: 2,
-    outputs: 2,
+    activeRuns: 6,
+    outputs: 7,
   });
   assert.deepEqual(
     summary.activeRuns.map((run) => run.runId),
-    ["r2", "r1"]
+    ["r6", "r5", "r4", "r3", "r2"]
   );
-  assert.equal(summary.activeRuns[1].projectName, "Alpha");
-  assert.equal(summary.activeRuns[1].currentStageType, "asset_generation");
-  assert.equal(summary.activeRuns[1].progressPercent, 40);
+  assert.equal(summary.activeRuns[4].projectName, "Alpha");
+  assert.equal(summary.activeRuns[4].status, "queued");
+  assert.equal(summary.activeRuns[0].currentStageType, undefined);
   assert.deepEqual(
     summary.recentOutputs.map((output) => output.artifactId),
-    ["a2", "a1"]
+    ["a7", "a6", "a5", "a4", "a3", "a2"]
   );
 });
 

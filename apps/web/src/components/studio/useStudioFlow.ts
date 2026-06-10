@@ -16,6 +16,7 @@ import type {
 } from "@popcorn/shared/v1/types";
 import type { StoryContext } from "@popcorn/shared/types";
 import { v1Api } from "../../lib/api-client";
+import { deleteDraft, saveDraft, type StudioDraftPayload } from "../../lib/draftStore";
 import type { GenerationRunResultArtifact } from "../../lib/v1/generation-runs/status";
 import { createAndStartRun } from "../../lib/startRun";
 import type { SelectedFootage } from "../../lib/upload";
@@ -161,6 +162,8 @@ export interface StudioFlow {
   updateReviewSegment(segmentId: string, patch: Partial<TimelineSegment>): void;
   /** Stores per-segment review notes next to the timeline editor. */
   updateReviewSegmentNote(segmentId: string, note: string): void;
+  /** Complete the persisted draft after the cut is exported. */
+  completeDraft(): Promise<void>;
 }
 
 /**
@@ -175,6 +178,7 @@ export interface StepProps {
   update(patch: Partial<BriefDraft>): void;
   next(): void;
   back(): void;
+  completeDraft?(): Promise<void>;
 }
 
 // --- Polling cadence (mirrors RunProgressPage) -----------------------------
@@ -212,6 +216,10 @@ function timelineFromArtifactContent(content: unknown): Timeline | null {
 export interface UseStudioFlowOptions {
   /** Seed the draft (e.g. from `?goal=`/`?length=` query params). */
   initialBrief?: Partial<BriefDraft>;
+  /** Active server-side draft id; when missing, the flow remains in-memory. */
+  draftId?: string;
+  /** Saved draft payload loaded by the Studio start screen. */
+  initialPayload?: StudioDraftPayload | null;
 }
 
 /**
@@ -220,16 +228,33 @@ export interface UseStudioFlowOptions {
  * visibility handling) and flips to `review` at the first gate / on success.
  */
 export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
-  const [state, setState] = useState<StudioState>("initial");
-  const [step, setStep] = useState<StudioStep>("brief");
+  const restoredRun =
+    options.initialPayload?.projectId && options.initialPayload?.runId
+      ? {
+          runId: options.initialPayload.runId,
+          projectId: options.initialPayload.projectId,
+          status: "queued" as GenerationRun["status"],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+      : undefined;
+  const [state, setState] = useState<StudioState>(
+    restoredRun ? "generating" : "initial",
+  );
+  const [step, setStep] = useState<StudioStep>(
+    restoredRun ? "generate" : options.initialPayload?.step ?? "brief",
+  );
   const [brief, setBrief] = useState<BriefDraft>(() => ({
     ...EMPTY_BRIEF_DRAFT,
+    ...options.initialPayload?.draft,
     ...options.initialBrief,
   }));
-  const [run, setRun] = useState<GenerationRun | undefined>();
+  const [run, setRun] = useState<GenerationRun | undefined>(restoredRun);
   const [stages, setStages] = useState<GenerationStage[]>([]);
   const [resultArtifacts, setResultArtifacts] = useState<GenerationRunResultArtifact[]>([]);
-  const [projectId, setProjectId] = useState<string | undefined>();
+  const [projectId, setProjectId] = useState<string | undefined>(
+    options.initialPayload?.projectId,
+  );
   const [reviewProject, setReviewProject] = useState<Project | null>(null);
   const [reviewTimeline, setReviewTimeline] = useState<Timeline | null>(null);
   const [reviewTimelineId, setReviewTimelineId] = useState<string | undefined>();
@@ -237,6 +262,49 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const draftId = options.draftId;
+  const briefRef = useRef(brief);
+  const stepRef = useRef(step);
+  const projectIdRef = useRef(projectId);
+  const runIdRef = useRef(run?.runId);
+
+  useEffect(() => {
+    briefRef.current = brief;
+  }, [brief]);
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+  useEffect(() => {
+    runIdRef.current = run?.runId;
+  }, [run?.runId]);
+
+  const persistDraft = useCallback(
+    async (overrides: {
+      draft?: BriefDraft;
+      step?: StudioStep;
+      projectId?: string;
+      runId?: string;
+    } = {}) => {
+      if (!draftId) return;
+      try {
+        await saveDraft(
+          draftId,
+          overrides.draft ?? briefRef.current,
+          overrides.step ?? stepRef.current,
+          {
+            projectId: overrides.projectId ?? projectIdRef.current,
+            runId: overrides.runId ?? runIdRef.current,
+          },
+        );
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "Could not save draft.");
+      }
+    },
+    [draftId],
+  );
 
   const update = useCallback((patch: Partial<BriefDraft>) => {
     setBrief((current) => ({ ...current, ...patch }));
@@ -244,21 +312,34 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
 
   const goTo = useCallback((next: StudioStep) => {
     setStep(next);
-  }, []);
+    void persistDraft({ step: next });
+  }, [persistDraft]);
 
   const next = useCallback(() => {
     setStep((current) => {
       const index = STUDIO_STEPS.indexOf(current);
-      return STUDIO_STEPS[Math.min(index + 1, STUDIO_STEPS.length - 1)];
+      const nextStep = STUDIO_STEPS[Math.min(index + 1, STUDIO_STEPS.length - 1)];
+      void persistDraft({ step: nextStep });
+      return nextStep;
     });
-  }, []);
+  }, [persistDraft]);
 
   const back = useCallback(() => {
     setStep((current) => {
       const index = STUDIO_STEPS.indexOf(current);
-      return STUDIO_STEPS[Math.max(index - 1, 0)];
+      const nextStep = STUDIO_STEPS[Math.max(index - 1, 0)];
+      void persistDraft({ step: nextStep });
+      return nextStep;
     });
-  }, []);
+  }, [persistDraft]);
+
+  useEffect(() => {
+    if (!draftId) return;
+    const timer = window.setTimeout(() => {
+      void persistDraft({ draft: brief });
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [brief, draftId, persistDraft]);
 
   const startGeneration = useCallback(async () => {
     setError(undefined);
@@ -279,6 +360,12 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       });
       setState("generating");
       setStep("generate");
+      await persistDraft({
+        draft: brief,
+        step: "generate",
+        projectId: createdProjectId,
+        runId,
+      });
     } catch (startError) {
       setError(
         startError instanceof Error
@@ -287,7 +374,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       );
       throw startError;
     }
-  }, [brief]);
+  }, [brief, persistDraft]);
 
   // Poll the active run while generating. Mirrors RunProgressPage: faster
   // cadence while running, slow while gated, pause when the tab is hidden, and
@@ -312,6 +399,11 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
         if (isReviewReady(data.run)) {
           setState("review");
           setStep("review");
+          void persistDraft({
+            step: "review",
+            projectId: data.run.projectId,
+            runId: data.run.runId,
+          });
           return;
         }
         if (isTerminal(data.run.status)) return;
@@ -347,7 +439,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       pollRef.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [state, projectId, run?.runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state, projectId, run?.runId, persistDraft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resolveGate = useCallback(
     async (action: "approve" | "reject", note?: string) => {
@@ -483,6 +575,11 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     setReviewSegmentNotes((current) => ({ ...current, [segmentId]: note }));
   }, []);
 
+  const completeDraft = useCallback(async () => {
+    if (!draftId) return;
+    await deleteDraft(draftId);
+  }, [draftId]);
+
   return useMemo(
     () => ({
       state,
@@ -510,7 +607,8 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       requestRevision,
       updateReviewSegment,
       updateReviewSegmentNote,
+      completeDraft,
     }),
-    [state, step, brief, run, stages, resultArtifacts, projectId, reviewProject, reviewTimeline, reviewTimelineId, reviewSegmentNotes, reviewLoading, reviewError, error, goTo, back, next, update, startGeneration, approveGate, rejectGate, requestRevision, updateReviewSegment, updateReviewSegmentNote],
+    [state, step, brief, run, stages, resultArtifacts, projectId, reviewProject, reviewTimeline, reviewTimelineId, reviewSegmentNotes, reviewLoading, reviewError, error, goTo, back, next, update, startGeneration, approveGate, rejectGate, requestRevision, updateReviewSegment, updateReviewSegmentNote, completeDraft],
   );
 }

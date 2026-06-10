@@ -21,6 +21,8 @@ const GENERATION_RUN_STATUS_VALUES: GenerationRunStatus[] = [
 
 export const workspacesRouter = Router();
 
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+
 // The :workspaceId path segment must match the authenticated workspace — the
 // session is the source of truth, the param is a guard. Shared by every
 // cross-project workspace list below.
@@ -41,22 +43,23 @@ function requireOwnWorkspace(
   return workspaceId;
 }
 
-// One-request summary for the guided Home launchpad. Detailed lists stay on the
-// sibling collection routes below.
+// One-request summary for the guided Home surface. The response is intentionally
+// denormalized so the client can render the hero and recent-output strip without
+// fan-out calls.
 workspacesRouter.get(
   "/workspaces/:workspaceId/dashboard",
   route(async ({ auth }, params) => {
     const workspaceId = requireOwnWorkspace(
       params.workspaceId,
       auth.workspaceId,
-      "dashboard"
+      "dashboard state"
     );
 
     const summary = await getWorkspaceDashboardSummary(workspaceId);
     return {
       status: 200,
-      headers: { "Cache-Control": "no-store" },
       body: { summary },
+      headers: NO_STORE_HEADERS,
     };
   })
 );
@@ -144,6 +147,7 @@ workspacesRouter.get(
     return {
       status: 200,
       body: { runs: items, pagination: { limit, nextCursor } },
+      headers: NO_STORE_HEADERS,
     };
   })
 );

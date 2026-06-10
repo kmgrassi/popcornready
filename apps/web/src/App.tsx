@@ -19,9 +19,9 @@ import { LaunchpadPage } from "./routes/LaunchpadPage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
 import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
+import { SettingsPage } from "./routes/SettingsPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
-import { WorkspaceStubPage } from "./routes/WorkspaceStubPage";
 
 // Route table for the SPA. Each page PR ports one former Next app route into
 // apps/web/src/routes/* and adds exactly one child <Route> here.
@@ -41,6 +41,7 @@ export function App() {
             path="/projects"
             element={<DashboardPlaceholderPage kind="projects" />}
           />
+          <Route path="/library" element={<Navigate to="/projects" replace />} />
           {/* The standalone create wizard is retired — Studio owns the full
               flow. Preserve any /projects/new deep links as a redirect. */}
           <Route path="/projects/new" element={<Navigate to="/studio" replace />} />
@@ -51,21 +52,12 @@ export function App() {
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/brand" element={<BrandKitPage />} />
-          <Route path="/storyboard" element={<StoryboardPage />} />
+          <Route path="/storyboard" element={<Navigate to="/library" replace />} />
           <Route
             path="/projects/:projectId/storyboard"
             element={<StoryboardPage />}
           />
-          <Route
-            path="/settings"
-            element={
-              <WorkspaceStubPage
-                eyebrow="Workspace controls"
-                title="Settings"
-                description="Account and workspace preferences will move into this section."
-              />
-            }
-          />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
           <Route path="/evals" element={<EvalsPage />} />
           <Route path="/admin" element={<AdminPage />} />
