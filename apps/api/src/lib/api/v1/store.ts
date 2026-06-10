@@ -1082,16 +1082,18 @@ export async function listWorkspaceOutputs(
       const artifacts = await deps.artifactStore.listArtifactsForProject(
         project.id
       );
-      return artifacts.map<WorkspaceOutputSummary>((artifact) => ({
-        artifactId: artifact.id,
-        projectId: project.id,
-        projectName: project.name,
-        timelineId: artifact.timelineId,
-        url: artifact.url ?? undefined,
-        durationSec: artifact.durationSec,
-        format: artifact.renderPlan?.format,
-        createdAt: artifact.createdAt,
-      }));
+      return artifacts
+        .filter((artifact) => artifact.status === "ready")
+        .map<WorkspaceOutputSummary>((artifact) => ({
+          artifactId: artifact.id,
+          projectId: project.id,
+          projectName: project.name,
+          timelineId: artifact.timelineId,
+          url: artifact.url ?? undefined,
+          durationSec: artifact.durationSec,
+          format: artifact.renderPlan?.format,
+          createdAt: artifact.createdAt,
+        }));
     })
   );
 

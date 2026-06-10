@@ -171,6 +171,17 @@ test("listWorkspaceOutputs aggregates export artifacts and maps to the wire shap
   const artifacts = [
     makeArtifact("p1", { id: "a1", createdAt: "2026-01-01T00:00:00.000Z" }),
     makeArtifact("p2", { id: "a2", createdAt: "2026-01-02T00:00:00.000Z" }),
+    makeArtifact("p2", {
+      id: "a3",
+      status: "pending_render",
+      url: null,
+      createdAt: "2026-01-03T00:00:00.000Z",
+    }),
+    makeArtifact("p1", {
+      id: "a4",
+      status: "failed",
+      createdAt: "2026-01-04T00:00:00.000Z",
+    }),
   ];
   const deps: ListWorkspaceOutputsDeps = {
     listProjects: async () => [
@@ -190,7 +201,7 @@ test("listWorkspaceOutputs aggregates export artifacts and maps to the wire shap
 
   assert.equal(nextCursor, null);
   assert.equal(items.length, 2);
-  // Newest-first.
+  // Only ready export artifacts are dashboard outputs, newest-first.
   assert.equal(items[0].artifactId, "a2");
   assert.equal(items[0].projectName, "Beta");
   assert.equal(items[0].format, "mp4");
