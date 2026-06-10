@@ -136,12 +136,6 @@ Expose the graph to agents and the UI: an endpoint wrapping
 fingerprints. Stale is a *signal* the agent may prune, never an auto-cascade
 (North Star §8). This PR is the on-ramp to the P2 orchestrator.
 
-## PR 7 — lift the `generation_runs.gates` JSONB exclusion
-
-20260610130000 deliberately left `gates` unconstrained "until the temporary v1
-bridge is removed." When the v1 compatibility bridge dies, add the typed check
-(schema marker or a flat string array) in a new migration.
-
 ## Ordering & dependencies
 
 ```
@@ -150,7 +144,6 @@ PR 1 (backfill/validate)          — independent, do early
 PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
 PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
 PR 5 (actions log)             ──▶ PR 6
-PR 7 — whenever the v1 bridge is removed
 ```
 
 PRs 1, 2, 4, 5 are mutually independent and can run in parallel.
