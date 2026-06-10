@@ -1,3 +1,100 @@
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.summaryItem {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.summaryItem span {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.summaryItem strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--text-md);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.summaryHeading span {
+  margin-bottom: 0;
+}
+
+.editButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.editButton:hover {
+  color: var(--accent-strong);
+}
+
+.editButton:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.goalText {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 800;
+  line-height: 1.45;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.goalTextExpanded {
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.goalText:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: none;
+  box-shadow: var(--ring);
+}
+
 .config {
   margin-top: var(--space-4);
 }
@@ -73,6 +170,7 @@
 }
 
 @media (max-width: 760px) {
+  .summary,
   .gateGrid {
     grid-template-columns: 1fr;
   }
