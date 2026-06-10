@@ -1,77 +1,100 @@
-# Asset-graph schema — design record (North Star P1)
+-- Asset-graph data model (North Star P1) — additive clean-break migration.
+--
+-- Applied ON TOP of the existing migration history (never rewrite applied
+-- migrations — the 20260609000000 stub documents why: `supabase db push` diffs
+-- the local folder against the remote schema_migrations history and errors on
+-- drift). The database is effectively empty (verify before landing — guard
+-- step in docs/scopes/asset-graph-schema.md §5), so the retired tables are
+-- dropped outright with no data port, and `assets` is recreated fresh.
+--
+-- Retires (the forward-only pipeline the North Star forbids):
+--   compositions, edit_graphs, timelines, brief_versions,
+--   generation_stages, generation_stage_items, generation_stage_artifacts,
+--   projects.brief/plan/current_brief_version_id,
+--   generation_runs.{brief_version_id, review_gates, review_gate,
+--                    current_stage_type, review_feedback},
+--   enums asset_kind, composition_mode, composition_status,
+--         generation_stage_type, stage_item_kind.
+--
+-- Replaces them with (full rationale: docs/scopes/asset-graph-schema.md):
+--   assets       — ONE immutable, project-scoped pool for every artifact kind
+--                  (source footage, brief, beats, anchors, keyframes, clips,
+--                  audio, critiques, plan, composites/the cut, renders).
+--                  Editing inserts a new version sharing lineage_id.
+--   asset_edges  — the dependency/provenance graph, trigger-synced from each
+--                  asset's write-once `inputs` snapshot; acyclic by
+--                  construction; strictly intra-project.
+--   selections   — append-only active pointers per slot; per-slot seq is the
+--                  compare-and-set token for parallel agents.
+--   actions      — the agent decision log (tool, inputs, rationale,
+--                  proposal/approval, cost).
+--   generation_runs — slimmed to a session/budget grouping over actions.
 
-> **Status:** Schema authored. The DDL lives in
-> [`supabase/migrations/20260610120000_asset_graph_model.sql`](../../supabase/migrations/20260610120000_asset_graph_model.sql)
-> — an **additive migration on top of the intact, applied history** (§5: we
-> never rewrite applied migrations); this doc is the rationale record. **Not
-> yet applied to the linked database** — run the §5 verify-empty guard, then a
-> normal `supabase db push`. No reset; auth users unaffected. Validated
-> against a scratch Supabase Postgres (full historical chain + this migration
-> + seed + functional smoke of edges/selections/guards/graph queries). This is
-> the concrete schema for [NORTH_STAR.md](../NORTH_STAR.md) §5 ("Target data
-> model") — the immutable project-scoped asset pool, dependency/provenance
-> edges, moving selections, and the agent action log. All §8 design decisions
-> are treated as constraints. Last updated 2026-06-10.
+set check_function_bodies = off;
 
-## 1. The model in one paragraph
+-- ===========================================================================
+-- A. Retire the old model.
+-- ===========================================================================
+-- A.1 The assets-returning search RPC: its setof return type blocks
+-- `drop table assets` below.
+drop function if exists public.search_public_assets(text, public.asset_kind);
 
-Everything the system produces or ingests — source footage, the brief, **each
-beat**, anchors, keyframes, clips, audio, critiques, the plan, the cut, renders —
-is an **immutable row in `assets`** (the pool). Rows are **never updated
-semantically and never deleted**; editing something inserts a **new version**
-sharing a `lineage_id`. **`asset_edges`** records what each asset was built from
-(provenance) and what a composite contains (ordered children) — together this is
-the dependency graph, and because new rows can only reference existing rows, it
-is a DAG by construction. **`selections`** is an append-only log of which asset
-is *active* in each slot (active version of a lineage, a beat's active keyframe,
-the project's active cut); the current state of a project is just the latest
-selection per slot. **`actions`** is the agent's decision log — every tool call
-with its inputs (by id), rationale, proposal/approval, and cost — replacing the
-edit graph's revision operations and the `Patch` persistence concept. `jobs`
-stays as the async execution substrate; `generation_runs` slims down to a
-session/budget grouping over actions.
+-- A.2 Generation stage tables (children first). Progress becomes a UI
+-- projection over actions + jobs; artifacts become pool assets. The stage
+-- visibility helper drops AFTER the tables — their public-read policies
+-- depend on it.
+drop table if exists public.generation_stage_artifacts;
+drop table if exists public.generation_stage_items;
+drop table if exists public.generation_stages;
+drop function if exists public.generation_stage_is_public(uuid);
 
-Invariants the schema enforces:
+-- A.3 The timeline/edit-graph/composition stack: the cut is a composite asset;
+-- the edit graph is asset_edges + actions; the composition plan is a plan asset.
+drop table if exists public.timelines;
+drop table if exists public.edit_graphs;
+drop table if exists public.compositions;
 
-- **Immutability:** semantic columns on `assets` reject UPDATE (guard trigger);
-  only lifecycle fields (status, storage pointers, late-arriving analysis) may
-  change. DELETE is blocked except for `service_role`.
-- **DAG:** edges are written once, in the same transaction as the derived
-  asset, from its `inputs` snapshot; the never-delete invariant is enforced by
-  the asset delete guard (FKs stay `cascade` so project deletion still works).
-- **Append-only selections:** UPDATE/DELETE revoked (same pattern as
-  `judgments`); per-slot `seq` is the compare-and-set token for parallel agents.
-- **Self-description:** every asset carries `kind`, `role`, `params`
-  (prompt/model/seed), `inputs` (what it was built from, by id + content hash),
-  `content_hash`, and `inputs_fingerprint` — the agent can reason over the pool
-  without reading media.
+-- A.4 The old asset pool and its bookmarks (both recreated below).
+drop table if exists public.saved_assets;
+drop table if exists public.assets;
 
-## 2. Worked example (the §3 gap, closed)
+-- A.5 generation_runs slims to a session/budget grouping. Gates are opt-in
+-- pause points by tool name (stops are opt-in, North Star Principle 2);
+-- review feedback flows through actions.
+alter table public.generation_runs
+  drop column brief_version_id,
+  drop column review_gates,
+  drop column review_gate,
+  drop column current_stage_type,
+  drop column review_feedback;
+alter table public.generation_runs
+  add column budget_usd double precision,
+  add column gates jsonb not null default '[]'::jsonb;
 
-"Edit beat 3" becomes:
+-- A.6 Briefs and plans move into the pool. (Dropping `brief` also drops the
+-- projects_search_idx expression index — recreated name-only in section I.)
+alter table public.projects
+  drop column current_brief_version_id,
+  drop column brief,
+  drop column plan;
+drop table if exists public.brief_versions;
 
-1. Agent records an `actions` row (`tool = 'change_beat'`, rationale, pinned
-   fingerprints in `proposal`).
-2. Insert beat-3 **v2** into `assets` (same `lineage_id`, `version = 2`,
-   `created_by_action_id` set).
-3. Append a `selections` row flipping the beat-3 lineage's `active` slot to v2.
-4. `downstream_assets(beat3_v1.id)` returns the candidate stale set — keyframe 3,
-   clip 3, the plan, the cut — **computed from data**, in one recursive query.
-5. The candidate set + provenance goes to the agent, which proposes the minimal
-   re-run (Principle 5). Cheap data nodes (plan, cut) re-derive automatically;
-   expensive ones (clip) wait for approval.
-6. Regenerations insert new pool rows and flip slots. Nothing is mutated,
-   nothing is lost; beat-3 v1's keyframe stays reusable elsewhere.
+-- A.7 eval_runs.stop_after loses its enum type: now loose text naming the
+-- tool/checkpoint after which an eval run stops.
+alter table public.eval_runs
+  alter column stop_after type text using stop_after::text;
 
-## 3. DDL (migration-ready)
+-- A.8 Retired enums. (job_type's 'composition'/'revision' values stay —
+-- Postgres cannot drop enum values in place; they are harmless orphans.)
+drop type if exists public.generation_stage_type;
+drop type if exists public.stage_item_kind;
+drop type if exists public.composition_mode;
+drop type if exists public.composition_status;
+drop type if exists public.asset_kind;
 
-Conventions match `20260603000000_init_schema.sql`: DB-generated uuid PKs,
-`set_updated_at` trigger, RLS via `owns_project` / `project_is_public`,
-append-only via `revoke`.
-
-### 3.0 Enums
-
-```sql
+-- ===========================================================================
+-- B. New enums.
+-- ===========================================================================
 -- What an asset IS, semantically (the agent routes on this).
 create type graph_asset_kind as enum (
   'source_footage',    -- uploaded/ingested media
@@ -100,14 +123,10 @@ create type edge_relation as enum ('input', 'anchor', 'child');
 
 create type action_status as enum
   ('proposed', 'approved', 'rejected', 'running', 'applied', 'failed');
-```
 
-### 3.1 `actions` — the agent decision log
-
-Created first so `assets.created_by_action_id` and `selections.set_by_action_id`
-can reference it.
-
-```sql
+-- ===========================================================================
+-- C. Actions — the agent decision log.
+-- ===========================================================================
 create table public.actions (
   id                 uuid primary key default gen_random_uuid(),
   schema_version     text          not null default 'action.v1',
@@ -167,20 +186,10 @@ $$;
 create trigger actions_guard_immutable
   before update on public.actions
   for each row execute function public.actions_guard_immutable();
-```
 
-### 3.2 `assets` — the pool (fresh create)
-
-The database holds no data worth porting (§5), so the migration drops the
-empty old `assets` table outright and creates the new shape fresh — no
-backfill, no column renames. Versus the old shape:
-`kind asset_kind` splits into `kind graph_asset_kind` + `media`; `provenance`
-and `generated_asset_job_id` are subsumed by `inputs` /
-`created_by_action_id`; `filename` and `source` become nullable (meaningless
-for data kinds). The delivery columns (`url`, `storage_key`, `storage_bucket`,
-…), `visibility`, and the analysis jsonb columns carry over unchanged.
-
-```sql
+-- ===========================================================================
+-- D. Assets — the one immutable, project-scoped pool.
+-- ===========================================================================
 create table public.assets (
   id                   uuid              primary key default gen_random_uuid(),
   schema_version       text              not null default 'asset.v2',
@@ -207,7 +216,7 @@ create table public.assets (
   -- hash over sorted (inputs[].contentHash) + hash(params): the staleness signal
   inputs_fingerprint   text,
   created_by_action_id uuid              references public.actions (id) on delete set null,
-  -- media delivery + analysis (unchanged semantics from the old table)
+  -- media delivery + analysis (same semantics as the old table)
   filename             text,
   url                  text,
   remote_url           text,
@@ -231,6 +240,12 @@ create unique index assets_project_ref_idx     on public.assets (project_id, ref
 create unique index assets_lineage_version_idx on public.assets (lineage_id, version);
 create index assets_lineage_idx                on public.assets (lineage_id);
 create index assets_project_kind_idx           on public.assets (project_id, kind);
+create index assets_workspace_id_idx           on public.assets (workspace_id);
+
+comment on column public.assets.visibility is
+  'Asset-level public/private visibility. Effective public access also requires the owning project to be public.';
+comment on column public.assets.storage_bucket is
+  'Physical object bucket for delivery (tracks effective visibility once the S3/CloudFront storage toggle is wired).';
 
 -- Shape coherence: data kinds carry content; media kinds carry storage.
 alter table public.assets add constraint assets_media_shape check (
@@ -277,8 +292,6 @@ $$;
 create trigger assets_set_ref
   before insert on public.assets
   for each row execute function public.assets_set_ref();
--- (unique-collision on (project_id, ref) is ~impossible at project scale; the
---  insert errors and the app retries.)
 
 -- Immutability: semantic fields reject UPDATE. Mutable lifecycle fields:
 -- status, url/remote_url/storage_key/storage_bucket, duration_sec, filename,
@@ -317,7 +330,7 @@ create trigger assets_guard_immutable
   before update on public.assets
   for each row execute function public.assets_guard_immutable();
 
--- Nothing is throwaway (Principle 9): deletes are service_role-only
+-- Nothing is throwaway (North Star Principle 9): deletes are service_role-only
 -- (GDPR/admin escape hatch).
 create or replace function public.assets_guard_delete()
 returns trigger
@@ -336,23 +349,27 @@ $$;
 create trigger assets_guard_delete
   before delete on public.assets
   for each row execute function public.assets_guard_delete();
-```
 
-### 3.3 `asset_edges` — the dependency/provenance graph
+-- Re-attach the workspace<->project consistency check to the new table
+-- (function exists since 20260609020000; the old trigger died with the table).
+create trigger assets_workspace_consistency
+  before insert or update of workspace_id, project_id on public.assets
+  for each row execute function public.enforce_asset_workspace_consistency();
 
-Source of truth for *what was built from what*. Written once, by trigger, from
-the new asset's `inputs` snapshot — they cannot drift. Direction: `from_id`
-(consumer/derived) → `to_id` (consumed/input). A composite may reference the
-same child at two positions (a reused scene), hence the surrogate PK.
+-- NOTE: the tier->visibility triggers stay DETACHED (20260609020000 dropped
+-- them so all users can toggle public/private until billing tiers ship).
 
-```sql
+-- ===========================================================================
+-- E. Asset edges — the dependency/provenance graph.
+-- ===========================================================================
+-- Direction: from_id (consumer/derived) -> to_id (consumed/input). A composite
+-- may reference the same child at two positions (a reused scene), hence the
+-- surrogate PK. Cascade FKs (not restrict): the never-delete invariant lives in
+-- assets_guard_delete; restrict would race the project->assets cascade.
 create table public.asset_edges (
   id         uuid primary key default gen_random_uuid(),
   project_id uuid          not null references public.projects (id) on delete cascade,
   from_id    uuid          not null references public.assets (id) on delete cascade,
-  -- cascade, not restrict: restrict would race the project->assets cascade
-  -- (sibling-cascade order is unspecified). The "inputs are never deleted"
-  -- invariant lives in assets_guard_delete, not in this FK.
   to_id      uuid          not null references public.assets (id) on delete cascade,
   relation   edge_relation not null,
   role       text,
@@ -368,6 +385,9 @@ create index asset_edges_project_idx on public.asset_edges (project_id);
 create unique index asset_edges_child_order_idx
   on public.asset_edges (from_id, position) where relation = 'child';
 
+-- Edges are written once, by trigger, from the new asset's `inputs` snapshot —
+-- they cannot drift. Because inputs can only name rows that already exist, the
+-- graph is acyclic by construction.
 create or replace function public.assets_sync_edges()
 returns trigger
 language plpgsql
@@ -378,9 +398,9 @@ declare
 begin
   for e in select * from jsonb_array_elements(coalesce(new.inputs, '[]'::jsonb))
   loop
-    -- Edges are strictly intra-project (decided, §7.2): cross-project reuse is
-    -- import-by-copy with the origin recorded in `source`, never a graph edge —
-    -- so blast radius and RLS can never leak across projects.
+    -- Edges are strictly intra-project: cross-project reuse is import-by-copy
+    -- with the origin recorded in `source`, never a graph edge — so blast
+    -- radius and RLS can never leak across projects.
     select project_id into v_input_project
     from public.assets
     where id = (e ->> 'assetId')::uuid;
@@ -406,26 +426,13 @@ $$;
 create trigger assets_sync_edges
   after insert on public.assets
   for each row execute function public.assets_sync_edges();
-```
 
-Because an asset's `inputs` can only name rows that already exist, and edges are
-written at insert time, the graph is acyclic by construction — no cycle check
-needed.
-
-### 3.4 `selections` — append-only active pointers
-
-A *slot* is identified by `(slot_owner_lineage_id, slot_role)`:
-
-| Slot | owner lineage | role |
-|---|---|---|
-| Active version of beat 3 | beat-3 lineage | `active` |
-| Beat 3's keyframe | beat-3 lineage | `keyframe` |
-| Beat 3's clip | beat-3 lineage | `clip` |
-| Anchor "Maya"'s image | anchor lineage | `active` |
-| The project's plan | `null` (project-scoped) | `plan` |
-| The project's cut | `null` | `cut` |
-
-```sql
+-- ===========================================================================
+-- F. Selections — append-only active pointers per slot.
+-- ===========================================================================
+-- A slot is (slot_owner_lineage_id, slot_role): the active version of a
+-- lineage ('active'), a beat's keyframe/clip, or a project-scoped slot
+-- (owner null: 'plan', 'cut'). History IS the undo stack.
 create table public.selections (
   id                    uuid primary key default gen_random_uuid(),
   project_id            uuid        not null references public.projects (id) on delete cascade,
@@ -445,6 +452,7 @@ create index selections_current_idx
 
 -- Per-slot monotone seq; the unique index is the CAS arbiter — two agents
 -- racing the same slot: one insert wins, the other errors and re-reads.
+-- Clients applying a proposal should send an explicit seq (last seen + 1).
 create unique index selections_slot_seq_idx on public.selections (
   project_id,
   coalesce(slot_owner_lineage_id, '00000000-0000-0000-0000-000000000000'::uuid),
@@ -472,9 +480,8 @@ create trigger selections_set_seq
   before insert on public.selections
   for each row execute function public.selections_set_seq();
 
--- Append-only (history IS the undo stack): judgments pattern, but also revoke
--- from anon/authenticated — Supabase grants those roles directly, so revoking
--- only `public` would not actually strip them.
+-- Append-only: revoke from anon/authenticated too — Supabase grants those
+-- roles directly, so revoking only `public` would not actually strip them.
 revoke update, delete on table public.selections from public, anon, authenticated;
 
 -- Current state of every slot.
@@ -483,38 +490,10 @@ with (security_invoker = on) as
 select distinct on (project_id, slot_owner_lineage_id, slot_role) *
 from public.selections
 order by project_id, slot_owner_lineage_id, slot_role, seq desc;
-```
 
-`seq` must be allowed `null` on insert for the trigger default; clients should
-**send an explicit `seq` (last seen + 1) when applying a proposal** so the
-unique index enforces compare-and-set against the state the proposal was
-computed on.
-
-### 3.5 `generation_runs` — slimmed to a session/budget grouping
-
-```sql
-alter table public.generation_runs
-  drop column brief_version_id,    -- briefs are pool assets
-  drop column review_gates,
-  drop column review_gate,
-  drop column current_stage_type,  -- the stage enum is gone
-  drop column review_feedback;     -- feedback flows through actions
-alter table public.generation_runs
-  add column budget_usd double precision,
-  -- opt-in pause points, by tool name (stops are opt-in, Principle 2):
-  add column gates jsonb not null default '[]'::jsonb;
--- kept: id, project_id, status, progress_percent, message, error, timestamps
-```
-
-`generation_stages` / `generation_stage_items` / `generation_stage_artifacts`
-are **dropped** (§5): stage progress becomes a UI projection over
-`actions` + `jobs`, and every artifact is a pool asset — there is no second
-artifact store. The hardcoded `generation_stage_type` order was the conveyor
-belt the North Star forbids.
-
-### 3.6 Graph queries (the payoff)
-
-```sql
+-- ===========================================================================
+-- G. Graph queries.
+-- ===========================================================================
 -- Candidate stale set: everything downstream of a changed asset. This is a
 -- SIGNAL to the agent, not a command (North Star §8) — the agent prunes it.
 create or replace function public.downstream_assets(p_asset_id uuid)
@@ -538,7 +517,7 @@ as $$
 $$;
 
 -- The orchestrator's working context: the whole project graph, token-compact.
--- (SQL function without SECURITY DEFINER -> runs under caller's RLS.)
+-- (SQL function without SECURITY DEFINER -> runs under the caller's RLS.)
 create or replace function public.project_manifest(p_project_id uuid)
 returns jsonb
 language sql
@@ -573,32 +552,28 @@ as $$
     )
   )
 $$;
-```
 
-**Staleness is computed on read, never stored.** A derived asset is a stale
-*candidate* when, for any of its input lineages, the slot's current active
-asset's `content_hash` differs from the hash recorded in its `inputs` snapshot.
-No `stale` flag, no cascade-update writes — and a flag would imply a command,
-where the doc wants a signal.
-
-### 3.7 RLS
-
-```sql
+-- ===========================================================================
+-- H. Row Level Security for the new tables.
+-- ===========================================================================
+alter table public.assets      enable row level security;
 alter table public.asset_edges enable row level security;
 alter table public.selections  enable row level security;
 alter table public.actions     enable row level security;
 
+create policy assets_owner on public.assets
+  for all using (public.owns_workspace(workspace_id) and public.owns_project(project_id))
+  with check (public.owns_workspace(workspace_id) and public.owns_project(project_id));
 create policy asset_edges_owner on public.asset_edges
-  for all using (public.owns_project(project_id))
-  with check (public.owns_project(project_id));
+  for all using (public.owns_project(project_id)) with check (public.owns_project(project_id));
 create policy selections_owner on public.selections
-  for all using (public.owns_project(project_id))
-  with check (public.owns_project(project_id));
+  for all using (public.owns_project(project_id)) with check (public.owns_project(project_id));
 create policy actions_owner on public.actions
-  for all using (public.owns_project(project_id))
-  with check (public.owns_project(project_id));
+  for all using (public.owns_project(project_id)) with check (public.owns_project(project_id));
 
--- Public discovery parity with today's tables:
+create policy assets_public_read on public.assets
+  for select to anon, authenticated
+  using (visibility = 'public' and public.project_is_public(project_id));
 create policy asset_edges_public_read on public.asset_edges
   for select to anon, authenticated
   using (public.project_is_public(project_id));
@@ -608,149 +583,104 @@ create policy selections_public_read on public.selections
 create policy actions_public_read on public.actions
   for select to anon, authenticated
   using (public.project_is_public(project_id));
-```
 
-Because `assets` is dropped and recreated (§3.2), its security surface is
-recreated verbatim from the init schema:
+-- ===========================================================================
+-- I. Public discovery — recreate what died with the old objects.
+-- ===========================================================================
+-- (asset_is_effectively_public/project_is_public/generation_run_is_public
+-- survive unchanged: their bodies reference the new assets table by name.)
+create index assets_visibility_idx on public.assets (visibility)
+  where visibility = 'public';
+create index assets_public_feed_idx on public.assets (created_at desc)
+  where visibility = 'public';
+create index assets_search_idx on public.assets
+  using gin (to_tsvector('english',
+    coalesce(description, '') || ' ' ||
+    coalesce(content ->> 'summary', '') || ' ' ||
+    coalesce(context ->> 'summary', '')))
+  where visibility = 'public';
 
-```sql
-alter table public.assets enable row level security;
+-- projects.brief is gone (the brief is a pool asset): project search is by
+-- name. (The old expression index died with the column.)
+create index projects_search_idx on public.projects
+  using gin (to_tsvector('english', coalesce(name, '')))
+  where visibility = 'public' and status <> 'deleted';
 
-create policy assets_owner on public.assets
-  for all using (public.owns_workspace(workspace_id) and public.owns_project(project_id))
-  with check (public.owns_workspace(workspace_id) and public.owns_project(project_id));
-create policy assets_public_read on public.assets
-  for select to anon, authenticated
-  using (visibility = 'public' and public.project_is_public(project_id));
+create or replace function public.search_public_projects(search_query text)
+returns setof public.projects
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.*
+  from public.projects p
+  where p.visibility = 'public'
+    and p.status <> 'deleted'
+    and to_tsvector('english', coalesce(p.name, ''))
+      @@ plainto_tsquery('english', search_query)
+  order by p.created_at desc, p.id desc
+$$;
+revoke all on function public.search_public_projects(text) from public;
+grant execute on function public.search_public_projects(text)
+  to anon, authenticated, service_role;
 
--- NOTE: the tier->visibility triggers stay DETACHED — migration 20260609020000
--- deliberately dropped them so all users can toggle public/private until
--- billing tiers ship. enforce_visibility_tier() is kept (unattached) for that
--- day; what IS attached is the tier-agnostic workspace-consistency check it
--- used to provide as a side effect:
-create trigger assets_workspace_consistency
-  before insert or update of workspace_id, project_id on public.assets
-  for each row execute function public.enforce_asset_workspace_consistency();
+create or replace function public.search_public_assets(
+  search_query text,
+  media_filter public.asset_media default null
+)
+returns setof public.assets
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.*
+  from public.assets a
+  join public.projects p on p.id = a.project_id
+  where a.visibility = 'public'
+    and p.visibility = 'public'
+    and p.status <> 'deleted'
+    and (media_filter is null or a.media = media_filter)
+    and to_tsvector(
+      'english',
+      coalesce(a.description, '') || ' ' ||
+      coalesce(a.content ->> 'summary', '') || ' ' ||
+      coalesce(a.context ->> 'summary', '') || ' ' ||
+      coalesce(a.context #>> '{agentContext,summary}', '') || ' ' ||
+      coalesce(a.semantic_analysis::text, '')
+    ) @@ plainto_tsquery('english', search_query)
+  order by a.created_at desc, a.id desc
+$$;
+revoke all on function public.search_public_assets(text, public.asset_media) from public;
+grant execute on function public.search_public_assets(text, public.asset_media)
+  to anon, authenticated, service_role;
 
--- saved_assets: recreate exactly as in the init schema §13 (definition and
--- policies unchanged — it references assets only by id).
-```
+-- ===========================================================================
+-- J. Saved public-asset bookmarks (recreated; definition unchanged).
+-- ===========================================================================
+create table public.saved_assets (
+  user_id         uuid not null references public.users (id) on delete cascade,
+  source_asset_id uuid not null references public.assets (id) on delete cascade,
+  created_at      timestamptz not null default now(),
+  primary key (user_id, source_asset_id)
+);
+create index saved_assets_source_asset_id_idx on public.saved_assets (source_asset_id);
 
-Discovery artifacts are recreated against the new columns: the partial
-visibility/feed indexes verbatim, the search GIN index over
-`description || content->>'summary' || context->>'summary'`, and
-`search_public_assets(search_query text, media_filter asset_media default null)`
-replacing the old `asset_kind`-typed RPC.
+alter table public.saved_assets enable row level security;
 
-## 4. What this replaces
+create policy saved_assets_select_own on public.saved_assets
+  for select to authenticated
+  using (user_id = public.current_app_user_id());
 
-| Today | Where it goes |
-|---|---|
-| `projects.brief`, `projects.plan`, `brief_versions` | `brief` / `beat` / `plan` pool assets + selections |
-| `compositions` (`planned_beats`, `ready_asset_ids`, …) | `plan` asset + per-beat slots + `actions` |
-| `edit_graphs.document` (jsonb megalith) | `asset_edges` (queryable rows) + `actions` (rationale/alternatives) |
-| `timelines` (+ `VersionedTimeline`) | `composite` assets (`cut_*`); Remotion renders the compiled projection of the active cut |
-| `generation_stage_artifacts` | pool assets — one store (Principle 9) |
-| `generation_stages` / `_items`, `generation_stage_type` enum | UI view over `actions` + `jobs` |
-| `Patch` ops / `EditGraphRevisionOperation` | `actions` rows + new pool versions + selection flips |
-| `assets.provenance`, `assets.generated_asset_job_id` | `inputs` / `params` / `created_by_action_id` |
+-- Bookmarks may only be created for assets that are effectively public.
+create policy saved_assets_insert_own on public.saved_assets
+  for insert to authenticated
+  with check (
+    user_id = public.current_app_user_id()
+    and public.asset_is_effectively_public(source_asset_id)
+  );
 
-`jobs`, `idempotency`, identity/tenancy, visibility/tier enforcement, and the
-eval framework are untouched — except `eval_runs.stop_after` and `judgments`'
-loose `stage_id` pointers, which referenced the stage enum (see §5).
-
-## 5. Migration mechanics (empty database — drop, don't port)
-
-The database holds no meaningful rows — no assets, no in-flight creative state
-(decided 2026-06-10). So there is **no transform or backfill path**: dead
-objects are dropped outright and `assets` is created fresh in its final shape.
-**Guard step before landing:** confirm the linked DB is actually disposable —
-row counts over `users` / `workspaces` / `projects` / `assets` via the
-Management API query endpoint (don't trust a stale assumption).
-
-**What shipped: an additive migration on top of intact history**
-(`supabase/migrations/20260610120000_asset_graph_model.sql`). **We never
-rewrite or delete applied migrations** — decided 2026-06-10. Supabase's
-`db push` diffs the local folder against the remote
-`supabase_migrations.schema_migrations` history and errors on drift; this repo
-already carries the scar (the `20260609000000` stub exists *solely* to keep a
-remotely-recorded version aligned). A squashed baseline was considered and
-rejected: it would force `supabase db reset --linked` (wiping auth users) and
-break any environment holding the old history. The cost of the additive route
-— the retired tables stay visible in *past* migration files — is acceptable;
-they no longer exist in the schema itself. Landing is a normal
-`supabase db push` after the guard step above.
-
-**Dead objects (deleted entirely; nothing references them after this DDL):**
-
-- **Tables:** `compositions`, `edit_graphs`, `timelines`, `brief_versions`,
-  `generation_stages`, `generation_stage_items`, `generation_stage_artifacts`;
-  plus the old `assets` and `saved_assets` (both recreated fresh, §3.2/§3.7).
-- **Columns:** `projects.brief`, `projects.plan`,
-  `projects.current_brief_version_id` (drop its FK with `brief_versions`);
-  `generation_runs.{brief_version_id, review_gates, review_gate,
-  current_stage_type}` (§3.5).
-- **Enums:** `asset_kind`, `composition_mode`, `composition_status`,
-  `stage_item_kind`, and `generation_stage_type` — convert
-  `eval_runs.stop_after` to `text` first (`using stop_after::text`).
-- **Functions:** `search_public_assets(text, asset_kind)` (recreated against
-  `media`/`kind`/`content`, §3.7).
-- **`job_type` enum values** `composition` and `revision` are orphaned
-  vocabulary and stay in place — Postgres can't drop enum values; they're
-  harmless and nothing writes them anymore.
-
-**Kept untouched:** identity/tenancy (`users`, `workspaces`, `workspace_members`,
-`workspace_invites`), `projects` (minus the dropped columns), `jobs`,
-`idempotency`, the eval framework, and the tier/visibility machinery.
-
-## 6. Code impact (for the PR that lands this)
-
-- `packages/shared`: add `GraphAsset`, `AssetEdge`, `Selection`, `AgentAction`,
-  `AssetKind`, `EdgeRelation`; delete `CompositionPlan`, `VersionedTimeline`,
-  `VersionedEditGraph`, the whole `edit-graph.ts` module, and `Patch`.
-- `apps/api` `V1Store`: collapses to `assets` / `asset_edges` / `selections` /
-  `actions` / `jobs` accessors + `projectManifest()` / `downstreamAssets()`
-  RPC wrappers.
-- Agent functions (`planEdit`, `revise`, …) become tools that read the manifest
-  and emit actions + pool inserts; `revise`'s patch output is replaced by the
-  regeneration vocabulary (`change_beat`, `swap_selection`, `regenerate_*`,
-  `assemble`).
-- Remotion render input: a pure compile of the active `cut` composite. Trims,
-  captions, and transitions live in the composite's own `content.children[]`
-  (keyed by position, decided §7.1); edges carry ordering only, so the renderer
-  reads one self-contained document.
-
-## 7. Design questions (all resolved 2026-06-10)
-
-Kept with their resolutions as the design record (North Star §8 pattern); these
-are constraints for the implementing PR.
-
-1. ~~**Trim/offset placement**~~ **— DECIDED: composite `content`.** Trims,
-   captions, and transitions live in the composite's `content.children[]`,
-   keyed by position; edges carry only (child, relation, position). Rationale:
-   edges exist for blast radius, and a trim doesn't change what the cut
-   *depends on* — it changes what the cut *is*, so `content_hash` is the right
-   place for it to register (a re-trim mints a new composite version and the
-   render correctly becomes a stale candidate). The renderer reads one
-   self-contained document; `asset_edges` stays lean. The write-once
-   duplication of the child list between `content` and edges is accepted —
-   both derive from the same insert payload on an immutable row, so they
-   cannot drift.
-2. ~~**Workspace-level pool promotion**~~ **— DECIDED: reuse is by copy, and
-   edges are strictly intra-project.** When cross-project reuse arrives
-   (recurring character/logo), importing **mints a new immutable row** in the
-   target project with the origin recorded in `source` jsonb (the upload
-   pattern) — never a cross-project graph edge. By-reference reuse would leak
-   blast radius across projects (touching the character in project A would
-   stale project B's clips) and break project-scoped RLS/manifest queries.
-   Copying is semantically free because pool rows are immutable. A future
-   "workspace library" is a bookmark/tag table over assets (the `saved_assets`
-   pattern), not a new scope. The edge-sync trigger (§3.3) enforces the
-   intra-project invariant today.
-3. ~~**`current_selections` materialization**~~ **— DECIDED: plain view +
-   covering index.** Selections per project ≈ number of slot flips (hundreds,
-   maybe low thousands), so the `distinct on` view over an indexed
-   `project_id` filter is more than fast enough; a materialized view would add
-   refresh orchestration and make the one table whose job is "current state"
-   itself potentially stale. `selections_current_idx` (§3.4) gives the view a
-   plain-column path the coalesce-expression CAS index can't provide.
+create policy saved_assets_delete_own on public.saved_assets
+  for delete to authenticated
+  using (user_id = public.current_app_user_id());
