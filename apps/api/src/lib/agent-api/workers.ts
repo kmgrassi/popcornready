@@ -88,6 +88,7 @@ export interface ExportOptions {
   format?: string;
   quality?: string;
   audioAssetIds?: string[];
+  showCaptions?: boolean;
   // Defaults to match_longest_media: until audio alignment (PR5) exists this is
   // safer than silently truncating narration. TODO(PR5): default generated
   // narration to fail_on_mismatch once alignment can guarantee a fit.
@@ -130,7 +131,12 @@ export function runExportJob(input: {
     });
   }
 
-  const timeline = input.project.timeline;
+  const timeline = input.project.timeline
+    ? {
+        ...input.project.timeline,
+        showCaptions: options.showCaptions ?? input.project.timeline.showCaptions,
+      }
+    : null;
   if (!timeline || timeline.segments.length === 0) {
     throw new ApiError(
       "timeline_not_ready",
@@ -238,6 +244,7 @@ export function runExportJob(input: {
     ...baseRenderPlan,
     format: baseRenderPlan.output.format,
     quality: baseRenderPlan.output.quality,
+    showCaptions: timeline.showCaptions ?? false,
   };
 
   // Skeleton output: the artifact is recorded but not yet rendered. TODO(PR5):

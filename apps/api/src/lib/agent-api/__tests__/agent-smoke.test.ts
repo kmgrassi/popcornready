@@ -155,6 +155,19 @@ test("export worker emits a pending_render artifact under match_longest_media", 
   assert.equal(artifact.renderPlan.audioDurationSec, 12);
 });
 
+test("export worker lets callers choose whether captions render", () => {
+  const project = projectFixture();
+  project.timeline!.showCaptions = true;
+
+  const { artifact } = runExportJob({
+    project,
+    timelineId: "tl_requested",
+    options: { showCaptions: false },
+  });
+
+  assert.equal(artifact.renderPlan.showCaptions, false);
+});
+
 test("export worker fails on audio/timeline mismatch when policy is fail_on_mismatch", () => {
   const project = projectFixture();
   assert.throws(

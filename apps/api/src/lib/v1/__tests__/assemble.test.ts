@@ -169,6 +169,59 @@ test("assemble runs selectClips and persists a VersionedTimeline", async () => {
   });
 });
 
+test("store lists project timelines newest first and scoped by project", async () => {
+  await withStore(async (store) => {
+    const project = await seedProject(store);
+    const otherProject = await seedProject(store, "proj_other");
+    await seedAsset(store, project.id, { id: "asset_1" });
+    await seedAsset(store, otherProject.id, { id: "asset_other" });
+
+    const firstInput = await resolveAssemble(store, "dev_workspace", project.id, {
+      plan: rawPlan,
+      assetIds: ["asset_1"],
+    });
+    const first = await runAssemble({
+      store,
+      jobId: "job_assemble_first",
+      input: firstInput,
+      projectId: project.id,
+      deps: fakeAssembleDeps,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    const secondInput = await resolveAssemble(store, "dev_workspace", project.id, {
+      plan: rawPlan,
+      assetIds: ["asset_1"],
+    });
+    const second = await runAssemble({
+      store,
+      jobId: "job_assemble_second",
+      input: secondInput,
+      projectId: project.id,
+      deps: fakeAssembleDeps,
+    });
+
+    const otherInput = await resolveAssemble(store, "dev_workspace", otherProject.id, {
+      plan: rawPlan,
+      assetIds: ["asset_other"],
+    });
+    await runAssemble({
+      store,
+      jobId: "job_assemble_other",
+      input: otherInput,
+      projectId: otherProject.id,
+      deps: fakeAssembleDeps,
+    });
+
+    const timelines = await store.listTimelinesForProject(project.id);
+    assert.deepEqual(
+      timelines.map((timeline) => timeline.id),
+      [second.timelineId, first.timelineId]
+    );
+  });
+});
+
 // --- assemble precondition: no plan and no composition ---------------------
 
 test("assemble with neither plan nor composition is a structured error", async () => {

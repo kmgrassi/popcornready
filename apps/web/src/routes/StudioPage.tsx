@@ -11,11 +11,12 @@ export function StudioPage() {
   const [params] = useSearchParams();
   const goal = params.get("goal") ?? "";
   const length = Number(params.get("length"));
+  const draftId = params.get("draft");
 
   const initialBrief: Partial<BriefDraft> = {
     ...(goal ? { goal } : {}),
     ...(Number.isFinite(length) && length > 0 ? { targetLengthSec: length } : {}),
   };
 
-  return <StudioShell initialBrief={initialBrief} />;
+  return <StudioShell initialBrief={initialBrief} draftId={draftId} />;
 }

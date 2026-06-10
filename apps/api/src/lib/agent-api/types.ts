@@ -101,6 +101,7 @@ export interface ExportRenderPlan extends RenderPlan {
   // renderer integrations should read output.format and output.quality.
   format: "mp4";
   quality: string;
+  showCaptions: boolean;
 }
 
 export interface ExportJobResult {
