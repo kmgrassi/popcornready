@@ -337,6 +337,10 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
   ladder: one L0 per screen, ≤ 2 interactions from relevance, palette entry
   for everything L3+. Fix violations; align copy with
   `components/studio/copy.ts` tone.
+- **Audit worksheet:** use
+  [guided-dashboard-pr7-audit.md](./guided-dashboard-pr7-audit.md) for the
+  preflight checks, ladder matrix, and copy/polish checklist. If PRs 1–6 have
+  not landed, PR 7 is blocked rather than a partial code pass.
 - **Done when:** the acceptance table below passes end to end.
 
 ## Dependency graph & merge order
