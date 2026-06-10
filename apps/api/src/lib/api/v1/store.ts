@@ -53,6 +53,7 @@ import {
   getGenerationRunStore,
   type GenerationRunsStore,
 } from "../../v1/generation-runs/store";
+import { getRequestSupabase } from "../../supabase/clients";
 import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
 import {
   AgentAssetSource,
@@ -174,6 +175,36 @@ export interface IdempotencyRecord {
   createdAt: string;
 }
 
+export interface AssetGraphSelectionRef {
+  slotOwnerLineageId: string | null;
+  slotRole: string;
+  seq: number;
+}
+
+export interface StaleCandidateAsset {
+  assetId: string;
+  depth: number;
+  ref: string | null;
+  kind: string;
+  status: string;
+  role: string | null;
+  lineageId: string;
+  version: number;
+  contentHash: string | null;
+  inputsFingerprint: string | null;
+  selections: AssetGraphSelectionRef[];
+}
+
+export interface StaleCandidatesResult {
+  changedAsset: {
+    assetId: string;
+    ref: string | null;
+    kind: string;
+    contentHash: string | null;
+  };
+  candidates: StaleCandidateAsset[];
+}
+
 // ---------------------------------------------------------------------------
 // Local media paths (asset BYTES, not DB rows)
 // ---------------------------------------------------------------------------
@@ -252,6 +283,14 @@ function getServiceSupabase(): SupabaseClient {
     },
   });
   return serviceClient;
+}
+
+function getRequestSupabaseOrService(): SupabaseClient {
+  try {
+    return getRequestSupabase();
+  } catch {
+    return getServiceSupabase();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +419,30 @@ function mapBriefVersion(row: DataAssetRow): V1BriefVersion {
 }
 
 interface CurrentSelectionRow {
+  active_asset_id: string;
+}
+
+interface GraphAssetSummaryRow {
+  id: string;
+  ref: string | null;
+  kind: string;
+  status: string;
+  role: string | null;
+  lineage_id: string;
+  version: number;
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
+}
+
+interface DownstreamAssetRow {
+  asset_id: string;
+  depth: number;
+}
+
+interface CurrentSelectionSummaryRow {
+  slot_owner_lineage_id: string | null;
+  slot_role: string;
+  seq: number;
   active_asset_id: string;
 }
 
@@ -1934,6 +1997,125 @@ export async function listJobs(
   throwOnError(error, "listJobs");
   const all = (data as JobRow[]).map(mapJob);
   return paginate(all, limit, cursor);
+}
+
+export async function getProjectManifest(
+  workspaceId: string,
+  projectId: string
+): Promise<unknown> {
+  await getProject(workspaceId, projectId);
+  const db = getRequestSupabaseOrService();
+  const { data, error } = await db.rpc("project_manifest", {
+    p_project_id: projectId,
+  });
+  throwOnError(error, "getProjectManifest");
+  return data ?? {};
+}
+
+export async function getStaleCandidates(
+  workspaceId: string,
+  projectId: string,
+  changedAssetId: string
+): Promise<StaleCandidatesResult> {
+  await getProject(workspaceId, projectId);
+  const db = getRequestSupabaseOrService();
+
+  const changed = await db
+    .from("assets")
+    .select("id, ref, kind, status, role, lineage_id, version, content_hash, inputs_fingerprint")
+    .eq("id", changedAssetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(changed.error)) {
+    throw notFound(`Asset not found: ${changedAssetId}`);
+  }
+  throwOnError(changed.error, "getStaleCandidates.changedAsset");
+  if (!changed.data) {
+    throw notFound(`Asset not found: ${changedAssetId}`);
+  }
+  const changedAsset = changed.data as GraphAssetSummaryRow;
+
+  const downstream = await db.rpc("downstream_assets", {
+    p_asset_id: changedAssetId,
+  });
+  throwOnError(downstream.error, "getStaleCandidates.downstreamAssets");
+  const rows = ((downstream.data ?? []) as DownstreamAssetRow[]).sort(
+    (a, b) => a.depth - b.depth || a.asset_id.localeCompare(b.asset_id)
+  );
+  const candidateIds = rows.map((row) => row.asset_id);
+  if (candidateIds.length === 0) {
+    return {
+      changedAsset: {
+        assetId: changedAsset.id,
+        ref: changedAsset.ref,
+        kind: changedAsset.kind,
+        contentHash: changedAsset.content_hash,
+      },
+      candidates: [],
+    };
+  }
+
+  const [assetsResult, selectionsResult] = await Promise.all([
+    db
+      .from("assets")
+      .select("id, ref, kind, status, role, lineage_id, version, content_hash, inputs_fingerprint")
+      .eq("project_id", projectId)
+      .eq("workspace_id", workspaceId)
+      .in("id", candidateIds),
+    db
+      .from("current_selections")
+      .select("slot_owner_lineage_id, slot_role, seq, active_asset_id")
+      .eq("project_id", projectId)
+      .in("active_asset_id", candidateIds),
+  ]);
+  throwOnError(assetsResult.error, "getStaleCandidates.assets");
+  throwOnError(selectionsResult.error, "getStaleCandidates.selections");
+
+  const assetsById = new Map(
+    ((assetsResult.data ?? []) as GraphAssetSummaryRow[]).map((asset) => [
+      asset.id,
+      asset,
+    ])
+  );
+  const selectionsByAssetId = new Map<string, AssetGraphSelectionRef[]>();
+  for (const selection of (selectionsResult.data ?? []) as CurrentSelectionSummaryRow[]) {
+    const refs = selectionsByAssetId.get(selection.active_asset_id) ?? [];
+    refs.push({
+      slotOwnerLineageId: selection.slot_owner_lineage_id,
+      slotRole: selection.slot_role,
+      seq: selection.seq,
+    });
+    selectionsByAssetId.set(selection.active_asset_id, refs);
+  }
+
+  return {
+    changedAsset: {
+      assetId: changedAsset.id,
+      ref: changedAsset.ref,
+      kind: changedAsset.kind,
+      contentHash: changedAsset.content_hash,
+    },
+    candidates: rows.flatMap((row) => {
+      const asset = assetsById.get(row.asset_id);
+      if (!asset) return [];
+      return [
+        {
+          assetId: asset.id,
+          depth: row.depth,
+          ref: asset.ref,
+          kind: asset.kind,
+          status: asset.status,
+          role: asset.role,
+          lineageId: asset.lineage_id,
+          version: asset.version,
+          contentHash: asset.content_hash,
+          inputsFingerprint: asset.inputs_fingerprint,
+          selections: selectionsByAssetId.get(asset.id) ?? [],
+        },
+      ];
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
