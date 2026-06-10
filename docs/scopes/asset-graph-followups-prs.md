@@ -74,27 +74,9 @@ migrations):
 Validate against a scratch Supabase Postgres with the full migration chain
 before pushing (established pattern: docker postgres + stub `auth`/`storage`).
 
-## PR 2 — storyboard write paths in the API
-
-Store functions + Express routes (own route file under
-`apps/api/src/routes/v1/`, registered in the smallest protected-routes file —
-no catch-all index):
-
-- CRUD for storyboards/scenes/beats/panels; every row carries `project_id`
-  (composite FK chains enforce same-project integrity for free).
-- **The snapshot contract is non-negotiable** (trigger-enforced): once a beat
-  has `beat_asset_id`, semantic edits (`intent`, `visual_description`,
-  `dialogue_summary`, `narration`, `duration_sec`) must mint a new
-  beat-snapshot asset (kind `beat`, same `lineage_id`, marker-stamped
-  `content`) and move `beat_asset_id` in the same write.
-- Panel selection writes `storyboard_panels.is_selected` only — never the
-  `selections` table (one source of truth; see asset-graph-schema.md §3.5).
-- Reorder = swap `scene_index`/`beat_index`/`panel_index` within the parent
-  (unique per parent).
-
 ## PR 3 — port the studio editor; retire the plan blob
 
-Point the studio storyboard editor (apps/web) at the PR 2 endpoints, then
+Point the studio storyboard editor (apps/web) at the storyboard endpoints, then
 delete the `EditPlan`-blob path: `updateProjectPlan`, the `plan` projection on
 `V1Project`, and the `plan`-asset write in the store. Per the Asset-Graph
 Migration Rule (CLAUDE.md): no compat shims — the storyboard tables are the
@@ -147,10 +129,9 @@ bridge is removed." When the v1 compatibility bridge dies, add the typed check
 ```
 P0 (deploy check)
 PR 1 (backfill/validate)          — independent, do early
-PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
 PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
 PR 5 (actions log)             ──▶ PR 6
 PR 7 — whenever the v1 bridge is removed
 ```
 
-PRs 1, 2, 4, 5 are mutually independent and can run in parallel.
+PRs 1, 4, 5 are mutually independent and can run in parallel.
