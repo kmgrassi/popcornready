@@ -1322,6 +1322,30 @@ async function assertStoryboardRowsAreWritable(input: {
   }
 }
 
+async function restoreStoryboardOrder(
+  db: SupabaseClient,
+  projectId: string,
+  scenes: Array<{ id: string; sceneIndex: number }>,
+  beats: Array<{ id: string; beatIndex: number }>
+): Promise<void> {
+  for (const scene of scenes) {
+    const { error } = await db
+      .from("storyboard_scenes")
+      .update({ scene_index: scene.sceneIndex })
+      .eq("project_id", projectId)
+      .eq("id", scene.id);
+    throwOnError(error, "restoreStoryboardOrder scene");
+  }
+  for (const beat of beats) {
+    const { error } = await db
+      .from("storyboard_beats")
+      .update({ beat_index: beat.beatIndex })
+      .eq("project_id", projectId)
+      .eq("id", beat.id);
+    throwOnError(error, "restoreStoryboardOrder beat");
+  }
+}
+
 export async function saveProjectStoryboard(
   workspaceId: string,
   projectId: string,
@@ -1422,65 +1446,49 @@ export async function saveProjectStoryboard(
     beatRowsByScene.set(scene.id, beatRows);
   }
 
-  const keepSceneIds = new Set(input.scenes.map((scene) => scene.id));
-  const keepBeatIds = new Set(
-    input.scenes.flatMap((scene) => scene.beats.map((beat) => beat.id))
+  const sceneOrderBackup = (current?.scenes ?? []).map((scene) => ({
+    id: scene.id,
+    sceneIndex: scene.sceneIndex,
+  }));
+  const beatOrderBackup = (current?.scenes ?? []).flatMap((scene) =>
+    scene.beats.map((beat) => ({ id: beat.id, beatIndex: beat.beatIndex }))
   );
-  const removeSceneIds = [...existingScenes.keys()].filter((id) => !keepSceneIds.has(id));
-  if (removeSceneIds.length > 0) {
-    const { error } = await db
-      .from("storyboard_scenes")
-      .delete()
-      .eq("project_id", projectId)
-      .in("id", removeSceneIds);
-    throwOnError(error, "saveProjectStoryboard remove scenes");
-  }
 
-  const existingSceneIds = input.scenes
-    .map((scene) => scene.id)
-    .filter((id) => existingScenes.has(id));
-  if (existingSceneIds.length > 0) {
-    const updates = existingSceneIds.map((id, index) =>
-      db
-        .from("storyboard_scenes")
-        .update({ scene_index: 10000 + index })
-        .eq("project_id", projectId)
-        .eq("id", id)
+  try {
+    const keepSceneIds = new Set(input.scenes.map((scene) => scene.id));
+    const keepBeatIds = new Set(
+      input.scenes.flatMap((scene) => scene.beats.map((beat) => beat.id))
     );
-    for (const update of updates) throwOnError((await update).error, "saveProjectStoryboard offset scenes");
-  }
+    const removeSceneIds = [...existingScenes.keys()].filter((id) => !keepSceneIds.has(id));
+    const removeBeatIds = [...existingBeats.keys()].filter((id) => !keepBeatIds.has(id));
 
-  for (const sceneRow of sceneRows) {
-    if (existingScenes.has(sceneRow.id)) {
-      const { error } = await db
-        .from("storyboard_scenes")
-        .update(sceneRow)
-        .eq("project_id", projectId)
-        .eq("id", sceneRow.id);
-      throwOnError(error, "saveProjectStoryboard update scene");
-    } else {
-      const { error } = await db.from("storyboard_scenes").insert(sceneRow);
-      throwOnError(error, "saveProjectStoryboard insert scene");
-    }
-  }
-
-  for (const scene of input.scenes) {
-    const existingScene = existingScenes.get(scene.id);
-    const removeBeatIds = (existingScene?.beats ?? [])
-      .map((beat) => beat.id)
-      .filter((id) => !keepBeatIds.has(id));
-    if (removeBeatIds.length > 0) {
-      const { error } = await db
-        .from("storyboard_beats")
-        .delete()
-        .eq("project_id", projectId)
-        .in("id", removeBeatIds);
-      throwOnError(error, "saveProjectStoryboard remove beats");
+    const existingSceneIds = [...existingScenes.keys()];
+    if (existingSceneIds.length > 0) {
+      const updates = existingSceneIds.map((id, index) =>
+        db
+          .from("storyboard_scenes")
+          .update({ scene_index: 10000 + index })
+          .eq("project_id", projectId)
+          .eq("id", id)
+      );
+      for (const update of updates) throwOnError((await update).error, "saveProjectStoryboard offset scenes");
     }
 
-    const existingBeatIds = scene.beats
-      .map((beat) => beat.id)
-      .filter((id) => existingBeats.has(id));
+    for (const sceneRow of sceneRows) {
+      if (existingScenes.has(sceneRow.id)) {
+        const { error } = await db
+          .from("storyboard_scenes")
+          .update(sceneRow)
+          .eq("project_id", projectId)
+          .eq("id", sceneRow.id);
+        throwOnError(error, "saveProjectStoryboard update scene");
+      } else {
+        const { error } = await db.from("storyboard_scenes").insert(sceneRow);
+        throwOnError(error, "saveProjectStoryboard insert scene");
+      }
+    }
+
+    const existingBeatIds = [...existingBeats.keys()];
     for (const [index, id] of existingBeatIds.entries()) {
       const { error } = await db
         .from("storyboard_beats")
@@ -1490,28 +1498,50 @@ export async function saveProjectStoryboard(
       throwOnError(error, "saveProjectStoryboard offset beats");
     }
 
-    for (const beatRow of beatRowsByScene.get(scene.id) ?? []) {
-      const id = String(beatRow.id);
-      if (existingBeats.has(id)) {
-        const { error } = await db
-          .from("storyboard_beats")
-          .update(beatRow)
-          .eq("project_id", projectId)
-          .eq("id", id);
-        throwOnError(error, "saveProjectStoryboard update beat");
-      } else {
-        const { error } = await db.from("storyboard_beats").insert(beatRow);
-        throwOnError(error, "saveProjectStoryboard insert beat");
+    for (const scene of input.scenes) {
+      for (const beatRow of beatRowsByScene.get(scene.id) ?? []) {
+        const id = String(beatRow.id);
+        if (existingBeats.has(id)) {
+          const { error } = await db
+            .from("storyboard_beats")
+            .update(beatRow)
+            .eq("project_id", projectId)
+            .eq("id", id);
+          throwOnError(error, "saveProjectStoryboard update beat");
+        } else {
+          const { error } = await db.from("storyboard_beats").insert(beatRow);
+          throwOnError(error, "saveProjectStoryboard insert beat");
+        }
       }
     }
-  }
 
-  const { error } = await db
-    .from("storyboards")
-    .update({ status: input.status ?? storyboard.status, updated_at: now })
-    .eq("project_id", projectId)
-    .eq("id", storyboard.id);
-  throwOnError(error, "saveProjectStoryboard update storyboard");
+    if (removeBeatIds.length > 0) {
+      const { error } = await db
+        .from("storyboard_beats")
+        .delete()
+        .eq("project_id", projectId)
+        .in("id", removeBeatIds);
+      throwOnError(error, "saveProjectStoryboard remove beats");
+    }
+    if (removeSceneIds.length > 0) {
+      const { error } = await db
+        .from("storyboard_scenes")
+        .delete()
+        .eq("project_id", projectId)
+        .in("id", removeSceneIds);
+      throwOnError(error, "saveProjectStoryboard remove scenes");
+    }
+
+    const { error } = await db
+      .from("storyboards")
+      .update({ status: input.status ?? storyboard.status, updated_at: now })
+      .eq("project_id", projectId)
+      .eq("id", storyboard.id);
+    throwOnError(error, "saveProjectStoryboard update storyboard");
+  } catch (err) {
+    await restoreStoryboardOrder(db, projectId, sceneOrderBackup, beatOrderBackup);
+    throw err;
+  }
 
   const saved = await getProjectStoryboard(workspaceId, projectId);
   if (!saved) throw notFound(`Storyboard not found: ${storyboard.id}`);
