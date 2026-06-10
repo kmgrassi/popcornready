@@ -348,9 +348,21 @@ language plpgsql
 as $$
 declare
   e jsonb;
+  v_input_project uuid;
 begin
   for e in select * from jsonb_array_elements(coalesce(new.inputs, '[]'::jsonb))
   loop
+    -- Edges are strictly intra-project (decided, §7.2): cross-project reuse is
+    -- import-by-copy with the origin recorded in `source`, never a graph edge —
+    -- so blast radius and RLS can never leak across projects.
+    select project_id into v_input_project
+    from public.assets
+    where id = (e ->> 'assetId')::uuid;
+    if v_input_project is distinct from new.project_id then
+      raise exception 'asset input % is not in project %', e ->> 'assetId', new.project_id
+        using errcode = 'check_violation';
+    end if;
+
     insert into public.asset_edges (project_id, from_id, to_id, relation, role, position)
     values (
       new.project_id,
@@ -400,6 +412,10 @@ create table public.selections (
 );
 create index selections_project_idx on public.selections (project_id);
 create index selections_asset_idx   on public.selections (active_asset_id);
+-- Serves the current_selections distinct-on scan (the CAS unique index below
+-- can't — it indexes a coalesce() expression, not the plain column).
+create index selections_current_idx
+  on public.selections (project_id, slot_owner_lineage_id, slot_role, seq desc);
 
 -- Per-slot monotone seq; the unique index is the CAS arbiter — two agents
 -- racing the same slot: one insert wins, the other errors and re-reads.
@@ -626,18 +642,42 @@ are preserved; in-flight creative state (compositions/edit graphs/timelines) is
   and emit actions + pool inserts; `revise`'s patch output is replaced by the
   regeneration vocabulary (`change_beat`, `swap_selection`, `regenerate_*`,
   `assemble`).
-- Remotion render input: a pure compile of the active `cut` composite
-  (children + trims live in each child edge's `role`/`position` plus the
-  child asset's `content`).
+- Remotion render input: a pure compile of the active `cut` composite. Trims,
+  captions, and transitions live in the composite's own `content.children[]`
+  (keyed by position, decided §7.1); edges carry ordering only, so the renderer
+  reads one self-contained document.
 
-## 7. Open questions (decide at PR time, none block the DDL)
+## 7. Design questions (all resolved 2026-06-10)
 
-1. **Trim/offset placement.** A segment's `sourceInSec`/`sourceOutSec`: on the
-   composite's `content` (recommended — keeps edges pure ordering) vs. as edge
-   attributes. Draft assumes composite `content` holds per-child render hints
-   keyed by position.
-2. **Workspace-level pool promotion** (recurring character across projects) —
-   explicitly deferred by North Star §8; the schema doesn't preclude it
-   (`workspace_id` already on every asset).
-3. **`current_selections` materialization.** The `distinct on` view is fine at
-   project scale; revisit only if manifest reads show up in profiles.
+Kept with their resolutions as the design record (North Star §8 pattern); these
+are constraints for the implementing PR.
+
+1. ~~**Trim/offset placement**~~ **— DECIDED: composite `content`.** Trims,
+   captions, and transitions live in the composite's `content.children[]`,
+   keyed by position; edges carry only (child, relation, position). Rationale:
+   edges exist for blast radius, and a trim doesn't change what the cut
+   *depends on* — it changes what the cut *is*, so `content_hash` is the right
+   place for it to register (a re-trim mints a new composite version and the
+   render correctly becomes a stale candidate). The renderer reads one
+   self-contained document; `asset_edges` stays lean. The write-once
+   duplication of the child list between `content` and edges is accepted —
+   both derive from the same insert payload on an immutable row, so they
+   cannot drift.
+2. ~~**Workspace-level pool promotion**~~ **— DECIDED: reuse is by copy, and
+   edges are strictly intra-project.** When cross-project reuse arrives
+   (recurring character/logo), importing **mints a new immutable row** in the
+   target project with the origin recorded in `source` jsonb (the upload
+   pattern) — never a cross-project graph edge. By-reference reuse would leak
+   blast radius across projects (touching the character in project A would
+   stale project B's clips) and break project-scoped RLS/manifest queries.
+   Copying is semantically free because pool rows are immutable. A future
+   "workspace library" is a bookmark/tag table over assets (the `saved_assets`
+   pattern), not a new scope. The edge-sync trigger (§3.3) enforces the
+   intra-project invariant today.
+3. ~~**`current_selections` materialization**~~ **— DECIDED: plain view +
+   covering index.** Selections per project ≈ number of slot flips (hundreds,
+   maybe low thousands), so the `distinct on` view over an indexed
+   `project_id` filter is more than fast enough; a materialized view would add
+   refresh orchestration and make the one table whose job is "current state"
+   itself potentially stale. `selections_current_idx` (§3.4) gives the view a
+   plain-column path the coalesce-expression CAS index can't provide.
