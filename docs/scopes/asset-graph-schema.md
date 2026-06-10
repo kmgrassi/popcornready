@@ -1,12 +1,16 @@
-# Asset-graph schema — migration-ready draft (North Star P1)
+# Asset-graph schema — design record (North Star P1)
 
-> **Status:** Draft for review. **Do not apply yet.** This is the concrete schema
+> **Status:** Schema authored. The DDL lives in
+> [`supabase/migrations/20260610120000_init_asset_graph.sql`](../../supabase/migrations/20260610120000_init_asset_graph.sql)
+> — a **squashed baseline** replacing the previous migration set (§5); this doc
+> is the rationale record. **Not yet applied to the linked database** — that
+> requires the §5 verify-empty guard, then `supabase db reset --linked`.
+> Validated against a scratch Supabase Postgres (migration + seed + functional
+> smoke of edges/selections/guards/graph queries). This is the concrete schema
 > for [NORTH_STAR.md](../NORTH_STAR.md) §5 ("Target data model") — the immutable
 > project-scoped asset pool, dependency/provenance edges, moving selections, and
 > the agent action log. All §8 design decisions are treated as constraints.
-> When this ships as a migration, mint a **fresh, unique timestamp** (parallel
-> agents have collided on versions before) and verify it applied via the
-> Management API. Last updated 2026-06-10.
+> Last updated 2026-06-10.
 
 ## 1. The model in one paragraph
 
@@ -164,24 +168,18 @@ create trigger actions_guard_immutable
   for each row execute function public.actions_guard_immutable();
 ```
 
-### 3.2 `assets` — the pool (fresh create; the old table is dropped)
+### 3.2 `assets` — the pool (fresh create)
 
-The database holds no data worth porting (§5), so the old `assets` table — and
-everything hanging off it — is **dropped outright** and recreated in its final
-shape. No backfill, no column renames. Versus the old table: `kind asset_kind`
-splits into `kind graph_asset_kind` + `media`; `provenance` and
-`generated_asset_job_id` are subsumed by `inputs` / `created_by_action_id`;
-`filename` and `source` become nullable (meaningless for data kinds). The
-delivery columns (`url`, `storage_key`, `storage_bucket`, …), `visibility`, and
-the analysis jsonb columns carry over unchanged.
+The database holds no data worth porting (§5) and the DDL ships as a squashed
+baseline, so the old `assets` shape simply doesn't exist — this is a clean
+`create table`, no backfill, no column renames. Versus the old shape:
+`kind asset_kind` splits into `kind graph_asset_kind` + `media`; `provenance`
+and `generated_asset_job_id` are subsumed by `inputs` /
+`created_by_action_id`; `filename` and `source` become nullable (meaningless
+for data kinds). The delivery columns (`url`, `storage_key`, `storage_bucket`,
+…), `visibility`, and the analysis jsonb columns carry over unchanged.
 
 ```sql
--- Drop the old pool and its dependents (recreated below / in §3.7).
-drop function if exists public.search_public_assets(text, public.asset_kind);
-drop table if exists public.saved_assets;
-drop table if exists public.assets;
-drop type if exists public.asset_kind;
-
 create table public.assets (
   id                   uuid              primary key default gen_random_uuid(),
   schema_version       text              not null default 'asset.v2',
@@ -493,17 +491,30 @@ computed on.
 
 ### 3.5 `generation_runs` — slimmed to a session/budget grouping
 
+Created fresh in the baseline (not altered):
+
 ```sql
-alter table public.generation_runs
-  drop column brief_version_id,
-  drop column review_gates,
-  drop column review_gate,
-  drop column current_stage_type,
-  add column budget_usd double precision,
+create table public.generation_runs (
+  id               uuid primary key default gen_random_uuid(),
+  project_id       uuid             not null references public.projects (id) on delete cascade,
+  status           job_status       not null default 'queued',
+  budget_usd       double precision,
   -- opt-in pause points, by tool name (stops are opt-in, Principle 2):
-  add column gates jsonb not null default '[]'::jsonb;
--- kept: id, project_id, status, progress_percent, message, error, timestamps
+  gates            jsonb            not null default '[]'::jsonb,
+  progress_percent double precision,
+  message          text,
+  error            jsonb,
+  created_at       timestamptz      not null default now(),
+  updated_at       timestamptz      not null default now(),
+  started_at       timestamptz,
+  completed_at     timestamptz
+);
 ```
+
+Retired with the old shape: `brief_version_id` (briefs are pool assets),
+`review_gates`/`review_gate`/`current_stage_type` (the stage enum is gone), and
+`review_feedback` (added by the 20260609 migrations; feedback now flows through
+`actions`).
 
 `generation_stages` / `generation_stage_items` / `generation_stage_artifacts`
 are **dropped** (§5): stage progress becomes a UI projection over
@@ -544,8 +555,8 @@ language sql
 stable
 as $$
   select jsonb_build_object(
-    'assets', coalesce((
-      select jsonb_agg(jsonb_build_object(
+    'assets', (
+      select coalesce(jsonb_agg(jsonb_build_object(
         'ref', a.ref, 'kind', a.kind, 'status', a.status, 'role', a.role,
         'lineage', a.lineage_id, 'v', a.version,
         'summary', coalesce(a.description, a.content ->> 'summary'),
@@ -562,8 +573,8 @@ as $$
       from public.assets a
       where a.project_id = p_project_id
     ),
-    'selections', coalesce((
-      select jsonb_agg(jsonb_build_object(
+    'selections', (
+      select coalesce(jsonb_agg(jsonb_build_object(
         'owner', s.slot_owner_lineage_id, 'slot', s.slot_role, 'seq', s.seq,
         'active', (select ref from public.assets where id = s.active_asset_id)
       )), '[]'::jsonb)
@@ -622,9 +633,14 @@ create policy assets_public_read on public.assets
   for select to anon, authenticated
   using (visibility = 'public' and public.project_is_public(project_id));
 
-create trigger assets_visibility_tier
-  before insert or update of visibility, workspace_id, project_id on public.assets
-  for each row execute function public.enforce_visibility_tier();
+-- NOTE: the tier->visibility triggers stay DETACHED — migration 20260609020000
+-- deliberately dropped them so all users can toggle public/private until
+-- billing tiers ship. enforce_visibility_tier() is kept (unattached) for that
+-- day; what IS attached is the tier-agnostic workspace-consistency check it
+-- used to provide as a side effect:
+create trigger assets_workspace_consistency
+  before insert or update of workspace_id, project_id on public.assets
+  for each row execute function public.enforce_asset_workspace_consistency();
 
 -- saved_assets: recreate exactly as in the init schema §13 (definition and
 -- policies unchanged — it references assets only by id).
@@ -662,18 +678,15 @@ objects are dropped outright and `assets` is created fresh in its final shape.
 row counts over `users` / `workspaces` / `projects` / `assets` via the
 Management API query endpoint (don't trust a stale assumption).
 
-Two ways to land it — **prefer the baseline squash**:
-
-- **A (preferred): squashed baseline.** Fold this DDL into a single new
-  baseline migration replacing the current history — the exact precedent of
-  `20260603000000_init_schema.sql`, which is itself a squash. Reset the linked
-  database (`supabase db reset --linked`). Future readers never see the dead
-  tables at all, which is the point: nothing left to confuse later work.
-  Cost: the reset wipes `auth.users`, so dev logins re-sign-up.
-- **B: additive migration.** One new migration (fresh, unique timestamp —
-  parallel agents have collided on versions before) that drops the dead
-  objects and creates the new ones. Keeps history and auth users, but the
-  retired tables stay visible in past migrations.
+**Option A (squashed baseline) is what shipped:**
+`supabase/migrations/20260610120000_init_asset_graph.sql` replaces the previous
+five migration files — the exact precedent of `20260603000000_init_schema.sql`,
+which was itself a squash. The dead tables below simply do not exist in it;
+future readers never see them. Landing it requires resetting the linked
+database (`supabase db reset --linked`), which also wipes `auth.users` — dev
+logins re-sign-up. (The rejected alternative was an additive drop-migration:
+it would keep history and auth users, but leave the retired tables visible in
+past migrations.)
 
 **Dead objects (deleted entirely; nothing references them after this DDL):**
 
