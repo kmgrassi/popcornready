@@ -167,7 +167,9 @@ survive. One sidebar item replaces four; nothing is lost.
 
 - **Draft persistence — server-side, multi-draft from day one (decided).**
   `BriefDraft` + active step persist to the API on `update()` (debounced)
-  and rehydrate on mount. **Users can hold many drafts** and pick between
+  **and on every step transition** (`next()`/`back()`/`goTo()` — the step can
+  change without the draft changing, and refresh must restore both) and
+  rehydrate on mount. **Users can hold many drafts** and pick between
   them: the Studio start screen lists existing drafts ("Continue a draft",
   most recent first) above the "Start a new video" CTA, and starting new
   always creates a new draft — no replace prompt. A stale or
@@ -258,8 +260,9 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
 
 ### PR 2b — Studio continuity: drafts + picker + run rehydration *(depends on PR 2a; biggest UX win)*
 - **Files:** new `apps/web/src/lib/draftStore.ts`;
-  `components/studio/useStudioFlow.ts` (debounced persist on `update()`/
-  `startGeneration()`, rehydrate by draft id, clear on export/abandon);
+  `components/studio/useStudioFlow.ts` (debounced persist on `update()`,
+  immediate persist on step transitions — `next()`/`back()`/`goTo()` — and on
+  `startGeneration()`; rehydrate by draft id, clear on export/abandon);
   `StudioShell.tsx` + `StudioEmptyState.tsx` → a **start screen**: "Start a
   new video" CTA above a "Continue a draft" list (excerpt + step + updated
   time, delete affordance per row).
