@@ -549,6 +549,33 @@ function paginate<T extends { id: string; createdAt: string }>(
   return { items, nextCursor };
 }
 
+function updatedOrderTuple(
+  a: { id: string; updatedAt: string },
+  b: { id: string; updatedAt: string }
+): number {
+  if (a.updatedAt === b.updatedAt) return a.id < b.id ? 1 : -1;
+  return a.updatedAt < b.updatedAt ? 1 : -1;
+}
+
+function paginateByUpdatedAt<T extends { id: string; updatedAt: string }>(
+  all: T[],
+  limit: number,
+  cursor: string | null
+): PageResult<T> {
+  const sorted = [...all].sort(updatedOrderTuple);
+  let start = 0;
+  if (cursor) {
+    const idx = sorted.findIndex((item) => item.id === cursor);
+    start = idx === -1 ? sorted.length : idx + 1;
+  }
+  const items = sorted.slice(start, start + limit);
+  const nextCursor =
+    start + limit < sorted.length && items.length > 0
+      ? items[items.length - 1].id
+      : null;
+  return { items, nextCursor };
+}
+
 // ---------------------------------------------------------------------------
 // Workspaces
 // ---------------------------------------------------------------------------
@@ -841,7 +868,9 @@ export async function listStudioDrafts(
   let query = db
     .from("studio_drafts")
     .select("*")
-    .eq("workspace_id", workspaceId);
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false });
   query = actor.isLocal
     ? query.eq("local_actor_id", actor.id).is("owner_user_id", null)
     : query.eq("owner_user_id", actor.id);
@@ -849,7 +878,7 @@ export async function listStudioDrafts(
   const { data, error } = await query;
   throwOnError(error, "listStudioDrafts");
   const all = (data as StudioDraftRow[]).map(mapStudioDraftSummary);
-  return paginate(all, limit, cursor);
+  return paginateByUpdatedAt(all, limit, cursor);
 }
 
 export async function createStudioDraft(input: {
