@@ -1,14 +1,20 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   type GateableGenerationStageType,
 } from "@popcorn/shared/v1/types";
+import { useNavigate } from "react-router-dom";
 import { Button } from "../ui/Button";
 import { StatusChecklist } from "../ui/StatusChecklist";
 import { StudioEmptyState } from "./StudioEmptyState";
 import { StudioStepper } from "./StudioStepper";
 import { buildChecklistItems } from "./statusChecklist";
-import { useStudioFlow, type BriefDraft, type StudioStep } from "./useStudioFlow";
+import {
+  EMPTY_BRIEF_DRAFT,
+  useStudioFlow,
+  type BriefDraft,
+  type StudioStep,
+} from "./useStudioFlow";
 import { BriefStep } from "./steps/BriefStep";
 import { SourceFootageStep } from "./steps/SourceFootageStep";
 import { StoryDirectionStep } from "./steps/StoryDirectionStep";
@@ -16,11 +22,21 @@ import { GenerateStep } from "./steps/GenerateStep";
 import { ReviewStep as ReviewSetupStep } from "./steps/ReviewStep";
 import { ReviewStep } from "./ReviewStep";
 import { ExportStep } from "./steps/ExportStep";
+import {
+  createDraft,
+  deleteDraft,
+  listDrafts,
+  loadDraft,
+  type StudioDraftPayload,
+  type StudioDraftSummary,
+} from "../../lib/draftStore";
 import styles from "./StudioShell.module.css";
 
 export interface StudioShellProps {
   /** Seed the brief draft, e.g. from `?goal=`/`?length=` query params. */
   initialBrief?: Partial<BriefDraft>;
+  /** Optional saved draft id from `/studio?draft=:id`. */
+  draftId?: string | null;
 }
 
 /**
@@ -31,19 +47,121 @@ export interface StudioShellProps {
  * checklist (generating), and the preview + timeline (review). Steps plug in by
  * implementing `StepProps`; the shell owns navigation and the run lifecycle.
  */
-export function StudioShell({ initialBrief }: StudioShellProps) {
-  const flow = useStudioFlow({ initialBrief });
-  const [started, setStarted] = useState(false);
+export function StudioShell({ initialBrief, draftId }: StudioShellProps) {
+  const navigate = useNavigate();
+  const seededBrief = useMemo(
+    () => ({
+      ...initialBrief,
+    }),
+    [initialBrief],
+  );
+  const [drafts, setDrafts] = useState<StudioDraftSummary[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(true);
+  const [draftsError, setDraftsError] = useState<string | null>(null);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [initialPayload, setInitialPayload] = useState<StudioDraftPayload | null>(null);
+  const [flowKey, setFlowKey] = useState(0);
 
-  // Before the user starts, show the empty state. Once they click "Start new
-  // video" we enter the Brief step; the stepper + step body take over.
-  if (flow.state === "initial" && !started) {
+  const refreshDrafts = useCallback(async () => {
+    setDraftsLoading(true);
+    setDraftsError(null);
+    try {
+      setDrafts(await listDrafts());
+    } catch (error) {
+      setDraftsError(error instanceof Error ? error.message : "Could not load drafts.");
+    } finally {
+      setDraftsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDrafts();
+  }, [refreshDrafts]);
+
+  const openDraft = useCallback(
+    async (nextDraftId: string) => {
+      setDraftsError(null);
+      try {
+        const record = await loadDraft(nextDraftId);
+        setActiveDraftId(record.draftId);
+        setInitialPayload(record.payload);
+        setFlowKey((current) => current + 1);
+        navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
+      } catch (error) {
+        setDraftsError(error instanceof Error ? error.message : "Could not open draft.");
+      }
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    if (!draftId || activeDraftId === draftId) return;
+    void openDraft(draftId);
+  }, [activeDraftId, draftId, openDraft]);
+
+  async function startNewDraft() {
+    setDraftsError(null);
+    try {
+      const record = await createDraft({ ...EMPTY_BRIEF_DRAFT, ...seededBrief }, "brief");
+      setActiveDraftId(record.draftId);
+      setInitialPayload(record.payload);
+      setFlowKey((current) => current + 1);
+      navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
+    } catch (error) {
+      setDraftsError(error instanceof Error ? error.message : "Could not create a draft.");
+    }
+  }
+
+  async function removeDraft(nextDraftId: string) {
+    setDraftsError(null);
+    try {
+      await deleteDraft(nextDraftId);
+      setDrafts((current) => current.filter((draft) => draft.draftId !== nextDraftId));
+      if (nextDraftId === activeDraftId) {
+        setActiveDraftId(null);
+        setInitialPayload(null);
+        navigate("/studio", { replace: true });
+      }
+    } catch (error) {
+      setDraftsError(error instanceof Error ? error.message : "Could not delete draft.");
+    }
+  }
+
+  if (!activeDraftId) {
     return (
       <main className={styles.shell}>
-        <StudioEmptyState onStart={() => setStarted(true)} />
+        <StudioEmptyState
+          drafts={drafts}
+          loading={draftsLoading}
+          error={draftsError}
+          onStart={() => void startNewDraft()}
+          onResume={(id) => void openDraft(id)}
+          onDelete={(id) => void removeDraft(id)}
+        />
       </main>
     );
   }
+
+  return (
+    <StudioFlowView
+      key={`${activeDraftId}-${flowKey}`}
+      draftId={activeDraftId}
+      initialBrief={seededBrief}
+      initialPayload={initialPayload}
+    />
+  );
+}
+
+function StudioFlowView({
+  draftId,
+  initialBrief,
+  initialPayload,
+}: {
+  draftId: string;
+  initialBrief?: Partial<BriefDraft>;
+  initialPayload: StudioDraftPayload | null;
+}) {
+  const flow = useStudioFlow({ initialBrief, draftId, initialPayload });
 
   if (flow.state === "generating") {
     const items = buildChecklistItems(flow.stages, flow.run?.status ?? "queued");
@@ -78,6 +196,7 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
       update: flow.update,
       next: flow.next,
       back: flow.back,
+      completeDraft: flow.completeDraft,
     };
 
     return (
@@ -135,6 +254,7 @@ function ActiveStep({
     update: flow.update,
     next: flow.next,
     back: flow.back,
+    completeDraft: flow.completeDraft,
   };
 
   switch (step) {
