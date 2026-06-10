@@ -22,6 +22,7 @@
 //     `assets` stores METADATA only — the bytes live in storage (separate PR).
 
 import { AsyncLocalStorage } from "async_hooks";
+import { randomUUID } from "crypto";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isMissingRow, throwDatabaseError } from "../../supabase/db-errors";
@@ -29,7 +30,7 @@ import {
   DASHBOARD_SCHEMA_VERSION,
   type DashboardSummary,
 } from "@popcorn/shared/v1/dashboard";
-import { notFound } from "./errors";
+import { ApiError, notFound } from "./errors";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
@@ -1221,6 +1222,106 @@ async function nextBeatSnapshotAssetId(input: {
   return asset.id;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertUuid(value: string | null | undefined, path: string): void {
+  if (value && !UUID_RE.test(value)) {
+    throw new ApiError("validation_failed", `${path} must be a UUID.`);
+  }
+}
+
+async function assertStoryboardIdAvailable(
+  db: SupabaseClient,
+  projectId: string,
+  storyboardId: string | null | undefined
+): Promise<void> {
+  assertUuid(storyboardId, "id");
+  if (!storyboardId) return;
+  const { data, error } = await db
+    .from("storyboards")
+    .select("id, project_id")
+    .eq("id", storyboardId)
+    .maybeSingle();
+  if (isNoRows(error)) return;
+  throwOnError(error, "assertStoryboardIdAvailable");
+  if (data && (data as StoryboardRow).project_id !== projectId) {
+    throw new ApiError("validation_failed", "Storyboard id belongs to another project.");
+  }
+}
+
+async function assertStoryboardRowsAreWritable(input: {
+  db: SupabaseClient;
+  projectId: string;
+  storyboardId: string;
+  storyboard: SaveStoryboardInput;
+}): Promise<void> {
+  const sceneIds = input.storyboard.scenes.map((scene) => scene.id);
+  const beatIds = input.storyboard.scenes.flatMap((scene) =>
+    scene.beats.map((beat) => beat.id)
+  );
+  for (const [index, scene] of input.storyboard.scenes.entries()) {
+    assertUuid(scene.id, `scenes[${index}].id`);
+    for (const [beatIndex, beat] of scene.beats.entries()) {
+      assertUuid(beat.id, `scenes[${index}].beats[${beatIndex}].id`);
+    }
+  }
+
+  if (sceneIds.length > 0) {
+    const { data, error } = await input.db
+      .from("storyboard_scenes")
+      .select("id, project_id, storyboard_id")
+      .in("id", sceneIds);
+    throwOnError(error, "assertStoryboardRowsAreWritable scenes");
+    for (const row of (data ?? []) as StoryboardSceneRow[]) {
+      if (row.project_id !== input.projectId || row.storyboard_id !== input.storyboardId) {
+        throw new ApiError(
+          "validation_failed",
+          `Scene id belongs to another storyboard: ${row.id}.`
+        );
+      }
+    }
+  }
+
+  if (beatIds.length === 0) return;
+  const beats = await input.db
+    .from("storyboard_beats")
+    .select("id, project_id, scene_id")
+    .in("id", beatIds);
+  throwOnError(beats.error, "assertStoryboardRowsAreWritable beats");
+  const existingBeatRows = (beats.data ?? []) as Pick<
+    StoryboardBeatRow,
+    "id" | "project_id" | "scene_id"
+  >[];
+  const existingBeatSceneIds = [
+    ...new Set(existingBeatRows.map((beat) => beat.scene_id)),
+  ];
+  const beatScenes = existingBeatSceneIds.length
+    ? await input.db
+        .from("storyboard_scenes")
+        .select("id, project_id, storyboard_id")
+        .in("id", existingBeatSceneIds)
+    : { data: [], error: null };
+  throwOnError(beatScenes.error, "assertStoryboardRowsAreWritable beat scenes");
+  const sceneById = new Map(
+    ((beatScenes.data ?? []) as StoryboardSceneRow[]).map((scene) => [scene.id, scene])
+  );
+  for (const row of existingBeatRows) {
+    const scene = sceneById.get(row.scene_id);
+    if (
+      row.project_id !== input.projectId ||
+      !scene ||
+      scene.project_id !== input.projectId ||
+      scene.storyboard_id !== input.storyboardId
+    ) {
+      throw new ApiError(
+        "validation_failed",
+        `Beat id belongs to another storyboard: ${row.id}.`
+      );
+    }
+  }
+}
+
 export async function saveProjectStoryboard(
   workspaceId: string,
   projectId: string,
@@ -1229,12 +1330,20 @@ export async function saveProjectStoryboard(
   const db = getServiceSupabase();
   await requireProjectRow(db, workspaceId, projectId);
   const now = new Date().toISOString();
+  await assertStoryboardIdAvailable(db, projectId, input.id);
   let storyboard = await getStoryboardRow(db, projectId, input.id);
+  const storyboardId = storyboard?.id ?? input.id ?? randomUUID();
+  await assertStoryboardRowsAreWritable({
+    db,
+    projectId,
+    storyboardId,
+    storyboard: input,
+  });
   if (!storyboard) {
     const { data, error } = await db
       .from("storyboards")
       .insert({
-        ...(input.id ? { id: input.id } : {}),
+        id: storyboardId,
         project_id: projectId,
         status: input.status ?? "draft",
         created_at: now,
@@ -1271,6 +1380,48 @@ export async function saveProjectStoryboard(
     }
   }
 
+  const sceneRows = input.scenes.map((scene, index) => ({
+    id: scene.id,
+    project_id: projectId,
+    storyboard_id: storyboardId,
+    scene_index: index,
+    title: scene.title,
+    summary: scene.summary ?? null,
+    setting: scene.setting ?? null,
+    mood: scene.mood ?? null,
+    duration_sec: scene.durationSec ?? null,
+    status: scene.status ?? "draft",
+    updated_at: now,
+  }));
+  const beatRowsByScene = new Map<string, Record<string, unknown>[]>();
+  for (const scene of input.scenes) {
+    const beatRows = [];
+    for (const [index, beat] of scene.beats.entries()) {
+      const existing = existingBeats.get(beat.id);
+      beatRows.push({
+        id: beat.id,
+        project_id: projectId,
+        scene_id: scene.id,
+        beat_index: index,
+        intent: beat.intent,
+        visual_description: beat.visualDescription ?? null,
+        dialogue_summary: beat.dialogueSummary ?? null,
+        narration: beat.narration ?? null,
+        duration_sec: beat.durationSec ?? null,
+        status: beat.status ?? "draft",
+        beat_asset_id: await nextBeatSnapshotAssetId({
+          db,
+          workspaceId,
+          projectId,
+          existing,
+          beat,
+        }),
+        updated_at: now,
+      });
+    }
+    beatRowsByScene.set(scene.id, beatRows);
+  }
+
   const keepSceneIds = new Set(input.scenes.map((scene) => scene.id));
   const keepBeatIds = new Set(
     input.scenes.flatMap((scene) => scene.beats.map((beat) => beat.id))
@@ -1299,24 +1450,18 @@ export async function saveProjectStoryboard(
     for (const update of updates) throwOnError((await update).error, "saveProjectStoryboard offset scenes");
   }
 
-  const sceneRows = input.scenes.map((scene, index) => ({
-    id: scene.id,
-    project_id: projectId,
-    storyboard_id: storyboard.id,
-    scene_index: index,
-    title: scene.title,
-    summary: scene.summary ?? null,
-    setting: scene.setting ?? null,
-    mood: scene.mood ?? null,
-    duration_sec: scene.durationSec ?? null,
-    status: scene.status ?? "draft",
-    updated_at: now,
-  }));
-  if (sceneRows.length > 0) {
-    const { error } = await db
-      .from("storyboard_scenes")
-      .upsert(sceneRows, { onConflict: "id" });
-    throwOnError(error, "saveProjectStoryboard upsert scenes");
+  for (const sceneRow of sceneRows) {
+    if (existingScenes.has(sceneRow.id)) {
+      const { error } = await db
+        .from("storyboard_scenes")
+        .update(sceneRow)
+        .eq("project_id", projectId)
+        .eq("id", sceneRow.id);
+      throwOnError(error, "saveProjectStoryboard update scene");
+    } else {
+      const { error } = await db.from("storyboard_scenes").insert(sceneRow);
+      throwOnError(error, "saveProjectStoryboard insert scene");
+    }
   }
 
   for (const scene of input.scenes) {
@@ -1345,35 +1490,19 @@ export async function saveProjectStoryboard(
       throwOnError(error, "saveProjectStoryboard offset beats");
     }
 
-    const beatRows = [];
-    for (const [index, beat] of scene.beats.entries()) {
-      const existing = existingBeats.get(beat.id);
-      beatRows.push({
-        id: beat.id,
-        project_id: projectId,
-        scene_id: scene.id,
-        beat_index: index,
-        intent: beat.intent,
-        visual_description: beat.visualDescription ?? null,
-        dialogue_summary: beat.dialogueSummary ?? null,
-        narration: beat.narration ?? null,
-        duration_sec: beat.durationSec ?? null,
-        status: beat.status ?? "draft",
-        beat_asset_id: await nextBeatSnapshotAssetId({
-          db,
-          workspaceId,
-          projectId,
-          existing,
-          beat,
-        }),
-        updated_at: now,
-      });
-    }
-    if (beatRows.length > 0) {
-      const { error } = await db
-        .from("storyboard_beats")
-        .upsert(beatRows, { onConflict: "id" });
-      throwOnError(error, "saveProjectStoryboard upsert beats");
+    for (const beatRow of beatRowsByScene.get(scene.id) ?? []) {
+      const id = String(beatRow.id);
+      if (existingBeats.has(id)) {
+        const { error } = await db
+          .from("storyboard_beats")
+          .update(beatRow)
+          .eq("project_id", projectId)
+          .eq("id", id);
+        throwOnError(error, "saveProjectStoryboard update beat");
+      } else {
+        const { error } = await db.from("storyboard_beats").insert(beatRow);
+        throwOnError(error, "saveProjectStoryboard insert beat");
+      }
     }
   }
 
