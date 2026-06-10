@@ -35,9 +35,82 @@ export interface V1Project {
   workspaceId: string;
   name: string;
   status: ProjectStatus;
-  // The project's editable storyboard plan (Scenes -> Beats). Null until a plan
-  // exists. Edited via PUT /projects/:id/plan (Storyboard & Scenes — PR6).
-  plan?: EditPlan | null;
+  hasStoryboard?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StoryboardStatus =
+  | "draft"
+  | "generating"
+  | "ready"
+  | "reviewing"
+  | "approved"
+  | "archived";
+
+export type StoryboardItemStatus =
+  | "draft"
+  | "queued"
+  | "generating"
+  | "ready"
+  | "approved"
+  | "rejected"
+  | "failed";
+
+export interface StoryboardPanel {
+  id: string;
+  projectId: string;
+  beatId: string;
+  panelIndex: number;
+  imageAssetId: string | null;
+  promptAssetId: string | null;
+  status: StoryboardItemStatus;
+  isSelected: boolean;
+  approvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoryboardBeat {
+  id: string;
+  projectId: string;
+  sceneId: string;
+  beatIndex: number;
+  intent: string;
+  visualDescription: string | null;
+  dialogueSummary: string | null;
+  narration: string | null;
+  durationSec: number | null;
+  status: StoryboardItemStatus;
+  beatAssetId: string | null;
+  panels: StoryboardPanel[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoryboardScene {
+  id: string;
+  projectId: string;
+  storyboardId: string;
+  sceneIndex: number;
+  title: string | null;
+  summary: string | null;
+  setting: string | null;
+  mood: string | null;
+  durationSec: number | null;
+  sceneAssetId: string | null;
+  status: StoryboardItemStatus;
+  beats: StoryboardBeat[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectStoryboard {
+  id: string;
+  projectId: string;
+  planAssetId: string | null;
+  status: StoryboardStatus;
+  scenes: StoryboardScene[];
   createdAt: string;
   updatedAt: string;
 }

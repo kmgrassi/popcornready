@@ -8,13 +8,13 @@ import type {
   GenerationJob,
   GenerationRun,
   GenerationRunStatus,
+  ProjectStoryboard,
   V1Asset,
   V1Project,
   VersionedTimeline,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
-import type { EditPlan, Project } from "@popcorn/shared/types";
-import type { Asset } from "@popcorn/shared/assets/types";
+import type { Project } from "@popcorn/shared/types";
 import type { GenerationRunDetail } from "./v1/generation-runs/status";
 import {
   authenticatedFetch,
@@ -146,6 +146,37 @@ export interface ProjectsResponse {
 
 export interface ProjectResponse {
   project: V1Project;
+}
+
+export interface ProjectStoryboardResponse {
+  storyboard: ProjectStoryboard | null;
+}
+
+export interface SaveStoryboardBeatInput {
+  id: string;
+  intent: string;
+  visualDescription?: string | null;
+  dialogueSummary?: string | null;
+  narration?: string | null;
+  durationSec?: number | null;
+  status?: ProjectStoryboard["scenes"][number]["beats"][number]["status"];
+}
+
+export interface SaveStoryboardSceneInput {
+  id: string;
+  title: string | null;
+  summary?: string | null;
+  setting?: string | null;
+  mood?: string | null;
+  durationSec?: number | null;
+  status?: ProjectStoryboard["scenes"][number]["status"];
+  beats: SaveStoryboardBeatInput[];
+}
+
+export interface SaveProjectStoryboardInput {
+  id?: string | null;
+  status?: ProjectStoryboard["status"];
+  scenes: SaveStoryboardSceneInput[];
 }
 
 export interface ListPagination {
@@ -353,31 +384,11 @@ export interface StudioProjectResponse {
   project: Project | null;
 }
 
-export interface RegenerateBeatTileResponse {
-  projectId: string;
-  beatId: string;
-  sceneId: string;
-  storyboardAssetId: string | null;
-  status: "regenerated" | "queued" | "pending_generator";
-}
-
-// Read-only projection consumed by the Storyboard view (storyboard-scenes PR5):
-// the project's plan (Scenes → Beats) plus its pooled assets. The view resolves
-// each beat's `beat_storyboard` sketch tile from `assets` by
-// `role === "beat_storyboard"` && `depicts.beatId`. Plan/assets become populated
-// once the PR1 (plan model) and PR2 (tile generation) backend wiring lands; until
-// then the projection is empty and the view shows its empty state.
-export interface StoryboardData {
-  projectId: string | null;
-  plan: EditPlan | null;
-  assets: Asset[];
-}
-
 function studioProjectFromV1(project: V1Project): Project {
   return {
     id: project.id,
     goal: project.name,
-    plan: project.plan ?? null,
+    plan: null,
     timeline: null,
     clips: [],
     critic: null,
@@ -421,19 +432,18 @@ export const v1Api = {
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
     ),
-  // Persist an edited storyboard plan (Scenes -> Beats). Scene/beat ids must be
-  // stable across edits; the API validates them as unique + non-empty.
-  updateProjectPlan: (projectId: string, plan: EditPlan) =>
-    apiRequest<ProjectResponse>(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/plan`,
-      { method: "PUT", body: plan }
+  getProjectStoryboard: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<ProjectStoryboardResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard`,
+      { signal }
     ),
-  // Regenerate the storyboard sketch tile for a single beat (recompute-affected
-  // only — triggers generation for just this beat).
-  regenerateBeatTile: (projectId: string, beatId: string) =>
-    apiRequest<RegenerateBeatTileResponse>(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard/beats/${encodeURIComponent(beatId)}/regenerate`,
-      { method: "POST", body: {} }
+  saveProjectStoryboard: (
+    projectId: string,
+    storyboard: SaveProjectStoryboardInput
+  ) =>
+    apiRequest<{ storyboard: ProjectStoryboard }>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard`,
+      { method: "PUT", body: storyboard }
     ),
   getGenerationRun: (
     projectId: string,
@@ -622,16 +632,6 @@ export const v1Api = {
         timeline: timeline ?? null,
         clips: assets.map(workspaceAssetToClip),
       },
-    };
-  },
-  // Read-only selector for the Storyboard view. Resolves the current studio
-  // project and returns its plan + pooled assets. Read-only by design (PR5).
-  getStoryboard: async (): Promise<StoryboardData> => {
-    const { project } = await v1Api.getStudioProject();
-    return {
-      projectId: project?.id ?? null,
-      plan: project?.plan ?? null,
-      assets: project?.assets ?? [],
     };
   },
   listCreatedVideos: async () => ({ videos: [] }),

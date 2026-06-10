@@ -5,7 +5,6 @@ import {
   parseAnalyzeBatch,
   parseCreateProject,
   parsePagination,
-  parseUpdateProjectPlan,
 } from "@/lib/api/v1/schemas";
 import {
   analyzeAssetBatch,
@@ -15,9 +14,8 @@ import {
   createProject,
   getProject,
   listProjects,
-  updateProjectPlan,
 } from "@/lib/api/v1/store";
-import { regenerateBeatTile } from "@/lib/api/v1/storyboard";
+import { getStoryboard, putStoryboard } from "@/lib/api/v1/storyboard";
 
 export const projectsRouter = Router();
 
@@ -63,35 +61,23 @@ projectsRouter.get(
   })
 );
 
-// Persist the project's edited storyboard plan (Scenes -> Beats). Scene/beat
-// ids are preserved by the editor and validated as stable + unique here.
+projectsRouter.get(
+  "/projects/:projectId/storyboard",
+  route(async ({ auth }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    return getStoryboard({ auth, projectId: params.projectId });
+  })
+);
+
 projectsRouter.put(
-  "/projects/:projectId/plan",
+  "/projects/:projectId/storyboard",
   mutation(async ({ auth, body }, params) => {
     if (!params.projectId) {
       throw new ApiError("validation_failed", "projectId is required.");
     }
-    const plan = parseUpdateProjectPlan(body);
-    const project = await updateProjectPlan(auth.workspaceId, params.projectId, plan);
-    return { status: 200, body: { project } };
-  })
-);
-
-// Regenerate the storyboard sketch tile for ONE beat (recompute-affected only).
-projectsRouter.post(
-  "/projects/:projectId/storyboard/beats/:beatId/regenerate",
-  mutation(async ({ auth }, params) => {
-    if (!params.projectId) {
-      throw new ApiError("validation_failed", "projectId is required.");
-    }
-    if (!params.beatId) {
-      throw new ApiError("validation_failed", "beatId is required.");
-    }
-    return regenerateBeatTile({
-      auth,
-      projectId: params.projectId,
-      beatId: params.beatId,
-    });
+    return putStoryboard({ auth, projectId: params.projectId, body });
   })
 );
 

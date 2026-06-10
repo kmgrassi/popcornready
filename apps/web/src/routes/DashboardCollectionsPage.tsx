@@ -274,7 +274,7 @@ export function ProjectsPage() {
                     <span className={`${styles.chip} ${statusChipClass(project.status)}`}>
                       {titleCase(project.status)}
                     </span>
-                    <span>{project.plan ? "Storyboard ready" : "No storyboard yet"}</span>
+                    <span>{project.hasStoryboard ? "Storyboard ready" : "No storyboard yet"}</span>
                     <span>Created {formatDate(project.createdAt)}</span>
                   </div>
                 </div>
