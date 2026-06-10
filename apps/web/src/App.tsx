@@ -13,10 +13,10 @@ import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
 import { BrandKitPage } from "./routes/BrandKitPage";
 import { HomePage } from "./routes/HomePage";
+import { LaunchpadPage } from "./routes/LaunchpadPage";
 import { LibraryPage } from "./routes/LibraryPage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
-import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
@@ -34,10 +34,7 @@ export function App() {
         </Route>
 
         <Route element={<AuthenticatedAppLayout />}>
-          <Route
-            path="/dashboard"
-            element={<DashboardPlaceholderPage kind="dashboard" />}
-          />
+          <Route path="/dashboard" element={<LaunchpadPage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/library/:tab" element={<LibraryPage />} />
           <Route path="/projects" element={<RedirectWithSearch to="/library/projects" />} />

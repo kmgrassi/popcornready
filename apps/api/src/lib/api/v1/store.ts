@@ -25,13 +25,13 @@ import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { EditPlan } from "@popcorn/shared/types";
-import { notFound } from "./errors";
-import { GeneratedAssetProvenance } from "./provenance";
-import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
   DASHBOARD_SCHEMA_VERSION,
   type DashboardSummary,
 } from "@popcorn/shared/v1/dashboard";
+import { notFound } from "./errors";
+import { GeneratedAssetProvenance } from "./provenance";
+import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
   type CompositionPlan as ContractCompositionPlan,
   type GenerationRun,
@@ -1396,6 +1396,7 @@ export async function getWorkspaceDashboardSummary(
       projectId: run.projectId,
       projectName: run.projectName,
       status: run.status,
+      reviewGate: run.reviewGate ?? null,
       currentStageType: run.currentStageType,
       progressPercent: run.progressPercent,
       updatedAt: run.updatedAt,
@@ -1414,7 +1415,6 @@ export async function getWorkspaceDashboardSummary(
       })),
   };
 }
-
 export async function listPublicAssets(
   limit: number,
   cursor: string | null,

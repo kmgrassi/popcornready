@@ -312,3 +312,28 @@ test("getWorkspaceDashboardSummary counts and caps dashboard state", async () =>
     ["a7", "a6", "a5", "a4", "a3", "a2"]
   );
 });
+
+test("getWorkspaceDashboardSummary includes reviewGate for gated runs", async () => {
+  const runs = [
+    makeRun("p1", {
+      runId: "r1",
+      status: "running",
+      reviewGate: {
+        stageType: "quality_review",
+        stageId: "stage_1",
+        state: "awaiting_review",
+        enteredAt: "2026-01-03T00:00:00.000Z",
+      },
+    }),
+  ];
+  const deps: GetWorkspaceDashboardSummaryDeps = {
+    listProjects: async () => [{ id: "p1", name: "Alpha" }],
+    runStore: runStoreFrom(runs),
+    artifactStore: artifactStoreFrom([]),
+  };
+
+  const summary = await getWorkspaceDashboardSummary("ws1", deps);
+
+  assert.equal(summary.activeRuns.length, 1);
+  assert.equal(summary.activeRuns[0].reviewGate?.stageType, "quality_review");
+});

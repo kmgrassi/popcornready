@@ -5,6 +5,7 @@ import type {
   GenerationRunStatus,
   GenerationStageType,
   JobStatus,
+  RunReviewGate,
   V1Asset,
 } from "./types";
 
@@ -31,6 +32,7 @@ export interface DashboardActiveRunSummary {
   projectId: string;
   projectName: string;
   status: GenerationRunStatus;
+  reviewGate?: RunReviewGate | null;
   currentStageType?: GenerationStageType;
   progressPercent?: number;
   updatedAt: string;

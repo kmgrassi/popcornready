@@ -1,0 +1,48 @@
+.page {
+  display: grid;
+  width: min(var(--content-max), calc(100% - var(--space-8)));
+  margin: 0 auto;
+  padding: var(--space-7) 0 var(--space-8);
+  gap: var(--space-6);
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.skeleton span {
+  display: block;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
+  background-size: 220% 100%;
+  animation: shimmer 1200ms linear infinite;
+}
+
+.skeleton span:first-child {
+  width: 140px;
+}
+
+.skeleton span:nth-child(2) {
+  width: min(620px, 100%);
+  height: 42px;
+}
+
+.skeleton span:nth-child(3) {
+  width: min(760px, 100%);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 220% 0;
+  }
+
+  to {
+    background-position: -220% 0;
+  }
+}
