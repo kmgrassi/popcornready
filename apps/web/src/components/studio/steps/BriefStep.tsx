@@ -4,7 +4,11 @@ import { aspectOptions, lengthOptions, studioCopy } from "../copy";
 import { StepShell } from "./StepShell";
 import styles from "./BriefStep.module.css";
 
-export function BriefStep({ draft, update, next }: StepProps) {
+interface BriefStepProps extends StepProps {
+  openPanel?: string;
+}
+
+export function BriefStep({ draft, update, next, openPanel }: BriefStepProps) {
   return (
     <StepShell
       heading={studioCopy.brief.heading}
@@ -62,7 +66,11 @@ export function BriefStep({ draft, update, next }: StepProps) {
           </fieldset>
         </div>
 
-        <AdvancedDirection draft={draft} update={update} />
+        <AdvancedDirection
+          draft={draft}
+          update={update}
+          defaultOpen={openPanel === "advanced"}
+        />
       </div>
     </StepShell>
   );

@@ -212,6 +212,8 @@ function timelineFromArtifactContent(content: unknown): Timeline | null {
 export interface UseStudioFlowOptions {
   /** Seed the draft (e.g. from `?goal=`/`?length=` query params). */
   initialBrief?: Partial<BriefDraft>;
+  /** Seed the active step for palette and deep-link entry. */
+  initialStep?: StudioStep;
 }
 
 /**
@@ -221,7 +223,7 @@ export interface UseStudioFlowOptions {
  */
 export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
   const [state, setState] = useState<StudioState>("initial");
-  const [step, setStep] = useState<StudioStep>("brief");
+  const [step, setStep] = useState<StudioStep>(options.initialStep ?? "brief");
   const [brief, setBrief] = useState<BriefDraft>(() => ({
     ...EMPTY_BRIEF_DRAFT,
     ...options.initialBrief,

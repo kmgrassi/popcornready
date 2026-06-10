@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   type GateableGenerationStageType,
@@ -21,6 +21,12 @@ import styles from "./StudioShell.module.css";
 export interface StudioShellProps {
   /** Seed the brief draft, e.g. from `?goal=`/`?length=` query params. */
   initialBrief?: Partial<BriefDraft>;
+  /** Seed the active step, e.g. from palette deep links. */
+  initialStep?: StudioStep;
+  /** Skip the empty state when the route is opened for a specific action. */
+  initialStarted?: boolean;
+  /** Optional panel key the active step should open by default. */
+  openPanel?: string;
 }
 
 /**
@@ -31,9 +37,20 @@ export interface StudioShellProps {
  * checklist (generating), and the preview + timeline (review). Steps plug in by
  * implementing `StepProps`; the shell owns navigation and the run lifecycle.
  */
-export function StudioShell({ initialBrief }: StudioShellProps) {
-  const flow = useStudioFlow({ initialBrief });
-  const [started, setStarted] = useState(false);
+export function StudioShell({
+  initialBrief,
+  initialStep,
+  initialStarted = false,
+  openPanel,
+}: StudioShellProps) {
+  const flow = useStudioFlow({ initialBrief, initialStep });
+  const goToStep = flow.goTo;
+  const [started, setStarted] = useState(initialStarted);
+
+  useEffect(() => {
+    if (initialStarted) setStarted(true);
+    if (initialStep) goToStep(initialStep);
+  }, [goToStep, initialStarted, initialStep]);
 
   // Before the user starts, show the empty state. Once they click "Start new
   // video" we enter the Brief step; the stepper + step body take over.
@@ -116,7 +133,12 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
       </div>
       <StudioStepper step={flow.step} onStepClick={flow.goTo} />
       <section className={styles.stepBody}>
-        <ActiveStep step={flow.step} flow={flow} />
+        <ActiveStep
+          key={`${flow.step}:${openPanel ?? ""}`}
+          step={flow.step}
+          flow={flow}
+          openPanel={openPanel}
+        />
       </section>
     </main>
   );
@@ -125,9 +147,11 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
 function ActiveStep({
   step,
   flow,
+  openPanel,
 }: {
   step: StudioStep;
   flow: ReturnType<typeof useStudioFlow>;
+  openPanel?: string;
 }) {
   const stepProps = {
     draft: flow.brief,
@@ -139,7 +163,7 @@ function ActiveStep({
 
   switch (step) {
     case "brief":
-      return <BriefStep {...stepProps} />;
+      return <BriefStep {...stepProps} openPanel={openPanel} />;
     case "footage":
       return <SourceFootageStep {...stepProps} />;
     case "story":
@@ -150,6 +174,7 @@ function ActiveStep({
           {...stepProps}
           error={flow.error}
           onGenerate={flow.startGeneration}
+          openPanel={openPanel}
         />
       );
     case "review":
