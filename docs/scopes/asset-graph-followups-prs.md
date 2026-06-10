@@ -101,23 +101,6 @@ Migration Rule (CLAUDE.md): no compat shims — the storyboard tables are the
 contract, and `storyboards.plan_asset_id` snapshots provide lineage. The brief
 path (also a pool asset) stays as-is.
 
-## PR 4 — provenance wiring: inputs, edges, fingerprints
-
-The graph can't compute blast radius until writers record what things were
-built from:
-
-- Generation writers populate `assets.inputs`
-  (`[{assetId, relation, role?, position?, contentHash}]`) — the sync trigger
-  materializes `asset_edges`. Beat snapshots list the brief; keyframes list
-  their beat snapshot + anchors; clips list keyframe + beat + anchors; panels'
-  image assets list their prompt asset.
-- Define the canonical hash (sha256 over canonically-serialized semantic
-  content) in `packages/shared`; writers set `content_hash` (data kinds at
-  insert; media kinds when bytes land) and `inputs_fingerprint` (hash over
-  sorted input contentHashes + params hash).
-- Acceptance: after generating from a storyboard, `downstream_assets(beatSnapshotId)`
-  returns that beat's keyframe/clip chain and nothing else.
-
 ## PR 5 — actions decision log + proposals
 
 Generation and edit paths record `actions` rows (tool, `input_asset_ids`,
@@ -148,9 +131,9 @@ bridge is removed." When the v1 compatibility bridge dies, add the typed check
 P0 (deploy check)
 PR 1 (backfill/validate)          — independent, do early
 PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
-PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
 PR 5 (actions log)             ──▶ PR 6
+PR 6 (staleness surface)       ──▶ P2 orchestrator
 PR 7 — whenever the v1 bridge is removed
 ```
 
-PRs 1, 2, 4, 5 are mutually independent and can run in parallel.
+PRs 1, 2, and 5 are mutually independent and can run in parallel.
