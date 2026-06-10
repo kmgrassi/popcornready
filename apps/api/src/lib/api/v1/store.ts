@@ -42,6 +42,13 @@ import {
   SCHEMA as CONTRACT_SCHEMA,
 } from "@popcorn/shared/v1/types";
 import {
+  STUDIO_DRAFT_SCHEMA_VERSION,
+  type StudioDraft,
+  type StudioDraftPayload,
+  type StudioDraftStep,
+  type StudioDraftSummary,
+} from "@popcorn/shared/v1/studio-drafts";
+import {
   getGenerationRunStore,
   type GenerationRunsStore,
 } from "../../v1/generation-runs/store";
@@ -347,6 +354,68 @@ function mapBriefVersion(row: BriefVersionRow): V1BriefVersion {
   };
 }
 
+// --- studio drafts ---------------------------------------------------------
+interface StudioDraftRow {
+  id: string;
+  schema_version: string;
+  workspace_id: string;
+  owner_user_id: string | null;
+  local_actor_id: string | null;
+  payload: StudioDraftPayload;
+  display_excerpt: string;
+  step: StudioDraftStep;
+  project_id: string | null;
+  run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapStudioDraftSummary(row: StudioDraftRow): StudioDraftSummary {
+  return {
+    id: row.id,
+    schemaVersion: STUDIO_DRAFT_SCHEMA_VERSION,
+    workspaceId: row.workspace_id,
+    displayExcerpt: row.display_excerpt,
+    step: row.step,
+    projectId: row.project_id ?? undefined,
+    runId: row.run_id ?? undefined,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+function mapStudioDraft(row: StudioDraftRow): StudioDraft {
+  return {
+    ...mapStudioDraftSummary(row),
+    payload: row.payload,
+  };
+}
+
+export function displayExcerptForStudioDraft(payload: StudioDraftPayload): string {
+  const goal = payload.draft.goal;
+  if (typeof goal !== "string") return "Untitled draft";
+  const compact = goal.trim().replace(/\s+/g, " ");
+  if (!compact) return "Untitled draft";
+  return compact.length > 96 ? `${compact.slice(0, 93).trimEnd()}...` : compact;
+}
+
+async function assertStudioDraftRefs(
+  workspaceId: string,
+  payload: StudioDraftPayload
+): Promise<void> {
+  if (payload.projectId) {
+    await getProject(workspaceId, payload.projectId);
+  }
+  if (payload.runId) {
+    const run = await getGenerationRunStore().getRun(payload.runId);
+    if (!run) throw notFound(`Generation run not found: ${payload.runId}`);
+    await getProject(workspaceId, run.projectId);
+    if (payload.projectId && payload.projectId !== run.projectId) {
+      throw notFound(`Generation run not found: ${payload.runId}`);
+    }
+  }
+}
+
 // --- assets ----------------------------------------------------------------
 // The assets table has dedicated columns for a subset of V1Asset. The
 // context-family fields (context/userContext/agentContext/assetKnowledge/
@@ -471,6 +540,33 @@ function paginate<T extends { id: string; createdAt: string }>(
   cursor: string | null
 ): PageResult<T> {
   const sorted = [...all].sort(orderTuple);
+  let start = 0;
+  if (cursor) {
+    const idx = sorted.findIndex((item) => item.id === cursor);
+    start = idx === -1 ? sorted.length : idx + 1;
+  }
+  const items = sorted.slice(start, start + limit);
+  const nextCursor =
+    start + limit < sorted.length && items.length > 0
+      ? items[items.length - 1].id
+      : null;
+  return { items, nextCursor };
+}
+
+function updatedOrderTuple(
+  a: { id: string; updatedAt: string },
+  b: { id: string; updatedAt: string }
+): number {
+  if (a.updatedAt === b.updatedAt) return a.id < b.id ? 1 : -1;
+  return a.updatedAt < b.updatedAt ? 1 : -1;
+}
+
+function paginateByUpdatedAt<T extends { id: string; updatedAt: string }>(
+  all: T[],
+  limit: number,
+  cursor: string | null
+): PageResult<T> {
+  const sorted = [...all].sort(updatedOrderTuple);
   let start = 0;
   if (cursor) {
     const idx = sorted.findIndex((item) => item.id === cursor);
@@ -761,6 +857,139 @@ export async function listBriefVersions(
   throwOnError(error, "listBriefVersions");
   const all = (data as BriefVersionRow[]).map(mapBriefVersion);
   return paginate(all, limit, cursor);
+}
+
+// ---------------------------------------------------------------------------
+// Studio drafts
+// ---------------------------------------------------------------------------
+export async function listStudioDrafts(
+  workspaceId: string,
+  actor: { id: string; isLocal: boolean },
+  limit: number,
+  cursor: string | null
+): Promise<PageResult<StudioDraftSummary>> {
+  const db = getServiceSupabase();
+  let query = db
+    .from("studio_drafts")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false });
+  query = actor.isLocal
+    ? query.eq("local_actor_id", actor.id).is("owner_user_id", null)
+    : query.eq("owner_user_id", actor.id);
+
+  const { data, error } = await query;
+  throwOnError(error, "listStudioDrafts");
+  const all = (data as StudioDraftRow[]).map(mapStudioDraftSummary);
+  return paginateByUpdatedAt(all, limit, cursor);
+}
+
+export async function createStudioDraft(input: {
+  workspaceId: string;
+  actor: { id: string; isLocal: boolean };
+  payload: StudioDraftPayload;
+}): Promise<StudioDraft> {
+  await assertStudioDraftRefs(input.workspaceId, input.payload);
+  const db = getServiceSupabase();
+  const now = new Date().toISOString();
+  const row = {
+    schema_version: STUDIO_DRAFT_SCHEMA_VERSION,
+    workspace_id: input.workspaceId,
+    owner_user_id: input.actor.isLocal ? null : input.actor.id,
+    local_actor_id: input.actor.isLocal ? input.actor.id : null,
+    payload: input.payload,
+    display_excerpt: displayExcerptForStudioDraft(input.payload),
+    step: input.payload.step,
+    project_id: input.payload.projectId ?? null,
+    run_id: input.payload.runId ?? null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const { data, error } = await db
+    .from("studio_drafts")
+    .insert(row)
+    .select("*")
+    .single();
+  throwOnError(error, "createStudioDraft");
+  return mapStudioDraft(data as StudioDraftRow);
+}
+
+export async function getStudioDraft(
+  workspaceId: string,
+  actor: { id: string; isLocal: boolean },
+  draftId: string
+): Promise<StudioDraft> {
+  const db = getServiceSupabase();
+  let query = db
+    .from("studio_drafts")
+    .select("*")
+    .eq("id", draftId)
+    .eq("workspace_id", workspaceId);
+  query = actor.isLocal
+    ? query.eq("local_actor_id", actor.id).is("owner_user_id", null)
+    : query.eq("owner_user_id", actor.id);
+
+  const { data, error } = await query.maybeSingle();
+  if (isNoRows(error)) throw notFound(`Studio draft not found: ${draftId}`);
+  throwOnError(error, "getStudioDraft");
+  if (!data) throw notFound(`Studio draft not found: ${draftId}`);
+  return mapStudioDraft(data as StudioDraftRow);
+}
+
+export async function updateStudioDraft(input: {
+  workspaceId: string;
+  actor: { id: string; isLocal: boolean };
+  draftId: string;
+  payload: StudioDraftPayload;
+}): Promise<StudioDraft> {
+  await assertStudioDraftRefs(input.workspaceId, input.payload);
+  const db = getServiceSupabase();
+  const patch = {
+    payload: input.payload,
+    display_excerpt: displayExcerptForStudioDraft(input.payload),
+    step: input.payload.step,
+    project_id: input.payload.projectId ?? null,
+    run_id: input.payload.runId ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  let query = db
+    .from("studio_drafts")
+    .update(patch)
+    .eq("id", input.draftId)
+    .eq("workspace_id", input.workspaceId);
+  query = input.actor.isLocal
+    ? query.eq("local_actor_id", input.actor.id).is("owner_user_id", null)
+    : query.eq("owner_user_id", input.actor.id);
+
+  const { data, error } = await query.select("*").maybeSingle();
+  if (isNoRows(error)) throw notFound(`Studio draft not found: ${input.draftId}`);
+  throwOnError(error, "updateStudioDraft");
+  if (!data) throw notFound(`Studio draft not found: ${input.draftId}`);
+  return mapStudioDraft(data as StudioDraftRow);
+}
+
+export async function deleteStudioDraft(
+  workspaceId: string,
+  actor: { id: string; isLocal: boolean },
+  draftId: string
+): Promise<void> {
+  const db = getServiceSupabase();
+  let query = db
+    .from("studio_drafts")
+    .delete()
+    .eq("id", draftId)
+    .eq("workspace_id", workspaceId);
+  query = actor.isLocal
+    ? query.eq("local_actor_id", actor.id).is("owner_user_id", null)
+    : query.eq("owner_user_id", actor.id);
+
+  const { data, error } = await query.select("id").maybeSingle();
+  if (isNoRows(error)) throw notFound(`Studio draft not found: ${draftId}`);
+  throwOnError(error, "deleteStudioDraft");
+  if (!data) throw notFound(`Studio draft not found: ${draftId}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,12 @@ import type {
   EditPlan,
   Scene,
 } from "@popcorn/shared/types";
+import type {
+  CreateStudioDraftRequest,
+  StudioDraftPayload,
+  StudioDraftStep,
+  UpdateStudioDraftRequest,
+} from "@popcorn/shared/v1/studio-drafts";
 import { ApiError, FieldError, validationError } from "./errors";
 
 export const SCHEMA_VERSIONS = {
@@ -60,6 +66,15 @@ const NARRATION_MODES: NarrationMode[] = [
   "generate",
   "provided_text",
   "provided_asset",
+];
+
+const STUDIO_DRAFT_STEPS: StudioDraftStep[] = [
+  "brief",
+  "footage",
+  "story",
+  "generate",
+  "review",
+  "export",
 ];
 
 export interface NarrationInput {
@@ -735,6 +750,54 @@ export function parseCreateProject(input: unknown): CreateProjectInput {
       : undefined;
 
   return { name: name as string, brief };
+}
+
+function parseStudioDraftPayload(input: unknown, path: string): StudioDraftPayload {
+  const fields: FieldError[] = [];
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path, message: "Must be an object." },
+    ]);
+  }
+
+  if (input.v !== 1) {
+    fields.push({ path: `${path}.v`, message: "Must be 1." });
+  }
+  if (!isPlainObject(input.draft)) {
+    fields.push({ path: `${path}.draft`, message: "Must be an object." });
+  }
+  const step = parseEnum(input.step, STUDIO_DRAFT_STEPS, `${path}.step`, fields);
+  const projectId = optionalString(input.projectId, `${path}.projectId`, fields);
+  const runId = optionalString(input.runId, `${path}.runId`, fields);
+
+  throwIfInvalid(fields);
+
+  const payload: StudioDraftPayload = {
+    v: 1,
+    draft: input.draft as Record<string, unknown>,
+    step: step as StudioDraftStep,
+  };
+  if (projectId !== undefined) payload.projectId = projectId;
+  if (runId !== undefined) payload.runId = runId;
+  return payload;
+}
+
+export function parseCreateStudioDraft(input: unknown): CreateStudioDraftRequest {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  return { payload: parseStudioDraftPayload(input.payload, "payload") };
+}
+
+export function parseUpdateStudioDraft(input: unknown): UpdateStudioDraftRequest {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  return { payload: parseStudioDraftPayload(input.payload, "payload") };
 }
 
 const KIND_BY_EXTENSION: Record<string, AssetKind> = {
