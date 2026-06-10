@@ -1,0 +1,75 @@
+// Provider-neutral LLM contracts. The agent brain (structured-output calls and
+// the orchestrator tool loop) talks to an LlmClient; concrete providers
+// (OpenAI, Anthropic) are adapters behind it. See ./index getLlmClient.
+
+export type LlmProvider = "openai" | "anthropic";
+
+// How hard the model should "think". Maps to OpenAI reasoning_effort.
+// Anthropic currently uses provider defaults for tool-calling turns. "minimal"
+// routes to the fast model for straightforward generation/extraction (e.g.
+// cleaning a prompt); use "high" only where the task needs real planning/
+// judgement. Unset -> the provider default (treated as "medium").
+export type LlmEffort = "minimal" | "low" | "medium" | "high";
+
+export type JsonSchema = Record<string, unknown>;
+
+// A tool the model may choose to call, in a provider-neutral shape. Adapters
+// map this to OpenAI `function` tools or Anthropic `input_schema` tools.
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: JsonSchema;
+}
+
+export type ToolChoiceResult =
+  | {
+      type: "tool_call";
+      toolName: string;
+      input: Record<string, unknown>;
+      model: string;
+    }
+  | {
+      type: "done";
+      text: string;
+      model: string;
+    };
+
+export interface StructuredArgs {
+  // The large, stable system prompt (instructions + catalog). On Anthropic this
+  // is cache-controlled; on OpenAI it is the system message (auto-cached).
+  cachedSystem: string;
+  user: string;
+  schema: JsonSchema;
+  maxTokens?: number;
+  effort?: LlmEffort;
+}
+
+export interface StructuredVisionImage {
+  path: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+}
+
+export interface StructuredVisionArgs extends StructuredArgs {
+  images: StructuredVisionImage[];
+}
+
+export interface ChooseToolArgs {
+  system: string;
+  userPayload: unknown;
+  tools: ToolSpec[];
+  maxTokens?: number;
+  effort?: LlmEffort;
+}
+
+export interface LlmClient {
+  readonly provider: LlmProvider;
+  readonly model: string;
+  // The concrete model a call with this effort routes to (fast model for
+  // minimal/low). Callers use it to record reviewer/judge provenance.
+  modelFor(effort?: LlmEffort): string;
+  // Structured result via a required tool call (planEdit/critique/revise/...).
+  structured<T>(args: StructuredArgs): Promise<T>;
+  structuredVision<T>(args: StructuredVisionArgs): Promise<T>;
+  // One tool-calling turn: pick the next tool, or finish with text.
+  chooseTool(args: ChooseToolArgs): Promise<ToolChoiceResult>;
+}

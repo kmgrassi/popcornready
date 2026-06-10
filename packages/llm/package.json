@@ -1,5 +1,5 @@
 {
-  "name": "@popcorn/agent",
+  "name": "@popcorn/llm",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,11 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@popcorn/llm": "workspace:*",
-    "@popcorn/shared": "workspace:*",
-    "@popcorn/timeline": "workspace:*"
+    "@anthropic-ai/sdk": "^0.70.0",
+    "openai": "^4.104.0"
   },
   "devDependencies": {
     "tsx": "^4.22.3",
