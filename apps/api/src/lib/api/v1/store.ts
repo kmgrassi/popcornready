@@ -29,6 +29,10 @@ import { notFound } from "./errors";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
+  DASHBOARD_SCHEMA_VERSION,
+  type DashboardSummary,
+} from "@popcorn/shared/v1/dashboard";
+import {
   type CompositionPlan as ContractCompositionPlan,
   type GenerationRun,
   type GenerationRunStatus,
@@ -1104,6 +1108,79 @@ export async function listWorkspaceOutputs(
       return output;
     }),
     nextCursor: paged.nextCursor,
+  };
+}
+
+export interface GetWorkspaceDashboardSummaryDeps {
+  listProjects: (workspaceId: string) => Promise<WorkspaceProjectRef[]>;
+  runStore: GenerationRunsStore;
+  artifactStore: Pick<AgentApiStore, "listArtifactsForProject">;
+}
+
+const ACTIVE_RUN_STATUSES: GenerationRunStatus[] = ["queued", "running"];
+const DASHBOARD_ACTIVE_RUN_LIMIT = 5;
+const DASHBOARD_RECENT_OUTPUT_LIMIT = 6;
+
+export async function getWorkspaceDashboardSummary(
+  workspaceId: string,
+  deps: GetWorkspaceDashboardSummaryDeps = {
+    listProjects: listWorkspaceProjectRefs,
+    runStore: getGenerationRunStore(),
+    artifactStore: agentApiStore,
+  }
+): Promise<DashboardSummary> {
+  const projects = await deps.listProjects(workspaceId);
+  const listProjectsOnce = async () => projects;
+
+  const [runsPage, outputsPage] = await Promise.all([
+    listWorkspaceGenerationRuns(
+      workspaceId,
+      {},
+      Number.MAX_SAFE_INTEGER,
+      null,
+      { listProjects: listProjectsOnce, runStore: deps.runStore }
+    ),
+    listWorkspaceOutputs(
+      workspaceId,
+      {},
+      Number.MAX_SAFE_INTEGER,
+      null,
+      { listProjects: listProjectsOnce, artifactStore: deps.artifactStore }
+    ),
+  ]);
+
+  const activeRuns = runsPage.items.filter((run) =>
+    ACTIVE_RUN_STATUSES.includes(run.status)
+  );
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    counts: {
+      projects: projects.length,
+      activeRuns: activeRuns.length,
+      outputs: outputsPage.items.length,
+    },
+    activeRuns: activeRuns.slice(0, DASHBOARD_ACTIVE_RUN_LIMIT).map((run) => ({
+      runId: run.runId,
+      projectId: run.projectId,
+      projectName: run.projectName,
+      status: run.status,
+      currentStageType: run.currentStageType,
+      progressPercent: run.progressPercent,
+      updatedAt: run.updatedAt,
+    })),
+    recentOutputs: outputsPage.items
+      .slice(0, DASHBOARD_RECENT_OUTPUT_LIMIT)
+      .map((output) => ({
+        artifactId: output.artifactId,
+        projectId: output.projectId,
+        projectName: output.projectName,
+        timelineId: output.timelineId,
+        url: output.url,
+        durationSec: output.durationSec,
+        format: output.format,
+        createdAt: output.createdAt,
+      })),
   };
 }
 
