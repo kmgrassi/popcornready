@@ -27,6 +27,12 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { EditPlan } from "@popcorn/shared/types";
 import { isMissingRow, throwDatabaseError } from "../../supabase/db-errors";
 import {
+  canonicalContentHash,
+  graphInputsFromProvenance,
+  inputsFingerprint,
+  type GraphAssetInput,
+} from "./asset-graph";
+import {
   DASHBOARD_SCHEMA_VERSION,
   type DashboardSummary,
 } from "@popcorn/shared/v1/dashboard";
@@ -135,6 +141,9 @@ export interface V1Asset {
   analysis?: V1AssetAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
+  graphInputs?: GraphAssetInput[];
+  contentHash?: string;
+  inputsFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -348,6 +357,8 @@ interface DataAssetRow {
   status: "ready" | "pending";
   role: string | null;
   content: unknown;
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -493,6 +504,7 @@ async function insertDataAsset(input: {
 }): Promise<DataAssetRow> {
   const now = new Date().toISOString();
   const visibility = await defaultVisibilityForWorkspace(input.db, input.workspaceId);
+  const content = markedContent(input.kind, input.content);
   const row: Record<string, unknown> = {
     schema_version: "asset.v2",
     workspace_id: input.workspaceId,
@@ -501,7 +513,9 @@ async function insertDataAsset(input: {
     media: "data",
     status: "ready",
     role: input.role,
-    content: markedContent(input.kind, input.content),
+    content,
+    content_hash: canonicalContentHash(content),
+    inputs_fingerprint: inputsFingerprint([], null),
     visibility,
     created_at: now,
     updated_at: now,
@@ -621,6 +635,9 @@ interface AssetRow {
   filename: string;
   content: unknown | null;
   params: { schema_version?: string; provenance?: GeneratedAssetProvenance } | null;
+  inputs: GraphAssetInput[];
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
   source: AgentAssetSource;
@@ -660,6 +677,9 @@ function assetContextEnvelope(asset: V1Asset): AssetContextEnvelope | null {
 }
 
 function assetToRow(asset: V1Asset): AssetRow {
+  const params = asset.provenance
+    ? { schema_version: "asset_params.v1", provenance: asset.provenance }
+    : null;
   return {
     id: asset.id,
     schema_version: asset.schemaVersion,
@@ -670,9 +690,12 @@ function assetToRow(asset: V1Asset): AssetRow {
     status: asset.status,
     filename: asset.filename,
     content: null,
-    params: asset.provenance
-      ? { schema_version: "asset_params.v1", provenance: asset.provenance }
-      : null,
+    params,
+    inputs: asset.graphInputs ?? [],
+    content_hash: asset.contentHash ?? null,
+    inputs_fingerprint:
+      asset.inputsFingerprint ??
+      (asset.graphInputs?.length ? inputsFingerprint(asset.graphInputs, params) : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
     source: asset.source,
@@ -682,6 +705,55 @@ function assetToRow(asset: V1Asset): AssetRow {
     semantic_analysis: asset.semanticAnalysis ?? null,
     created_at: asset.createdAt,
     updated_at: asset.updatedAt,
+  };
+}
+
+async function contentHashesForAssets(
+  db: SupabaseClient,
+  projectId: string,
+  assetIds: string[]
+): Promise<Map<string, string | null>> {
+  const uniqueIds = [...new Set(assetIds)].filter(Boolean);
+  if (uniqueIds.length === 0) return new Map();
+
+  const { data, error } = await db
+    .from("assets")
+    .select("id, content_hash")
+    .eq("project_id", projectId)
+    .in("id", uniqueIds);
+  throwOnError(error, "contentHashesForAssets");
+
+  const rows = (data ?? []) as Array<{ id: string; content_hash: string | null }>;
+  return new Map(rows.map((row) => [row.id, row.content_hash]));
+}
+
+async function withGraphMetadataForInsert(
+  db: SupabaseClient,
+  asset: V1Asset
+): Promise<V1Asset> {
+  if (!asset.provenance && asset.graphInputs === undefined) return asset;
+
+  const provenanceAssetIds = [
+    ...(asset.provenance?.referenceAssetIds ?? []),
+    ...(asset.provenance?.anchorIds ?? []),
+  ];
+  const existingInputIds = asset.graphInputs?.map((input) => input.assetId) ?? [];
+  const contentHashByAssetId = await contentHashesForAssets(db, asset.projectId, [
+    ...provenanceAssetIds,
+    ...existingInputIds,
+  ]);
+  const graphInputs =
+    asset.graphInputs ??
+    graphInputsFromProvenance(asset.provenance, contentHashByAssetId);
+  if (graphInputs.length === 0) return asset;
+
+  const params = asset.provenance
+    ? { schema_version: "asset_params.v1", provenance: asset.provenance }
+    : null;
+  return {
+    ...asset,
+    graphInputs,
+    inputsFingerprint: asset.inputsFingerprint ?? inputsFingerprint(graphInputs, params),
   };
 }
 
@@ -712,6 +784,13 @@ function mapAsset(row: AssetRow): V1Asset {
   if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
   if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
   if (row.params?.provenance != null) asset.provenance = row.params.provenance;
+  if (Array.isArray(row.inputs) && row.inputs.length > 0) {
+    asset.graphInputs = row.inputs;
+  }
+  if (row.content_hash != null) asset.contentHash = row.content_hash;
+  if (row.inputs_fingerprint != null) {
+    asset.inputsFingerprint = row.inputs_fingerprint;
+  }
   if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
 }
@@ -1165,11 +1244,12 @@ export async function deleteStudioDraft(
 // ---------------------------------------------------------------------------
 export async function addAsset(asset: V1Asset): Promise<V1Asset> {
   const db = getServiceSupabase();
+  const assetWithGraph = await withGraphMetadataForInsert(db, asset);
   // Omit `id` so Postgres assigns it (gen_random_uuid); any id on the incoming
   // object is a placeholder and is read back from the inserted row.
-  const { id: _omit, ...row } = assetToRow(asset);
+  const { id: _omit, ...row } = assetToRow(assetWithGraph);
   void _omit;
-  row.visibility = await defaultVisibilityForWorkspace(db, asset.workspaceId);
+  row.visibility = await defaultVisibilityForWorkspace(db, assetWithGraph.workspaceId);
   const { data, error } = await db
     .from("assets")
     .insert(row)

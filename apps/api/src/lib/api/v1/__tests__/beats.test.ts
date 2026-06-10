@@ -72,6 +72,8 @@ test("keyframe: forwards an image request and records beatId/anchorIds provenanc
   assert.equal(sent.prompt, "petri dish hook");
   assert.equal(sent.provider, "mock");
   assert.deepEqual(sent.referenceAssetIds, ["anchor_hero"]);
+  assert.equal(sent.beatId, "hook");
+  assert.deepEqual(sent.anchorIds, ["anchor_hero"]);
 
   // Provenance is stamped onto the produced asset.
   assert.ok(updated);
