@@ -32,6 +32,8 @@ import {
 } from "../../lib/draftStore";
 import styles from "./StudioShell.module.css";
 
+const LOCAL_DRAFT_ID = "local";
+
 export interface StudioShellProps {
   /** Seed the brief draft, e.g. from `?goal=`/`?length=` query params. */
   initialBrief?: Partial<BriefDraft>;
@@ -107,8 +109,11 @@ export function StudioShell({ initialBrief, draftId }: StudioShellProps) {
       setInitialPayload(record.payload);
       setFlowKey((current) => current + 1);
       navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
-    } catch (error) {
-      setDraftsError(error instanceof Error ? error.message : "Could not create a draft.");
+    } catch {
+      setActiveDraftId(LOCAL_DRAFT_ID);
+      setInitialPayload(null);
+      setFlowKey((current) => current + 1);
+      navigate("/studio", { replace: true });
     }
   }
 
@@ -161,7 +166,11 @@ function StudioFlowView({
   initialBrief?: Partial<BriefDraft>;
   initialPayload: StudioDraftPayload | null;
 }) {
-  const flow = useStudioFlow({ initialBrief, draftId, initialPayload });
+  const flow = useStudioFlow({
+    initialBrief,
+    draftId: draftId === LOCAL_DRAFT_ID ? undefined : draftId,
+    initialPayload,
+  });
 
   if (flow.state === "generating") {
     const items = buildChecklistItems(flow.stages, flow.run?.status ?? "queued");
