@@ -118,15 +118,6 @@ built from:
 - Acceptance: after generating from a storyboard, `downstream_assets(beatSnapshotId)`
   returns that beat's keyframe/clip chain and nothing else.
 
-## PR 5 — actions decision log + proposals
-
-Generation and edit paths record `actions` rows (tool, `input_asset_ids`,
-rationale, `output_asset_ids`, cost), and expensive operations write a
-`proposal` with pinned fingerprints before spending (North Star Principle 5).
-Honor `generation_runs.budget_usd`/`gates`. This is the audit trail the
-orchestrator (P2) reasons over; without it, "why did the agent do that" is
-unanswerable.
-
 ## PR 6 — staleness + manifest surface
 
 Expose the graph to agents and the UI: an endpoint wrapping
@@ -149,8 +140,7 @@ P0 (deploy check)
 PR 1 (backfill/validate)          — independent, do early
 PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
 PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
-PR 5 (actions log)             ──▶ PR 6
 PR 7 — whenever the v1 bridge is removed
 ```
 
-PRs 1, 2, 4, 5 are mutually independent and can run in parallel.
+PRs 1, 2, 4 are mutually independent and can run in parallel.
