@@ -12,6 +12,8 @@ import styles from "./GenerateStep.module.css";
 export interface GenerateStepProps extends StepProps {
   /** Kicks the create-project + start-run flow on the shell's StudioFlow. */
   onGenerate: () => Promise<void>;
+  /** Jumps back to the editable brief fields from the generate summary. */
+  onEditBrief: () => void;
   /** Surfaced when the last start attempt failed. */
   error?: string;
   /** Optional panel key the route/palette should open by default. */
@@ -27,11 +29,14 @@ export function GenerateStep({
   draft,
   update,
   onGenerate,
+  onEditBrief,
   error,
   back,
   openPanel,
 }: GenerateStepProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [goalExpanded, setGoalExpanded] = useState(false);
+  const goal = draft.goal.trim();
 
   async function generate() {
     if (submitting) return;
@@ -64,18 +69,30 @@ export function GenerateStep({
       nextDisabled={!draft.goal.trim() || submitting}
       nextCta
     >
-      <div className="new-project-summary">
-        <div>
-          <span>Goal</span>
-          <strong>{draft.goal.trim() || "—"}</strong>
+      <div className={styles.summary}>
+        <div className={styles.summaryItem}>
+          <div className={styles.summaryHeading}>
+            <span>Goal</span>
+            <button className={styles.editButton} type="button" onClick={onEditBrief}>
+              Edit
+            </button>
+          </div>
+          <button
+            className={`${styles.goalText} ${goalExpanded ? styles.goalTextExpanded : ""}`}
+            type="button"
+            aria-expanded={goalExpanded}
+            onClick={() => setGoalExpanded((expanded) => !expanded)}
+          >
+            {goal || "—"}
+          </button>
         </div>
-        <div>
+        <div className={styles.summaryItem}>
           <span>Format</span>
           <strong>
             {draft.aspectRatio}, {draft.targetLengthSec}s
           </strong>
         </div>
-        <div>
+        <div className={styles.summaryItem}>
           <span>Source</span>
           <strong>{draft.footageChoice === "upload" ? "Your footage" : "Prompt only"}</strong>
         </div>

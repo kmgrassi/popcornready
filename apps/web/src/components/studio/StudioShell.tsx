@@ -339,6 +339,7 @@ function ActiveStep({
           {...stepProps}
           error={flow.error}
           onGenerate={flow.startGeneration}
+          onEditBrief={() => flow.goTo("brief")}
           openPanel={openPanel}
         />
       );
