@@ -92,15 +92,6 @@ no catch-all index):
 - Reorder = swap `scene_index`/`beat_index`/`panel_index` within the parent
   (unique per parent).
 
-## PR 3 — port the studio editor; retire the plan blob
-
-Point the studio storyboard editor (apps/web) at the PR 2 endpoints, then
-delete the `EditPlan`-blob path: `updateProjectPlan`, the `plan` projection on
-`V1Project`, and the `plan`-asset write in the store. Per the Asset-Graph
-Migration Rule (CLAUDE.md): no compat shims — the storyboard tables are the
-contract, and `storyboards.plan_asset_id` snapshots provide lineage. The brief
-path (also a pool asset) stays as-is.
-
 ## PR 4 — provenance wiring: inputs, edges, fingerprints
 
 The graph can't compute blast radius until writers record what things were
@@ -147,7 +138,7 @@ bridge is removed." When the v1 compatibility bridge dies, add the typed check
 ```
 P0 (deploy check)
 PR 1 (backfill/validate)          — independent, do early
-PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
+PR 2 (storyboard API)
 PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
 PR 5 (actions log)             ──▶ PR 6
 PR 7 — whenever the v1 bridge is removed
