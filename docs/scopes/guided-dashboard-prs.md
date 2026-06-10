@@ -109,7 +109,7 @@ recent-outputs strip:
 | Workspace state | Hero (L0) |
 |---|---|
 | No projects yet | "Create your first AI rough cut" → `/studio` |
-| Draft in progress | "Continue your draft — *{goal excerpt}* (step 2 of 6)" → `/studio`, rehydrated |
+| Draft(s) in progress | "Continue your draft — *{goal excerpt}* (step 2 of 6)" for the most recent draft → `/studio?draft=:id`; other drafts as a "N more drafts" chip → the Studio picker |
 | Run in flight | Live status card (current stage + progress, polling) → Studio `generating` state |
 | Run awaiting a gate | "Your cut is waiting for review" → the gate |
 | Run succeeded recently | "Review your rough cut" → Studio `review` state |
@@ -165,16 +165,21 @@ survive. One sidebar item replaces four; nothing is lost.
 
 "One action at a time" requires the app to remember which action you were on:
 
-- **Draft persistence — server-side from day one (decided).** `BriefDraft` +
-  active step persist to the API on `update()` (debounced) and rehydrate on
-  mount, so drafts follow the user across devices and browsers. A stale or
-  version-mismatched draft is discarded silently (clean break, no migration
-  shims). Storage: drafts exist *before* a project does (the wizard only
-  creates the project at Generate), so they cannot hang off `projects` — a
-  workspace-scoped **`studio_drafts`** table (one active draft per user per
-  workspace, upserted; versioned `jsonb` payload) on Supabase, RLS keyed on
-  `current_app_user_id()` per
+- **Draft persistence — server-side, multi-draft from day one (decided).**
+  `BriefDraft` + active step persist to the API on `update()` (debounced)
+  and rehydrate on mount. **Users can hold many drafts** and pick between
+  them: the Studio start screen lists existing drafts ("Continue a draft",
+  most recent first) above the "Start a new video" CTA, and starting new
+  always creates a new draft — no replace prompt. A stale or
+  version-mismatched draft payload is discarded silently (clean break, no
+  migration shims). Storage: drafts exist *before* a project does (the
+  wizard only creates the project at Generate), so they cannot hang off
+  `projects` — a workspace-scoped **`studio_drafts`** table (many rows per
+  user per workspace, each its own draft id; versioned `jsonb` payload) on
+  Supabase, RLS keyed on `current_app_user_id()` per
   [docs/supabase-identity-and-rls.md](../supabase-identity-and-rls.md).
+  Cross-device write-conflict handling is explicitly out of scope:
+  last-write-wins.
 - **Active-run rehydration.** On mount, `useStudioFlow` checks for an
   in-flight run (persisted `projectId`/`runId`, verified via
   `getGenerationRun`) and enters `generating` directly. `RunProgressPage`
@@ -196,18 +201,20 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
   `activeRuns` with `currentStageType`/`progressPercent`, capped
   `recentOutputs`). Typed in `packages/shared/src/v1/`. One request renders
   Home.
-- **`deriveNextAction(pulse, draft): NextAction`** — a pure function in
+- **`deriveNextAction(pulse, drafts): NextAction`** — a pure function in
   `apps/web/src/lib/nextAction.ts` returning a typed union
   (`start | resume_draft | watch_run | review_gate | review_cut | new`).
   The Home hero is a dumb renderer of this value; any future surface (palette,
   sidebar badge) reuses the same derivation. One implementation of "what
   should the user do next."
-- **Draft persistence interface** — `loadDraft() / saveDraft(draft, step) /
-  clearDraft()` in `apps/web/src/lib/draftStore.ts`, versioned payload
-  (`{ v: 1, draft, step, projectId?, runId? }`), backed by
-  `GET/PUT/DELETE /api/v1/workspaces/:workspaceId/studio-draft`.
+- **Draft persistence interface** — `listDrafts() / createDraft() /
+  loadDraft(id) / saveDraft(id, draft, step) / deleteDraft(id)` in
+  `apps/web/src/lib/draftStore.ts`, versioned payload
+  (`{ v: 1, draft, step, projectId?, runId? }`), backed by the
+  `GET/POST /api/v1/workspaces/:workspaceId/studio-drafts` +
+  `GET/PUT/DELETE …/studio-drafts/:draftId` collection routes.
   `useStudioFlow` consumes only the interface; saves are debounced (~1s) and
-  last-write-wins (single active draft per user per workspace in v1).
+  last-write-wins.
 - **Palette command registration** — per repo convention, **no central
   `index.ts` aggregator**. Each feature owns a `commands.ts`
   (`studio/commands.ts`, `library/commands.ts`, …) exporting
@@ -237,25 +244,34 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
   `apps/api/src/routes/v1/studio-drafts.ts` (mounted via the protected-routes
   registration file, per repo convention — no catch-all index), shared types
   in `packages/shared/src/v1/`.
-- **Work:** `GET/PUT/DELETE /api/v1/workspaces/:workspaceId/studio-draft` —
-  one active draft per user per workspace, upsert semantics, versioned
-  `jsonb` payload, RLS keyed on `current_app_user_id()` (read
+- **Work:** collection routes —
+  `GET/POST /api/v1/workspaces/:workspaceId/studio-drafts` (list newest
+  first / create) and `GET/PUT/DELETE …/studio-drafts/:draftId` — many
+  drafts per user per workspace, versioned `jsonb` payload plus a derived
+  display excerpt (goal snippet + step + `updatedAt`) so the picker and Home
+  hero render without parsing payloads. RLS keyed on
+  `current_app_user_id()` (read
   [docs/supabase-identity-and-rls.md](../supabase-identity-and-rls.md)
   first). Unique migration timestamp (parallel-agent collision gotcha).
-- **Done when:** a draft round-trips for the authed user and is invisible to
-  other users; works in `AUTH_MODE=local`.
+- **Done when:** drafts round-trip for the authed user, list newest-first,
+  and are invisible to other users; works in `AUTH_MODE=local`.
 
-### PR 2b — Studio continuity: draft persistence + run rehydration *(depends on PR 2a; biggest UX win)*
+### PR 2b — Studio continuity: drafts + picker + run rehydration *(depends on PR 2a; biggest UX win)*
 - **Files:** new `apps/web/src/lib/draftStore.ts`;
   `components/studio/useStudioFlow.ts` (debounced persist on `update()`/
-  `startGeneration()`, rehydrate on mount, clear on export/abandon);
-  `StudioShell.tsx` (skip the empty state when a draft or active run exists).
-- **Work:** decision 4. Refreshing mid-brief restores the draft and step —
-  on any device; refreshing mid-generation lands back in `generating` with
-  the checklist live; a succeeded-but-unreviewed run lands in `review`.
+  `startGeneration()`, rehydrate by draft id, clear on export/abandon);
+  `StudioShell.tsx` + `StudioEmptyState.tsx` → a **start screen**: "Start a
+  new video" CTA above a "Continue a draft" list (excerpt + step + updated
+  time, delete affordance per row).
+- **Work:** decision 4. `/studio` with drafts shows the picker (or
+  rehydrates directly when deep-linked as `/studio?draft=:id` from the Home
+  hero); "Start new" always creates a fresh draft. Refreshing mid-brief
+  restores the draft and step; refreshing mid-generation lands back in
+  `generating` with the checklist live; a succeeded-but-unreviewed run lands
+  in `review`.
 - **Done when:** kill the tab at any wizard point, reopen `/studio` (even in
-  another browser), and you're where you left off — no `RunProgressPage` URL
-  needed.
+  another browser), and you can resume that draft in one click; multiple
+  drafts coexist and are individually resumable and deletable.
 
 ### PR 3 — Home launchpad *(depends on PR 1; PR 2a/2b enable `resume_draft`)*
 - **Files:** new `apps/web/src/routes/HomePage… → routes/LaunchpadPage.tsx`
@@ -357,17 +373,13 @@ PR 5 (library) ───┘   (4 ↔ 5 either order; both touch App.tsx routes)
 _Resolved during scoping (2026-06-10, with product):_ **Storyboard and Evals
 are user-facing** — Storyboard stays project-scoped (entered from project
 cards + the Review step), Evals becomes a Library tab; neither gets a rail
-slot. **Drafts are server-side from day one** (`studio_drafts`, PR 2a).
+slot. **Drafts are server-side and multi-draft from day one** (`studio_drafts`
+collection + picker, PRs 2a/2b); cross-device write conflicts are explicitly
+not handled (last-write-wins).
 **Templates/Brand Kit/Uploads keep their stub routes** but leave primary nav
 (Settings links + palette). **Hero precedence is urgency order** (gate > run >
 unreviewed cut > draft > new), with losers as secondary chips.
 
-- **Single-draft limit.** v1 allows one active draft per user per workspace;
-  starting a new video with a draft pending prompts replace-or-resume. If
-  multi-draft becomes a need, the table already supports it (drop the unique
-  constraint) but the Home hero and `/studio` rehydration need a picker.
-- **Draft write conflicts.** Last-write-wins across devices is accepted for
-  v1; revisit if simultaneous-edit complaints appear.
 - **Library: one page vs. four.** Tabs-on-one-route is chosen for nav
   quietness; if tab bodies grow heavy, code-split per tab rather than
   re-promoting routes to the sidebar.
@@ -385,6 +397,7 @@ unreviewed cut > draft > new), with losers as secondary chips.
 |---|---|
 | Login lands on a single, correct "do this next" action (urgency order) | PR 1, 3 |
 | Refresh/return resumes exactly where the user left off — on any device | PR 2a, 2b |
+| Multiple drafts coexist; each is resumable/deletable from the Studio picker | PR 2a, 2b, 3 |
 | A run in flight is visible from Home and one click from its live status | PR 1, 3 |
 | Sidebar shows ≤ 3 primary destinations; no duplicate nav | PR 4 |
 | All collections + Evals reachable from one Library item; old URLs redirect | PR 5 |
