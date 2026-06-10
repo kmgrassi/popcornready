@@ -12,6 +12,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { AuthContext } from "./auth";
+import { sha256Hex } from "./asset-graph";
 import { buildSemanticAnalysis } from "../../edit-graph/semantic-analysis";
 import { ApiError } from "./errors";
 import {
@@ -366,6 +367,7 @@ export async function registerAsset(
     // before the row exists.
     const destPath = path.join(destDir, `${randomUUID()}${ext}`);
     await fs.copyFile(srcPath, destPath);
+    const bytes = await fs.readFile(destPath);
     const storageKey = path.relative(localDir(), destPath);
 
     const asset: V1Asset = {
@@ -383,6 +385,7 @@ export async function registerAsset(
       context: input.context,
       userContext: input.userContext,
       agentContext: input.agentContext,
+      contentHash: sha256Hex(bytes),
       createdAt: now,
       updatedAt: now,
     };
@@ -430,6 +433,7 @@ export async function registerAsset(
       context: input.context,
       userContext: input.userContext,
       agentContext: input.agentContext,
+      contentHash: sha256Hex(bytes),
       createdAt: now,
       updatedAt: now,
     };

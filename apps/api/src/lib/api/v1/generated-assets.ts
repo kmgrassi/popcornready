@@ -21,6 +21,7 @@ import {
 } from "@popcorn/shared/generative/types";
 import type { GeneratedAssetCharacterBinding } from "@popcorn/shared/types";
 import { buildSemanticAnalysis } from "@/lib/edit-graph/semantic-analysis";
+import { sha256Hex } from "./asset-graph";
 import {
   RunStageHandle,
   RunStageItemHandle,
@@ -540,6 +541,7 @@ async function runGeneration(
       provenance,
     }),
     provenance,
+    contentHash: sha256Hex(result.bytes),
     createdAt: now,
     updatedAt: now,
   };
