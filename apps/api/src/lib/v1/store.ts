@@ -51,6 +51,7 @@ export interface V1Store {
   getEditGraph(id: string): Promise<VersionedEditGraph | null>;
   saveEditGraph(graph: VersionedEditGraph): Promise<VersionedEditGraph>;
   getTimeline(id: string): Promise<VersionedTimeline | null>;
+  listTimelinesForProject(projectId: string): Promise<VersionedTimeline[]>;
   saveTimeline(timeline: VersionedTimeline): Promise<VersionedTimeline>;
   getIdempotency(scope: string): Promise<IdempotencyRecord | null>;
   saveIdempotency(scope: string, record: IdempotencyRecord): Promise<void>;
@@ -540,6 +541,15 @@ export function createSupabaseStore(
       const row = await getOne<TimelineRow>("timelines", "id", id);
       return row ? rowToTimeline(row) : null;
     },
+    async listTimelinesForProject(projectId) {
+      const { data, error } = await db
+        .from("timelines")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (error) fail("listTimelinesForProject", error);
+      return (data ?? []).map((row) => rowToTimeline(row as TimelineRow));
+    },
     async saveTimeline(timeline) {
       const id = await saveWithGeneratedId("timelines", timelineToRow(timeline));
       return { ...timeline, id };
@@ -706,6 +716,12 @@ export function createStore(rootDir: string): V1Store {
     getEditGraph: (id) => readJson<VersionedEditGraph>(COLLECTIONS.editGraphs, id),
     saveEditGraph: (graph) => saveWithId(COLLECTIONS.editGraphs, graph),
     getTimeline: (id) => readJson<VersionedTimeline>(COLLECTIONS.timelines, id),
+    async listTimelinesForProject(projectId) {
+      const all = await readAll<VersionedTimeline>(COLLECTIONS.timelines);
+      return all
+        .filter((timeline) => timeline.projectId === projectId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    },
     saveTimeline: (timeline) => saveWithId(COLLECTIONS.timelines, timeline),
     getIdempotency: (scope) => readJson<IdempotencyRecord>(COLLECTIONS.idempotency, scope),
     async saveIdempotency(scope, record) {

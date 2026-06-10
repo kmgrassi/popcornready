@@ -3,12 +3,14 @@ import type {
   AssetStatus,
   BriefVersion,
   CompositionMode,
+  JobStatus,
   GateableGenerationStageType,
   GenerationJob,
   GenerationRun,
   GenerationRunStatus,
   V1Asset,
   V1Project,
+  VersionedTimeline,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
 import type { EditPlan, Project } from "@popcorn/shared/types";
@@ -293,6 +295,60 @@ export interface StartGenerationRunResponse {
   runId: string | null;
 }
 
+export type ExportDurationPolicy =
+  | "timeline_only"
+  | "match_longest_media"
+  | "fail_on_mismatch";
+
+export interface ExportRenderArtifact {
+  id: string;
+  projectId: string;
+  kind: "video/mp4";
+  status: "pending_render" | "ready" | "failed";
+  url: string | null;
+  timelineId: string;
+  durationSec: number;
+  createdAt: string;
+}
+
+export interface ExportJobResult {
+  artifactId?: string;
+}
+
+export interface ExportJob {
+  id: string;
+  type: "export";
+  status: JobStatus;
+  projectId: string;
+  step?: string;
+  result?: ExportJobResult;
+  error?: {
+    code: string;
+    message: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StartTimelineExportInput {
+  format: "mp4";
+  quality: "draft" | "standard" | "high";
+  durationPolicy: ExportDurationPolicy;
+  showCaptions: boolean;
+}
+
+export interface ExportJobResponse {
+  job: ExportJob;
+}
+
+export interface ExportArtifactResponse {
+  artifact: ExportRenderArtifact;
+}
+
+export interface ProjectTimelineResponse {
+  timeline: VersionedTimeline | null;
+}
+
 export interface StudioProjectResponse {
   project: Project | null;
 }
@@ -510,6 +566,37 @@ export const v1Api = {
         method: "POST",
         body: input,
       }
+    ),
+  startTimelineExport: (
+    projectId: string,
+    timelineId: string,
+    input: StartTimelineExportInput
+  ) =>
+    apiRequest<ExportJobResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}/exports`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
+  getTimelineExport: (projectId: string, jobId: string, signal?: AbortSignal) =>
+    apiRequest<ExportJobResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(jobId)}`,
+      { signal }
+    ),
+  getLatestProjectTimeline: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<ProjectTimelineResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/timelines/latest`,
+      { signal }
+    ),
+  getExportArtifact: (
+    projectId: string,
+    artifactId: string,
+    signal?: AbortSignal
+  ) =>
+    apiRequest<ExportArtifactResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      { signal }
     ),
   getStudioProject: async (): Promise<StudioProjectResponse> => {
     const { projects } = await v1Api.listProjects({ limit: 1 });

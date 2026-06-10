@@ -170,6 +170,8 @@ export interface StudioFlow {
  */
 export interface StepProps {
   draft: BriefDraft;
+  /** Active project created by generation; present for review/export steps. */
+  projectId?: string;
   update(patch: Partial<BriefDraft>): void;
   next(): void;
   back(): void;
