@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getServiceSupabase } from "../supabase-client";
+import { databaseError, isMissingRow } from "../../supabase/db-errors";
 import {
   GenerationRun,
   GenerationStage,
@@ -120,16 +121,12 @@ function safeKey(key: string): string {
 // Supabase (Postgres) implementation
 // ---------------------------------------------------------------------------
 
-const PGRST_NO_ROWS = "PGRST116";
-
 function isMissing(error: { code?: string } | null): boolean {
-  return !!error && error.code === PGRST_NO_ROWS;
+  return isMissingRow(error);
 }
 
 function fail(op: string, error: { message?: string } | null): never {
-  throw new Error(
-    `generation-runs store: ${op} failed: ${error?.message ?? "unknown error"}`
-  );
+  throw databaseError(`generation-runs store.${op}`, error);
 }
 
 // --- runs ------------------------------------------------------------------

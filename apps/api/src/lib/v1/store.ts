@@ -12,6 +12,7 @@ import {
   VersionedTimeline,
 } from "@popcorn/shared/v1/types";
 import { getServiceSupabase } from "./supabase-client";
+import { databaseError, isMissingRow } from "../supabase/db-errors";
 
 // Persistence repository for /api/v1's job + timeline stack.
 //
@@ -73,15 +74,12 @@ export interface V1Store {
 // shared with the api/v1 foundation store.
 const IDEMPOTENCY_KEY = "";
 
-// PostgREST "row not found" code from .single(); treated as a null read.
-const PGRST_NO_ROWS = "PGRST116";
-
 function isMissing(error: { code?: string } | null): boolean {
-  return !!error && error.code === PGRST_NO_ROWS;
+  return isMissingRow(error);
 }
 
 function fail(op: string, error: { message?: string } | null): never {
-  throw new Error(`v1 store: ${op} failed: ${error?.message ?? "unknown error"}`);
+  throw databaseError(`v1 store.${op}`, error);
 }
 
 // --- row <-> object mappers ------------------------------------------------
