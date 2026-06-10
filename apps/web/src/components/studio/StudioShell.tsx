@@ -6,14 +6,13 @@ import {
 } from "@popcorn/shared/v1/types";
 import { DEFAULT_DURATION_POLICY } from "@popcorn/shared/audio-alignment";
 import { Button } from "../ui/Button";
-import { StatusChecklist } from "../ui/StatusChecklist";
 import { PreviewPanel } from "../editor/PreviewPanel";
 import { SidebarPanel } from "../editor/SidebarPanel";
 import { PreviewPlayer } from "../PreviewPlayer";
 import { v1Api } from "../../lib/api-client";
 import { StudioEmptyState } from "./StudioEmptyState";
 import { StudioStepper } from "./StudioStepper";
-import { buildChecklistItems } from "./statusChecklist";
+import { GenerationChecklist } from "./GenerationChecklist";
 import { useStudioFlow, type BriefDraft, type StudioStep } from "./useStudioFlow";
 import { BriefStep } from "./steps/BriefStep";
 import { SourceFootageStep } from "./steps/SourceFootageStep";
@@ -51,7 +50,6 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
   }
 
   if (flow.state === "generating") {
-    const items = buildChecklistItems(flow.stages, flow.run?.status ?? "queued");
     const gate = flow.run?.reviewGate ?? null;
     return (
       <main className={styles.shell}>
@@ -62,7 +60,7 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
             This runs autonomously — we'll surface a preview to review as soon as
             it's ready.
           </p>
-          <StatusChecklist items={items} />
+          <GenerationChecklist run={flow.run} stages={flow.stages} />
           {gate ? (
             <GateCard
               stageType={gate.stageType}
