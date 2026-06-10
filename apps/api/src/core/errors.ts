@@ -12,6 +12,7 @@ export type ApiErrorCode =
   | "brief_missing"
   | "timeline_invalid"
   | "job_not_cancelable"
+  | "budget_exceeded"
   | "job_failed"
   | "render_failed"
   | "model_output_invalid"
@@ -31,6 +32,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   brief_missing: 400,
   timeline_invalid: 400,
   job_not_cancelable: 409,
+  budget_exceeded: 409,
   job_failed: 422,
   render_failed: 500,
   model_output_invalid: 502,

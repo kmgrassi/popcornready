@@ -452,6 +452,7 @@ interface ActionRow {
 
 interface RunBudgetRow {
   id: string;
+  project_id: string;
   budget_usd: number | null;
 }
 
@@ -661,19 +662,28 @@ export async function updateAction(
 
 export async function assertRunBudgetAllows(input: {
   runId?: string;
+  projectId: string;
   additionalCostUsd: number;
 }): Promise<void> {
   if (!input.runId) return;
   const db = getServiceSupabase();
   const { data: run, error: runError } = await db
     .from("generation_runs")
-    .select("id,budget_usd")
+    .select("id,project_id,budget_usd")
     .eq("id", input.runId)
     .maybeSingle();
-  if (isNoRows(runError)) return;
+  if (isNoRows(runError)) {
+    throw new Error(`Run not found: ${input.runId}`);
+  }
   throwOnError(runError, "assertRunBudgetAllows run");
 
-  const budgetUsd = (run as RunBudgetRow | null)?.budget_usd;
+  const scopedRun = run as RunBudgetRow | null;
+  if (!scopedRun) throw new Error(`Run not found: ${input.runId}`);
+  if (scopedRun.project_id !== input.projectId) {
+    throw new Error(`Run project mismatch: ${input.runId}`);
+  }
+
+  const budgetUsd = scopedRun.budget_usd;
   if (budgetUsd == null || budgetUsd <= 0) return;
 
   const { data: actions, error: actionsError } = await db

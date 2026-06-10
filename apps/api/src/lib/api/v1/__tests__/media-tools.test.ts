@@ -164,6 +164,32 @@ test("resumeGenerateClipTool maps provider failures to ToolError", async () => {
   assert.equal(result.error.recoverable, true);
 });
 
+test("resumeGenerateClipTool maps budget failures to ToolError", async () => {
+  setBeatMediaDepsForTests({
+    getGeneratedAssetJob: async () =>
+      apiJob(
+        job({
+          status: "failed",
+          error: { code: "budget_exceeded", message: "Run budget exceeded." },
+        })
+      ),
+  });
+
+  const result = await resumeGenerateClipTool({
+    auth,
+    projectId: "proj_1",
+    jobId: "job_clip_1",
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error.kind, "budget_exceeded");
+  assert.equal(result.error.recoverable, true);
+  assert.deepEqual(result.error.details, {
+    jobId: "job_clip_1",
+    code: "budget_exceeded",
+  });
+});
+
 test("startGenerateClipTool validates the required beat id before spending", async () => {
   let enqueueCalled = false;
   setBeatMediaDepsForTests({

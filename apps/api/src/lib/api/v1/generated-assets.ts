@@ -726,6 +726,7 @@ export async function runGeneratedAssetJob(args: {
     );
     await assertRunBudgetAllows({
       runId: parsed.runId,
+      projectId,
       additionalCostUsd: estimatedCostUsd,
     });
     action = await createAction({
@@ -790,10 +791,21 @@ export async function runGeneratedAssetJob(args: {
       err instanceof ApiError
         ? err
         : err instanceof Error && /^Run budget exceeded:/.test(err.message)
-          ? new ApiError("validation_failed", err.message, {
+          ? new ApiError("budget_exceeded", err.message, {
               reason: "budget_exceeded",
               estimatedCostUsd,
               runId: parsed.runId,
+            })
+        : err instanceof Error &&
+            (/^Run not found:/.test(err.message) ||
+              /^Run project mismatch:/.test(err.message))
+          ? new ApiError("validation_failed", err.message, {
+              fields: [
+                {
+                  path: "runId",
+                  message: "runId must belong to the current project.",
+                },
+              ],
             })
         : new ApiError(
             "job_failed",
