@@ -127,15 +127,6 @@ Honor `generation_runs.budget_usd`/`gates`. This is the audit trail the
 orchestrator (P2) reasons over; without it, "why did the agent do that" is
 unanswerable.
 
-## PR 6 — staleness + manifest surface
-
-Expose the graph to agents and the UI: an endpoint wrapping
-`project_manifest()` (the orchestrator's working context) and a
-"stale candidates" endpoint that, given a changed asset, returns
-`downstream_assets()` joined with current selections and recorded
-fingerprints. Stale is a *signal* the agent may prune, never an auto-cascade
-(North Star §8). This PR is the on-ramp to the P2 orchestrator.
-
 ## PR 7 — lift the `generation_runs.gates` JSONB exclusion
 
 20260610130000 deliberately left `gates` unconstrained "until the temporary v1
@@ -148,8 +139,8 @@ bridge is removed." When the v1 compatibility bridge dies, add the typed check
 P0 (deploy check)
 PR 1 (backfill/validate)          — independent, do early
 PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
-PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
-PR 5 (actions log)             ──▶ PR 6
+PR 4 (provenance/fingerprints)
+PR 5 (actions log)
 PR 7 — whenever the v1 bridge is removed
 ```
 
