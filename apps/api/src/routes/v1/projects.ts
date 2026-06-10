@@ -37,12 +37,18 @@ projectsRouter.post(
   "/projects",
   mutation(async ({ auth, body }) => {
     const input = parseCreateProject(body);
-    const { project } = await createProject({
+    const { project, briefVersion } = await createProject({
       workspaceId: auth.workspaceId,
       name: input.name,
       brief: input.brief,
     });
-    return { status: 201, body: { project } };
+    return {
+      status: 201,
+      body: {
+        project,
+        ...(briefVersion ? { briefVersion } : {}),
+      },
+    };
   })
 );
 
