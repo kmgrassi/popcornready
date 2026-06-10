@@ -11,7 +11,6 @@ import {
   NavLink,
   Outlet,
   useLocation,
-  useNavigate,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { canAccessAdminSurface } from "./auth/AdminRoute";
@@ -19,28 +18,23 @@ import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
 import { CommandPalette } from "./palette/Palette";
 import ThemeToggle from "./ThemeToggle";
-import { Button, ButtonLink } from "./ui/Button";
+import { ButtonLink } from "./ui/Button";
 import { v1Api, type MeResponse } from "../lib/api-client";
 import styles from "./AppLayout.module.css";
 
 const STORAGE_KEY = "popcorn-ready-theme";
 const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
 
-// Primary workspace nav. Ordered around the creation flow: Home → Studio
-// (create) → Projects/Assets/Outputs (the library). Runs are reachable from
-// inside Projects, so they no longer take a top-level slot.
+// Primary workspace nav. Library groups the collection routes until PR 5 gives
+// it a dedicated tab shell.
 const PRIMARY_NAV = [
-  { label: "Home", to: "/dashboard" },
-  { label: "Studio", to: "/studio" },
-  { label: "Projects", to: "/projects" },
-  { label: "Assets", to: "/assets" },
-  { label: "Outputs", to: "/outputs" },
-];
-
-const TOPNAV = [
-  { label: "Studio", to: "/studio" },
-  { label: "Storyboard", to: "/storyboard" },
-  { label: "Evals", to: "/evals" },
+  { label: "Create", to: "/studio", activePaths: ["/studio"] },
+  {
+    label: "Library",
+    to: "/library",
+    activePaths: ["/library", "/projects", "/runs", "/assets", "/outputs", "/evals"],
+  },
+  { label: "Settings", to: "/settings", activePaths: ["/settings"] },
 ];
 
 function applyStoredTheme() {
@@ -102,7 +96,6 @@ const DEV_AUTOPILOT = import.meta.env.DEV;
 export function AuthenticatedAppLayout() {
   const auth = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [meError, setMeError] = useState<string | null>(null);
 
@@ -146,19 +139,7 @@ export function AuthenticatedAppLayout() {
     me?.isLocal || auth.status === "disabled"
       ? "Local mode"
       : me?.authMode ?? "Hosted mode";
-  const canSignOut = auth.configured && auth.status === "authenticated";
   const showAdmin = canAccessAdminSurface(auth);
-  // Admins get the workbench; everyone else lands on workspace Settings. Both
-  // are the "Settings/Admin" footer slot in the simplified sidebar.
-  const settingsNav = showAdmin
-    ? { label: "Admin", to: "/admin" }
-    : { label: "Settings", to: "/settings" };
-
-  async function signOut() {
-    if (!canSignOut) return;
-    await auth.signOut();
-    navigate("/", { replace: true });
-  }
 
   if (auth.status === "loading") {
     return (
@@ -198,9 +179,14 @@ export function AuthenticatedAppLayout() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/dashboard"}
+              end={item.to === "/settings"}
               className={({ isActive }) =>
-                isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
+                isActive ||
+                item.activePaths.some((path) =>
+                  path === "/" ? location.pathname === path : location.pathname.startsWith(path)
+                )
+                  ? `${styles.navLink} ${styles.active}`
+                  : styles.navLink
               }
             >
               {item.label}
@@ -209,16 +195,27 @@ export function AuthenticatedAppLayout() {
         </nav>
 
         <div className={styles.sidebarFooter}>
-          <nav className={styles.footerNav} aria-label="Settings">
-            <NavLink
-              to={settingsNav.to}
-              className={({ isActive }) =>
-                isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
-              }
-            >
-              {settingsNav.label}
-            </NavLink>
-          </nav>
+          {showAdmin ? (
+            <nav className={styles.footerNav} aria-label="Admin">
+              <span className={styles.footerLabel}>Admin</span>
+              <NavLink
+                to="/admin"
+                className={({ isActive }) =>
+                  isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
+                }
+              >
+                Workbench
+              </NavLink>
+              <NavLink
+                to="/admin/evals"
+                className={({ isActive }) =>
+                  isActive ? `${styles.navLink} ${styles.active}` : styles.navLink
+                }
+              >
+                Admin evals
+              </NavLink>
+            </nav>
+          ) : null}
 
           {/* Quieter workspace indicator — a single read-only pill, no longer a
               prominent labelled <select> competing with the nav. */}
@@ -234,22 +231,7 @@ export function AuthenticatedAppLayout() {
 
       <div className={styles.content}>
         <header className={styles.topbar}>
-          <nav className={styles.topnav} aria-label="Utilities">
-            {TOPNAV.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  isActive
-                    ? `${styles.topLink} ${styles.topLinkActive}`
-                    : styles.topLink
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-          <CommandPalette />
+          <CommandPalette showAdminCommands={showAdmin} />
           <div className={styles.account}>
             {meError && auth.configured ? (
               <span className={`${styles.authMode} ${styles.authError}`} title={meError}>
@@ -258,25 +240,9 @@ export function AuthenticatedAppLayout() {
             ) : (
               <span className={styles.authMode}>{authModeLabel}</span>
             )}
-            <details className={styles.accountMenu}>
-              <summary>{accountLabel}</summary>
-              <div className={styles.accountPanel}>
-                <span className={styles.accountWorkspace}>{workspaceLabel}</span>
-                <div className={styles.accountSetting}>
-                  <span className={styles.accountSettingLabel}>Appearance</span>
-                  <ThemeToggle />
-                </div>
-                {canSignOut ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void signOut()}
-                  >
-                    Sign out
-                  </Button>
-                ) : null}
-              </div>
-            </details>
+            <Link className={styles.accountLink} to="/settings">
+              {accountLabel}
+            </Link>
           </div>
         </header>
         <main className={styles.routeFrame}>

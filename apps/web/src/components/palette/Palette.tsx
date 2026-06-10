@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { paletteCommands } from "./registry";
+import { getPaletteCommands } from "./registry";
 import styles from "./Palette.module.css";
 
 export interface PaletteCommand {
@@ -27,24 +27,37 @@ function commandHaystack(command: PaletteCommand) {
   );
 }
 
-function filterCommands(query: string) {
+function filterCommands(query: string, commands: PaletteCommand[]) {
   const normalizedQuery = normalize(query);
-  if (!normalizedQuery) return paletteCommands;
+  if (!normalizedQuery) return commands;
 
   const terms = normalizedQuery.split(/\s+/);
-  return paletteCommands.filter((command) => {
+  return commands.filter((command) => {
     const haystack = commandHaystack(command);
     return terms.every((term) => haystack.includes(term));
   });
 }
 
-export function CommandPalette() {
+export interface CommandPaletteProps {
+  showAdminCommands?: boolean;
+}
+
+export function CommandPalette({
+  showAdminCommands = false,
+}: CommandPaletteProps) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const commands = useMemo(() => filterCommands(query), [query]);
+  const registeredCommands = useMemo(
+    () => getPaletteCommands({ showAdminCommands }),
+    [showAdminCommands],
+  );
+  const commands = useMemo(
+    () => filterCommands(query, registeredCommands),
+    [query, registeredCommands],
+  );
   const activeCommand = commands[activeIndex] ?? null;
 
   useEffect(() => {

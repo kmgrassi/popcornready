@@ -47,6 +47,9 @@ export const settingsCommands: PaletteCommand[] = [
     keywords: ["brand", "style", "colors", "voice"],
     run: go("/brand"),
   },
+];
+
+export const adminSettingsCommands: PaletteCommand[] = [
   {
     id: "settings.admin",
     title: "Admin",
