@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { promises as fs } from "fs";
 import path from "path";
 import { promisify } from "util";
-import { MODEL, structuredVisionCall } from "@/lib/anthropic";
+import { getLlmClient } from "@popcorn/llm";
 import {
   type Beat,
   type CharacterProfile,
@@ -12,8 +12,10 @@ import {
 } from "@popcorn/shared/types";
 
 const execFileAsync = promisify(execFile);
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const DEFAULT_OPENAI_REVIEW_MODEL = "gpt-4.1-mini";
+
+// Snapshot grading is a cheap pass/fail check, so it rides the fast lane
+// (gpt-5-mini / claude-haiku) of the configured provider.
+const REVIEW_EFFORT = "low" as const;
 
 const reviewSchema = {
   type: "object",
@@ -112,115 +114,6 @@ function characterContextText(profiles: CharacterProfile[]): string {
     .join("\n\n");
 }
 
-function extractOpenAIOutputText(payload: any): string {
-  if (typeof payload?.output_text === "string") return payload.output_text;
-  const chunks: string[] = [];
-  for (const item of payload?.output || []) {
-    for (const content of item?.content || []) {
-      if (typeof content?.text === "string") chunks.push(content.text);
-    }
-  }
-  return chunks.join("");
-}
-
-function extractOpenAIToolResult(payload: any): ReviewResult {
-  for (const item of payload?.output || []) {
-    if (item?.type === "function_call" && item?.name === "review_video_snapshot") {
-      const args = String(item.arguments || "");
-      if (!args.trim()) break;
-      return JSON.parse(args) as ReviewResult;
-    }
-    for (const content of item?.content || []) {
-      if (
-        content?.type === "tool_call" &&
-        content?.name === "review_video_snapshot"
-      ) {
-        return content.input as ReviewResult;
-      }
-    }
-  }
-  const text = extractOpenAIOutputText(payload);
-  throw new Error(`Reviewer did not call review_video_snapshot: ${text.slice(0, 500)}`);
-}
-
-async function imageInputBlock(imagePath: string) {
-  const bytes = await fs.readFile(imagePath);
-  const mediaType = mediaTypeFor(imagePath);
-  return {
-    type: "input_image",
-    image_url: `data:${mediaType};base64,${bytes.toString("base64")}`,
-    detail: "high",
-  };
-}
-
-async function reviewWithOpenAI(input: {
-  prompt: string;
-  imagePaths: string[];
-}): Promise<{ result: ReviewResult; model: string }> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) throw new Error("OPENAI_API_KEY is not set for video snapshot review.");
-  const model =
-    process.env.OPENAI_VIDEO_REVIEW_MODEL?.trim() || DEFAULT_OPENAI_REVIEW_MODEL;
-  const imageBlocks = await Promise.all(input.imagePaths.map(imageInputBlock));
-  const res = await fetch(OPENAI_RESPONSES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      tools: [
-        {
-          type: "function",
-          name: "review_video_snapshot",
-          description:
-            "Return the generated video snapshot review grades and recommended action.",
-          parameters: reviewSchema,
-          strict: false,
-        },
-      ],
-      tool_choice: { type: "function", name: "review_video_snapshot" },
-      parallel_tool_calls: false,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: input.prompt,
-            },
-            ...imageBlocks,
-          ],
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`OpenAI snapshot review failed: ${res.status} ${error}`);
-  }
-
-  const payload = await res.json();
-  return { result: extractOpenAIToolResult(payload), model };
-}
-
-async function reviewWithAnthropic(input: {
-  system: string;
-  prompt: string;
-  images: { path: string; mediaType: "image/png" | "image/jpeg" }[];
-}): Promise<{ result: ReviewResult; model: string }> {
-  const result = await structuredVisionCall<ReviewResult>({
-    cachedSystem: input.system,
-    user: input.prompt,
-    schema: reviewSchema,
-    images: input.images,
-    maxTokens: 2000,
-  });
-  return { result, model: MODEL };
-}
-
 export async function reviewGeneratedVideoSnapshots(input: {
   goal: string;
   plan: EditPlan;
@@ -254,7 +147,6 @@ export async function reviewGeneratedVideoSnapshots(input: {
     path: imagePath,
     mediaType: mediaTypeFor(imagePath),
   }));
-  const imagePaths = images.map((image) => image.path);
 
   const sys = `You review generated video clips for an AI video editor.
 You receive still snapshots extracted from a clip, optionally preceded by a
@@ -285,32 +177,32 @@ video clip.
 Review strictly but practically. Use "needs_review" when the still frames are
 ambiguous. Recommend "regenerate" only for clear story or character failures.`;
 
-  const review =
+  const env =
     preferredProvider === "anthropic" && hasAnthropic
-      ? {
-          provider: "anthropic",
-          ...(await reviewWithAnthropic({ system: sys, prompt: user, images })),
-        }
+      ? { ...process.env, LLM_PROVIDER: "anthropic" }
       : hasOpenAI
-        ? {
-            provider: "openai",
-            ...(await reviewWithOpenAI({ prompt: `${sys}\n\n${user}`, imagePaths })),
-          }
-        : {
-            provider: "anthropic",
-            ...(await reviewWithAnthropic({ system: sys, prompt: user, images })),
-          };
+        ? { ...process.env, LLM_PROVIDER: "openai" }
+        : { ...process.env, LLM_PROVIDER: "anthropic" };
+  const client = getLlmClient(env);
+  const result = await client.structuredVision<ReviewResult>({
+    cachedSystem: sys,
+    user,
+    schema: reviewSchema,
+    images,
+    maxTokens: 2000,
+    effort: REVIEW_EFFORT,
+  });
 
   return {
-    ...review.result,
+    ...result,
     snapshots: snapshots.map((snapshot) =>
       snapshot.startsWith(path.join(process.cwd(), "public"))
         ? snapshot.slice(path.join(process.cwd(), "public").length)
         : snapshot
     ),
     reviewer: {
-      provider: review.provider,
-      model: review.model,
+      provider: client.provider,
+      model: client.modelFor(REVIEW_EFFORT),
     },
   };
 }

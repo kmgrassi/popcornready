@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { MODEL, structuredVisionCall } from "./anthropic";
+import { getLlmClient } from "@popcorn/llm";
 
 const execFileAsync = promisify(execFile);
 
@@ -258,11 +258,11 @@ function boundaryDescriptionText(boundaries: StitchBoundaryFrame[]): string {
     .join("\n");
 }
 
-// The production judge: validates the structured vision call against the schema
-// and pins the Anthropic model. Mirrors reviewWithAnthropic in
-// video-snapshot-review.ts.
+// The production judge: a structured vision call against the schema via the
+// configured provider-neutral client (LLM_PROVIDER / *_MODEL env vars).
 export const defaultStitchVisionJudge: StitchVisionJudge = async (input) => {
-  const result = await structuredVisionCall<
+  const client = getLlmClient();
+  const result = await client.structuredVision<
     Omit<StitchContinuityReview, "boundaryFrames" | "reviewer">
   >({
     cachedSystem: input.system,
@@ -271,7 +271,7 @@ export const defaultStitchVisionJudge: StitchVisionJudge = async (input) => {
     images: input.images,
     maxTokens: 2000,
   });
-  return { result, provider: "anthropic", model: MODEL };
+  return { result, provider: client.provider, model: client.modelFor() };
 };
 
 // Build the user prompt + image list from the assembled-output evidence only.

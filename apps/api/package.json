@@ -15,6 +15,7 @@
     "@google/genai": "^2.6.0",
     "@popcorn/agent": "workspace:*",
     "@popcorn/eval": "workspace:*",
+    "@popcorn/llm": "workspace:*",
     "@popcorn/renderer": "workspace:*",
     "@popcorn/shared": "workspace:*",
     "@popcorn/timeline": "workspace:*",
