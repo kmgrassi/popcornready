@@ -1,16 +1,10 @@
-import { useEffect, useState } from "react";
-import type { Project } from "@popcorn/shared/types";
+import { useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   type GateableGenerationStageType,
 } from "@popcorn/shared/v1/types";
-import { DEFAULT_DURATION_POLICY } from "@popcorn/shared/audio-alignment";
 import { Button } from "../ui/Button";
 import { StatusChecklist } from "../ui/StatusChecklist";
-import { PreviewPanel } from "../editor/PreviewPanel";
-import { SidebarPanel } from "../editor/SidebarPanel";
-import { PreviewPlayer } from "../PreviewPlayer";
-import { v1Api } from "../../lib/api-client";
 import { StudioEmptyState } from "./StudioEmptyState";
 import { StudioStepper } from "./StudioStepper";
 import { buildChecklistItems } from "./statusChecklist";
@@ -19,7 +13,8 @@ import { BriefStep } from "./steps/BriefStep";
 import { SourceFootageStep } from "./steps/SourceFootageStep";
 import { StoryDirectionStep } from "./steps/StoryDirectionStep";
 import { GenerateStep } from "./steps/GenerateStep";
-import { ReviewStep } from "./steps/ReviewStep";
+import { ReviewStep as ReviewSetupStep } from "./steps/ReviewStep";
+import { ReviewStep } from "./ReviewStep";
 import { ExportStep } from "./steps/ExportStep";
 import styles from "./StudioShell.module.css";
 
@@ -77,10 +72,35 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
   }
 
   if (flow.state === "review") {
+    const stepProps = {
+      draft: flow.brief,
+      update: flow.update,
+      next: flow.next,
+      back: flow.back,
+    };
+
     return (
       <main className={styles.shell}>
         <StudioStepper step={flow.step} onStepClick={flow.goTo} />
-        <ReviewState projectId={flow.projectId} />
+        {flow.step === "export" ? (
+          <section className={styles.stepBody}>
+            <ExportStep {...stepProps} />
+          </section>
+        ) : (
+          <ReviewStep
+            project={flow.reviewProject}
+            timeline={flow.reviewTimeline}
+            timelineId={flow.reviewTimelineId}
+            clips={flow.reviewClips}
+            segmentNotes={flow.reviewSegmentNotes}
+            loading={flow.reviewLoading}
+            error={flow.reviewError ?? flow.error}
+            onFeedback={flow.requestRevision}
+            onSegmentChange={flow.updateReviewSegment}
+            onSegmentNoteChange={flow.updateReviewSegmentNote}
+            onExport={() => flow.goTo("export")}
+          />
+        )}
       </main>
     );
   }
@@ -131,7 +151,7 @@ function ActiveStep({
         />
       );
     case "review":
-      return <ReviewStep {...stepProps} />;
+      return <ReviewSetupStep {...stepProps} />;
     case "export":
       return <ExportStep {...stepProps} />;
     default:
@@ -167,83 +187,5 @@ function GateCard({
         </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * ReviewState — interim review layout. Reuses the existing PreviewPanel
- * (preview) and SidebarPanel (timeline) until PR 6 re-homes them under
- * `components/studio/`. Loads the studio project so the timeline renders real
- * segments once one exists.
- *
- * NOTE: full rough-cut loading (resolving the run's generated timeline/clips for
- * `projectId`) is PR 6's scope and is also gated on the generation-engine media
- * stages — today `getStudioProject()` projects `timeline: null`, so the panels
- * fall back to the PR 5 placeholder. This state is only reached on terminal
- * success, so it reads as "ready" rather than mid-run.
- */
-function ReviewState({ projectId }: { projectId?: string }) {
-  const [project, setProject] = useState<Project | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    v1Api
-      .getStudioProject()
-      .then((data) => {
-        if (!cancelled) setProject(data.project);
-      })
-      .catch(() => {
-        if (!cancelled) setProject(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  const clips = project?.clips ?? [];
-  const timeline = project?.timeline ?? null;
-  const clipById = Object.fromEntries(clips.map((clip) => [clip.id, clip]));
-
-  return (
-    <section className={styles.review}>
-      <header className={styles.reviewHeader}>
-        <h2 className={styles.generatingHeading}>Your rough cut is ready</h2>
-        <p className="muted">
-          Review the preview and timeline below. Inline editing arrives with the
-          review step.
-        </p>
-      </header>
-      <PreviewPanel
-        Preview={PreviewPlayer}
-        audioClips={[]}
-        busy={false}
-        createdVideos={[]}
-        durationPolicy={DEFAULT_DURATION_POLICY}
-        exportResult={null}
-        galleryLoading={false}
-        loadedVideoThumbs={{}}
-        plan={project?.plan ?? undefined}
-        selectedAudioClipId=""
-        setDurationPolicy={() => {}}
-        setLoadedVideoThumbs={() => {}}
-        setSelectedAudioClipId={() => {}}
-        timeline={timeline}
-        clips={clips}
-        onAlignAudio={() => {}}
-        onExport={() => {}}
-        onRefreshCreatedVideos={() => {}}
-        showActions={false}
-      />
-      <SidebarPanel
-        busy={false}
-        clipById={clipById}
-        message=""
-        project={project}
-        setMessage={() => {}}
-        timeline={timeline}
-        onRevise={() => {}}
-        showActions={false}
-      />
-    </section>
   );
 }
