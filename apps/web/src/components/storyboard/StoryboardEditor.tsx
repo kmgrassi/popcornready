@@ -1,38 +1,86 @@
 import { useCallback, useMemo, useState } from "react";
-import type { Asset } from "@popcorn/shared/assets/types";
-import type { Beat, EditPlan, Scene } from "@popcorn/shared/types";
+import type { ProjectStoryboard, StoryboardBeat, StoryboardScene } from "@popcorn/shared/v1/types";
 import { v1Api } from "../../lib/api-client";
 import "./storyboard.css";
 
-// Storyboard editing surface (PR6 — Storyboard editing).
-//
-// Edits a project's EditPlan (Scenes -> Beats): reorder/add/remove beats within
-// and across scenes, add/remove/reorder scenes, edit scene + beat fields, and
-// regenerate a single beat's sketch tile. Scene/beat ids are kept STABLE across
-// every edit so persisted assets/provenance keep referencing the same nodes.
+type EditableBeat = Pick<
+  StoryboardBeat,
+  | "id"
+  | "intent"
+  | "visualDescription"
+  | "dialogueSummary"
+  | "narration"
+  | "durationSec"
+  | "status"
+>;
 
-function newId(prefix: string): string {
-  const rand =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
-  return `${prefix}_${rand}`;
+type EditableScene = Pick<
+  StoryboardScene,
+  | "id"
+  | "title"
+  | "summary"
+  | "setting"
+  | "mood"
+  | "durationSec"
+  | "status"
+> & {
+  beats: EditableBeat[];
+};
+
+function newId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function emptyBeat(): Beat {
-  // `intent` must be a non-empty string to pass the plan validator
-  // (`parseBeat` -> `requireString(intent)`). Seed a starter the user can edit
-  // so adding a beat and saving immediately does not fail validation.
-  return { id: newId("beat"), name: "New beat", intent: "New beat", durationSec: 3 };
+function emptyBeat(): EditableBeat {
+  return {
+    id: newId(),
+    intent: "New beat",
+    visualDescription: null,
+    dialogueSummary: null,
+    narration: null,
+    durationSec: 3,
+    status: "draft",
+  };
 }
 
-function emptyScene(): Scene {
-  return { id: newId("scene"), name: "New scene", beats: [emptyBeat()] };
+function emptyScene(): EditableScene {
+  return {
+    id: newId(),
+    title: "New scene",
+    summary: null,
+    setting: null,
+    mood: null,
+    durationSec: null,
+    status: "draft",
+    beats: [emptyBeat()],
+  };
 }
 
-function toEditableScenes(plan: EditPlan): Scene[] {
-  if (plan.scenes.length > 0) return plan.scenes;
-  return [emptyScene()];
+function toEditableScenes(storyboard: ProjectStoryboard | null): EditableScene[] {
+  if (!storyboard || storyboard.scenes.length === 0) return [emptyScene()];
+  return storyboard.scenes.map((scene) => ({
+    id: scene.id,
+    title: scene.title,
+    summary: scene.summary,
+    setting: scene.setting,
+    mood: scene.mood,
+    durationSec: scene.durationSec,
+    status: scene.status,
+    beats:
+      scene.beats.length > 0
+        ? scene.beats.map((beat) => ({
+            id: beat.id,
+            intent: beat.intent,
+            visualDescription: beat.visualDescription,
+            dialogueSummary: beat.dialogueSummary,
+            narration: beat.narration,
+            durationSec: beat.durationSec,
+            status: beat.status,
+          }))
+        : [emptyBeat()],
+  }));
 }
 
 function move<T>(list: T[], from: number, to: number): T[] {
@@ -45,59 +93,40 @@ function move<T>(list: T[], from: number, to: number): T[] {
 
 export interface StoryboardEditorProps {
   projectId: string;
-  initialPlan: EditPlan;
-  assets?: Asset[];
-}
-
-function indexStoryboardTileUrlsByBeat(assets: Asset[]): Map<string, string> {
-  const byBeat = new Map<string, string>();
-  for (const asset of assets) {
-    if (asset.role !== "beat_storyboard") continue;
-    const beatId = asset.depicts?.beatId;
-    if (!beatId) continue;
-    byBeat.set(beatId, asset.media.url);
-  }
-  return byBeat;
+  initialStoryboard: ProjectStoryboard | null;
 }
 
 export function StoryboardEditor({
   projectId,
-  initialPlan,
-  assets = [],
+  initialStoryboard,
 }: StoryboardEditorProps) {
-  const [scenes, setScenes] = useState<Scene[]>(() =>
-    toEditableScenes(initialPlan),
+  const [storyboardId, setStoryboardId] = useState<string | null>(
+    initialStoryboard?.id ?? null
   );
-  const [planMeta] = useState(() => ({
-    targetLengthSec: initialPlan.targetLengthSec,
-    style: initialPlan.style,
-    aspectRatio: initialPlan.aspectRatio,
-  }));
+  const [status, setStatus] = useState<ProjectStoryboard["status"]>(
+    initialStoryboard?.status ?? "draft"
+  );
+  const [scenes, setScenes] = useState<EditableScene[]>(() =>
+    toEditableScenes(initialStoryboard)
+  );
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [regenBeatId, setRegenBeatId] = useState<string | null>(null);
-  const tileUrlByBeatId = useMemo(
-    () => indexStoryboardTileUrlsByBeat(assets),
-    [assets]
-  );
 
-  const update = useCallback((next: Scene[]) => {
+  const update = useCallback((next: EditableScene[]) => {
     setScenes(next);
     setDirty(true);
     setSavedAt(null);
   }, []);
 
-  // --- scene ops ---
-  const updateScene = (sceneIdx: number, patch: Partial<Scene>) =>
+  const updateScene = (sceneIdx: number, patch: Partial<EditableScene>) =>
     update(scenes.map((s, i) => (i === sceneIdx ? { ...s, ...patch } : s)));
   const moveScene = (idx: number, dir: -1 | 1) => update(move(scenes, idx, idx + dir));
   const addScene = () => update([...scenes, emptyScene()]);
   const removeScene = (idx: number) => update(scenes.filter((_, i) => i !== idx));
 
-  // --- beat ops ---
-  const updateBeat = (sceneIdx: number, beatIdx: number, patch: Partial<Beat>) =>
+  const updateBeat = (sceneIdx: number, beatIdx: number, patch: Partial<EditableBeat>) =>
     update(
       scenes.map((s, i) =>
         i === sceneIdx
@@ -123,7 +152,6 @@ export function StoryboardEditor({
         i === sceneIdx ? { ...s, beats: move(s.beats, beatIdx, beatIdx + dir) } : s,
       ),
     );
-  // Move a beat across scenes (to the end of the adjacent scene).
   const moveBeatAcross = (sceneIdx: number, beatIdx: number, dir: -1 | 1) => {
     const targetIdx = sceneIdx + dir;
     if (targetIdx < 0 || targetIdx >= scenes.length) return;
@@ -147,30 +175,27 @@ export function StoryboardEditor({
     setSaving(true);
     setSaveError(null);
     try {
-      const plan: EditPlan = {
-        ...planMeta,
-        scenes,
-      };
-      await v1Api.updateProjectPlan(projectId, plan);
+      const result = await v1Api.saveProjectStoryboard(projectId, {
+        id: storyboardId ?? "",
+        status,
+        scenes: scenes.map((scene) => ({
+          ...scene,
+          title: scene.title || "Untitled scene",
+          beats: scene.beats.map((beat) => ({
+            ...beat,
+            intent: beat.intent || "Untitled beat",
+          })),
+        })),
+      });
+      setStoryboardId(result.storyboard.id);
+      setStatus(result.storyboard.status);
+      setScenes(toEditableScenes(result.storyboard));
       setDirty(false);
       setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function regenerate(beatId: string | undefined) {
-    if (!beatId || regenBeatId) return;
-    setRegenBeatId(beatId);
-    setSaveError(null);
-    try {
-      await v1Api.regenerateBeatTile(projectId, beatId);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRegenBeatId(null);
     }
   }
 
@@ -199,7 +224,7 @@ export function StoryboardEditor({
             {saveError
               ? saveError
               : saving
-                ? "Saving…"
+                ? "Saving..."
                 : dirty
                   ? "Unsaved changes"
                   : savedAt
@@ -212,7 +237,7 @@ export function StoryboardEditor({
             onClick={() => void save()}
             disabled={saving || !dirty}
           >
-            Save plan
+            Save storyboard
           </button>
         </div>
       </div>
@@ -225,8 +250,8 @@ export function StoryboardEditor({
               <input
                 id={`name-${scene.id}`}
                 className="sb-input sb-input-grow"
-                value={scene.name}
-                onChange={(e) => updateScene(sceneIdx, { name: e.target.value })}
+                value={scene.title ?? ""}
+                onChange={(e) => updateScene(sceneIdx, { title: e.target.value })}
               />
             </div>
             <div className="sb-field">
@@ -247,23 +272,6 @@ export function StoryboardEditor({
                 value={scene.mood ?? ""}
                 placeholder="lighting / tone"
                 onChange={(e) => updateScene(sceneIdx, { mood: e.target.value })}
-              />
-            </div>
-            <div className="sb-field">
-              <label htmlFor={`chars-${scene.id}`}>Characters</label>
-              <input
-                id={`chars-${scene.id}`}
-                className="sb-input"
-                value={(scene.characterIds ?? []).join(", ")}
-                placeholder="comma-separated ids"
-                onChange={(e) =>
-                  updateScene(sceneIdx, {
-                    characterIds: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })
-                }
               />
             </div>
             <div className="sb-scene-controls">
@@ -287,127 +295,147 @@ export function StoryboardEditor({
               </button>
               <button
                 type="button"
-                className="sb-btn sb-btn-xs sb-btn-danger"
+                className="sb-btn sb-btn-danger sb-btn-xs"
                 onClick={() => removeScene(sceneIdx)}
                 disabled={scenes.length === 1}
               >
-                Remove
+                Remove scene
               </button>
             </div>
           </div>
 
-          {scene.beats.length === 0 ? (
-            <p className="sb-empty">No beats. Add one below.</p>
-          ) : (
-            <div className="sb-beats">
-              {scene.beats.map((beat, beatIdx) => {
-                const tileUrl = beat.id ? tileUrlByBeatId.get(beat.id) : undefined;
-                return (
-                  <div className="sb-beat" key={beat.id ?? beatIdx}>
-                    <div className="sb-tile">
-                      {tileUrl ? (
-                        <img src={tileUrl} alt={`${beat.name} storyboard tile`} />
-                      ) : (
-                        <span>sketch tile</span>
-                      )}
-                    </div>
-                    <div className="sb-beat-row">
+          <div className="sb-beats">
+            {scene.beats.map((beat, beatIdx) => (
+              <article className="sb-beat" key={beat.id}>
+                <div className="sb-beat-media">
+                  <div className="sb-thumb-placeholder">Storyboard panel</div>
+                </div>
+                <div className="sb-beat-fields">
+                  <div className="sb-beat-row">
+                    <div className="sb-field sb-input-grow">
+                      <label htmlFor={`intent-${beat.id}`}>Intent</label>
                       <input
+                        id={`intent-${beat.id}`}
                         className="sb-input sb-input-grow"
-                        value={beat.name}
-                        aria-label="Beat name"
-                        onChange={(e) => updateBeat(sceneIdx, beatIdx, { name: e.target.value })}
+                        value={beat.intent}
+                        onChange={(e) =>
+                          updateBeat(sceneIdx, beatIdx, { intent: e.target.value })
+                        }
                       />
+                    </div>
+                    <div className="sb-field sb-duration">
+                      <label htmlFor={`duration-${beat.id}`}>Seconds</label>
                       <input
-                        className="sb-input sb-duration"
+                        id={`duration-${beat.id}`}
+                        className="sb-input"
                         type="number"
-                        min={0}
-                        step={0.5}
-                        value={beat.durationSec}
-                        aria-label="Beat duration in seconds"
+                        min="0"
+                        step="0.5"
+                        value={beat.durationSec ?? ""}
                         onChange={(e) =>
                           updateBeat(sceneIdx, beatIdx, {
-                            durationSec: Number(e.target.value) || 0,
+                            durationSec: e.target.value ? Number(e.target.value) : null,
                           })
                         }
                       />
                     </div>
-                    <textarea
-                      className="sb-textarea"
-                      value={beat.intent}
-                      placeholder="What happens in this beat"
-                      aria-label="Beat intent"
-                      onChange={(e) => updateBeat(sceneIdx, beatIdx, { intent: e.target.value })}
-                    />
-                    <div className="sb-beat-controls">
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs"
-                        onClick={() => moveBeatWithin(sceneIdx, beatIdx, -1)}
-                        disabled={beatIdx === 0}
-                        aria-label="Move beat up"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs"
-                        onClick={() => moveBeatWithin(sceneIdx, beatIdx, 1)}
-                        disabled={beatIdx === scene.beats.length - 1}
-                        aria-label="Move beat down"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs"
-                        onClick={() => moveBeatAcross(sceneIdx, beatIdx, -1)}
-                        disabled={sceneIdx === 0}
-                        title="Move to previous scene"
-                      >
-                        ⤺ scene
-                      </button>
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs"
-                        onClick={() => moveBeatAcross(sceneIdx, beatIdx, 1)}
-                        disabled={sceneIdx === scenes.length - 1}
-                        title="Move to next scene"
-                      >
-                        scene ⤻
-                      </button>
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs"
-                        onClick={() => void regenerate(beat.id)}
-                        disabled={!beat.id || regenBeatId === beat.id}
-                      >
-                        {regenBeatId === beat.id ? "Regenerating…" : "Regenerate tile"}
-                      </button>
-                      <button
-                        type="button"
-                        className="sb-btn sb-btn-xs sb-btn-danger"
-                        onClick={() => removeBeat(sceneIdx, beatIdx)}
-                      >
-                        Remove
-                      </button>
-                    </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="sb-scene-add">
-            <button type="button" className="sb-btn sb-btn-xs" onClick={() => addBeat(sceneIdx)}>
-              + Add beat
-            </button>
+                  <div className="sb-field">
+                    <label htmlFor={`visual-${beat.id}`}>Visual description</label>
+                    <textarea
+                      id={`visual-${beat.id}`}
+                      className="sb-textarea"
+                      value={beat.visualDescription ?? ""}
+                      onChange={(e) =>
+                        updateBeat(sceneIdx, beatIdx, {
+                          visualDescription: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="sb-field">
+                    <label htmlFor={`dialogue-${beat.id}`}>Dialogue summary</label>
+                    <textarea
+                      id={`dialogue-${beat.id}`}
+                      className="sb-textarea"
+                      value={beat.dialogueSummary ?? ""}
+                      onChange={(e) =>
+                        updateBeat(sceneIdx, beatIdx, {
+                          dialogueSummary: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="sb-field">
+                    <label htmlFor={`narration-${beat.id}`}>Narration</label>
+                    <textarea
+                      id={`narration-${beat.id}`}
+                      className="sb-textarea"
+                      value={beat.narration ?? ""}
+                      onChange={(e) =>
+                        updateBeat(sceneIdx, beatIdx, { narration: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="sb-beat-controls">
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-xs"
+                    onClick={() => moveBeatWithin(sceneIdx, beatIdx, -1)}
+                    disabled={beatIdx === 0}
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-xs"
+                    onClick={() => moveBeatWithin(sceneIdx, beatIdx, 1)}
+                    disabled={beatIdx === scene.beats.length - 1}
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-xs"
+                    onClick={() => moveBeatAcross(sceneIdx, beatIdx, -1)}
+                    disabled={sceneIdx === 0}
+                  >
+                    Scene ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-xs"
+                    onClick={() => moveBeatAcross(sceneIdx, beatIdx, 1)}
+                    disabled={sceneIdx === scenes.length - 1}
+                  >
+                    Scene ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="sb-btn sb-btn-danger sb-btn-xs"
+                    onClick={() => removeBeat(sceneIdx, beatIdx)}
+                    disabled={scene.beats.length === 1}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
+
+          <button
+            type="button"
+            className="sb-btn"
+            onClick={() => addBeat(sceneIdx)}
+          >
+            Add beat
+          </button>
         </section>
       ))}
 
       <button type="button" className="sb-btn" onClick={addScene}>
-        + Add scene
+        Add scene
       </button>
     </main>
   );
