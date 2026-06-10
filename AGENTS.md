@@ -17,6 +17,19 @@ file calls out conventions that matter for parallel agent work.
 - When planning parallel work, split tasks so each PR mostly edits distinct
   route, page, component, or package files.
 
+## Asset-Graph Migration Hygiene
+
+- The target generation model is the immutable asset graph:
+  `assets` + `asset_edges` + `selections` + `actions`.
+- Do **not** add migrations that restore retired legacy surfaces such as
+  `projects.brief`, `projects.plan`, `brief_versions`, generation stage tables,
+  composition/edit-graph/timeline tables, or `assets.provenance`.
+- If code still expects a retired column/table, update the code to write graph
+  assets, selections, edges, or actions. Preserve old API response fields only
+  as projections from the new graph state.
+- Treat schema-cache errors after a retirement migration as evidence of stale
+  callers, not as a reason to re-add the old column.
+
 ## Styling (CSS Modules + global tokens)
 
 `apps/web/src/styles/globals.css` grew into a multi-thousand-line monolith that

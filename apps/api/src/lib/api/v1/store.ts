@@ -308,46 +308,197 @@ interface ProjectRow {
   workspace_id: string;
   name: string;
   status: "active" | "deleted";
-  brief: VideoBrief | null;
-  current_brief_version_id: string | null;
-  plan: EditPlan | null;
   visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
 }
 
-function mapProject(row: ProjectRow): V1Project {
+function mapProject(
+  row: ProjectRow,
+  projection: {
+    brief?: VideoBrief | null;
+    currentBriefVersionId?: string | null;
+    plan?: EditPlan | null;
+  } = {}
+): V1Project {
   return {
     id: row.id,
     schemaVersion: SCHEMA_VERSIONS.project,
     workspaceId: row.workspace_id,
     name: row.name,
     status: row.status,
-    brief: row.brief ?? null,
-    currentBriefVersionId: row.current_brief_version_id ?? null,
-    plan: row.plan ?? null,
+    brief: projection.brief ?? null,
+    currentBriefVersionId: projection.currentBriefVersionId ?? null,
+    plan: projection.plan ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
 }
 
 // --- brief versions --------------------------------------------------------
-interface BriefVersionRow {
+interface DataAssetRow {
   id: string;
   schema_version: string;
+  workspace_id: string;
   project_id: string;
-  brief: VideoBrief;
+  lineage_id: string;
+  version: number;
+  kind: GraphAssetKind;
+  media: AssetMedia;
+  status: "ready" | "pending";
+  role: string | null;
+  content: unknown;
   created_at: string;
+  updated_at: string;
 }
 
-function mapBriefVersion(row: BriefVersionRow): V1BriefVersion {
+function mapBriefVersion(row: DataAssetRow): V1BriefVersion {
   return {
     id: row.id,
     schemaVersion: SCHEMA_VERSIONS.briefVersion,
     projectId: row.project_id,
-    brief: row.brief,
+    brief: row.content as VideoBrief,
     createdAt: iso(row.created_at),
   };
+}
+
+interface CurrentSelectionRow {
+  active_asset_id: string;
+}
+
+async function dataAssetById(
+  db: SupabaseClient,
+  assetId: string
+): Promise<DataAssetRow | null> {
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("id", assetId)
+    .eq("media", "data")
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, "dataAssetById");
+  return (data as DataAssetRow | null) ?? null;
+}
+
+async function latestDataAsset(
+  db: SupabaseClient,
+  projectId: string,
+  kind: GraphAssetKind
+): Promise<DataAssetRow | null> {
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("kind", kind)
+    .eq("media", "data")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, `latestDataAsset ${kind}`);
+  return (data as DataAssetRow | null) ?? null;
+}
+
+async function selectedDataAsset(
+  db: SupabaseClient,
+  projectId: string,
+  slotRole: string,
+  kind: GraphAssetKind
+): Promise<DataAssetRow | null> {
+  const selected = await db
+    .from("current_selections")
+    .select("active_asset_id")
+    .eq("project_id", projectId)
+    .eq("slot_role", slotRole)
+    .maybeSingle();
+  if (isNoRows(selected.error)) return latestDataAsset(db, projectId, kind);
+  throwOnError(selected.error, `selectedDataAsset ${slotRole}`);
+
+  const activeAssetId = (selected.data as CurrentSelectionRow | null)?.active_asset_id;
+  if (!activeAssetId) return latestDataAsset(db, projectId, kind);
+  return (await dataAssetById(db, activeAssetId)) ?? latestDataAsset(db, projectId, kind);
+}
+
+async function projectProjection(
+  db: SupabaseClient,
+  projectId: string
+): Promise<{
+  brief: VideoBrief | null;
+  currentBriefVersionId: string | null;
+  plan: EditPlan | null;
+}> {
+  const [briefAsset, planAsset] = await Promise.all([
+    selectedDataAsset(db, projectId, "brief", "brief"),
+    selectedDataAsset(db, projectId, "plan", "plan"),
+  ]);
+  return {
+    brief: (briefAsset?.content as VideoBrief | undefined) ?? null,
+    currentBriefVersionId: briefAsset?.id ?? null,
+    plan: (planAsset?.content as EditPlan | undefined) ?? null,
+  };
+}
+
+async function mapProjectWithProjection(
+  db: SupabaseClient,
+  row: ProjectRow
+): Promise<V1Project> {
+  return mapProject(row, await projectProjection(db, row.id));
+}
+
+async function setActiveAssetSelection(
+  db: SupabaseClient,
+  projectId: string,
+  slotRole: "brief" | "plan",
+  activeAssetId: string
+): Promise<void> {
+  const { error } = await db
+    .from("selections")
+    .insert({
+      project_id: projectId,
+      slot_owner_lineage_id: null,
+      slot_role: slotRole,
+      active_asset_id: activeAssetId,
+    });
+  throwOnError(error, `setActiveAssetSelection ${slotRole}`);
+}
+
+async function insertDataAsset(input: {
+  db: SupabaseClient;
+  workspaceId: string;
+  projectId: string;
+  kind: "brief" | "plan";
+  role: string;
+  content: unknown;
+  lineageId?: string;
+  version?: number;
+}): Promise<DataAssetRow> {
+  const now = new Date().toISOString();
+  const visibility = await defaultVisibilityForWorkspace(input.db, input.workspaceId);
+  const row: Record<string, unknown> = {
+    schema_version: "asset.v2",
+    workspace_id: input.workspaceId,
+    project_id: input.projectId,
+    kind: input.kind,
+    media: "data",
+    status: "ready",
+    role: input.role,
+    content: input.content,
+    visibility,
+    created_at: now,
+    updated_at: now,
+  };
+  if (input.lineageId) row.lineage_id = input.lineageId;
+  if (input.version) row.version = input.version;
+
+  const { data, error } = await input.db
+    .from("assets")
+    .insert(row)
+    .select("*")
+    .single();
+  throwOnError(error, `insertDataAsset ${input.kind}`);
+  return data as DataAssetRow;
 }
 
 // --- studio drafts ---------------------------------------------------------
@@ -426,14 +577,33 @@ interface AssetContextEnvelope {
   analysis?: V1AssetAnalysis;
 }
 
+type GraphAssetKind =
+  | "source_footage"
+  | "brief"
+  | "beat"
+  | "anchor"
+  | "keyframe"
+  | "clip"
+  | "audio_track"
+  | "narration_script"
+  | "critique"
+  | "plan"
+  | "composite"
+  | "render";
+
+type AssetMedia = "data" | "image" | "video" | "audio";
+
 interface AssetRow {
   id: string;
   schema_version: string;
   workspace_id: string;
   project_id: string;
-  kind: AssetKind;
+  kind: GraphAssetKind;
+  media: AssetMedia;
   status: "ready" | "pending";
   filename: string;
+  content: unknown | null;
+  params: { provenance?: GeneratedAssetProvenance } | null;
   remote_url: string | null;
   storage_key: string | null;
   source: AgentAssetSource;
@@ -441,10 +611,22 @@ interface AssetRow {
   description: string | null;
   context: AssetContextEnvelope | null;
   semantic_analysis: AssetSemanticAnalysis | null;
-  provenance: GeneratedAssetProvenance | null;
   visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
+}
+
+function assetKindToGraphKind(asset: V1Asset): GraphAssetKind {
+  if (asset.kind === "audio") return "audio_track";
+  if (asset.kind === "image") return asset.provenance ? "keyframe" : "anchor";
+  return asset.provenance ? "clip" : "source_footage";
+}
+
+function assetMediaToKind(media: AssetMedia, kind: GraphAssetKind): AssetKind {
+  if (media === "image" || media === "video" || media === "audio") return media;
+  if (kind === "audio_track") return "audio";
+  if (kind === "anchor" || kind === "keyframe") return "image";
+  return "video";
 }
 
 function assetContextEnvelope(asset: V1Asset): AssetContextEnvelope | null {
@@ -466,9 +648,12 @@ function assetToRow(asset: V1Asset): AssetRow {
     schema_version: asset.schemaVersion,
     workspace_id: asset.workspaceId,
     project_id: asset.projectId,
-    kind: asset.kind,
+    kind: assetKindToGraphKind(asset),
+    media: asset.kind,
     status: asset.status,
     filename: asset.filename,
+    content: null,
+    params: asset.provenance ? { provenance: asset.provenance } : null,
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
     source: asset.source,
@@ -476,7 +661,6 @@ function assetToRow(asset: V1Asset): AssetRow {
     description: asset.userContext?.description ?? asset.context?.summary ?? null,
     context: assetContextEnvelope(asset),
     semantic_analysis: asset.semanticAnalysis ?? null,
-    provenance: asset.provenance ?? null,
     created_at: asset.createdAt,
     updated_at: asset.updatedAt,
   };
@@ -489,7 +673,7 @@ function mapAsset(row: AssetRow): V1Asset {
     schemaVersion: SCHEMA_VERSIONS.asset,
     workspaceId: row.workspace_id,
     projectId: row.project_id,
-    kind: row.kind,
+    kind: assetMediaToKind(row.media, row.kind),
     filename: row.filename,
     status: row.status,
     source: row.source,
@@ -508,7 +692,7 @@ function mapAsset(row: AssetRow): V1Asset {
   }
   if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
   if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
-  if (row.provenance != null) asset.provenance = row.provenance;
+  if (row.params?.provenance != null) asset.provenance = row.params.provenance;
   if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
 }
@@ -653,11 +837,6 @@ export async function createProject(input: {
   const now = new Date().toISOString();
   const visibility = await defaultVisibilityForWorkspace(db, input.workspaceId);
 
-  // FK ordering: brief_versions.project_id -> projects.id (NOT NULL), and
-  // projects.current_brief_version_id -> brief_versions.id. So insert the project
-  // first (with a null current_brief_version_id), then the brief version, then
-  // point the project at it. Ids are DB-generated (gen_random_uuid); omit `id`
-  // and read the generated value back via .select().
   const insertedProject = await db
     .from("projects")
     .insert({
@@ -665,44 +844,31 @@ export async function createProject(input: {
       workspace_id: input.workspaceId,
       name: input.name,
       status: "active",
-      brief: input.brief ?? null,
       visibility,
-      current_brief_version_id: null,
       created_at: now,
       updated_at: now,
     })
     .select("*")
     .single();
   throwOnError(insertedProject.error, "createProject insert project");
-  let projectRow = insertedProject.data as ProjectRow;
+  const projectRow = insertedProject.data as ProjectRow;
   const projectId = projectRow.id;
 
   let briefVersion: V1BriefVersion | null = null;
   if (input.brief) {
-    const insertedBrief = await db
-      .from("brief_versions")
-      .insert({
-        schema_version: SCHEMA_VERSIONS.briefVersion,
-        project_id: projectId,
-        brief: input.brief,
-        created_at: now,
-      })
-      .select("*")
-      .single();
-    throwOnError(insertedBrief.error, "createProject insert brief_version");
-    briefVersion = mapBriefVersion(insertedBrief.data as BriefVersionRow);
-
-    const updatedProject = await db
-      .from("projects")
-      .update({ current_brief_version_id: briefVersion.id, updated_at: now })
-      .eq("id", projectId)
-      .select("*")
-      .single();
-    throwOnError(updatedProject.error, "createProject link brief_version");
-    projectRow = updatedProject.data as ProjectRow;
+    const briefAsset = await insertDataAsset({
+      db,
+      workspaceId: input.workspaceId,
+      projectId,
+      kind: "brief",
+      role: "current_brief",
+      content: input.brief,
+    });
+    await setActiveAssetSelection(db, projectId, "brief", briefAsset.id);
+    briefVersion = mapBriefVersion(briefAsset);
   }
 
-  return { project: mapProject(projectRow), briefVersion };
+  return { project: await mapProjectWithProjection(db, projectRow), briefVersion };
 }
 
 export async function getProject(
@@ -720,7 +886,7 @@ export async function getProject(
   if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
   throwOnError(error, "getProject");
   if (!data) throw notFound(`Project not found: ${projectId}`);
-  return mapProject(data as ProjectRow);
+  return mapProjectWithProjection(db, data as ProjectRow);
 }
 
 // Persist the project's editable storyboard plan (Scenes -> Beats). Replaces the
@@ -732,19 +898,24 @@ export async function updateProjectPlan(
   plan: EditPlan
 ): Promise<V1Project> {
   const db = getServiceSupabase();
-  const now = new Date().toISOString();
-  const { data, error } = await db
-    .from("projects")
-    .update({ plan, updated_at: now })
-    .eq("id", projectId)
-    .eq("workspace_id", workspaceId)
-    .neq("status", "deleted")
-    .select("*")
-    .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
-  throwOnError(error, "updateProjectPlan");
-  if (!data) throw notFound(`Project not found: ${projectId}`);
-  return mapProject(data as ProjectRow);
+  const project = await getProject(workspaceId, projectId);
+  const previous = await selectedDataAsset(db, projectId, "plan", "plan");
+  const planAsset = await insertDataAsset({
+    db,
+    workspaceId,
+    projectId,
+    kind: "plan",
+    role: "storyboard_plan",
+    content: plan,
+    lineageId: previous?.lineage_id,
+    version: previous ? previous.version + 1 : undefined,
+  });
+  await setActiveAssetSelection(db, projectId, "plan", planAsset.id);
+  return {
+    ...project,
+    plan,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export async function listProjects(
@@ -759,7 +930,9 @@ export async function listProjects(
     .eq("workspace_id", workspaceId)
     .neq("status", "deleted");
   throwOnError(error, "listProjects");
-  const all = (data as ProjectRow[]).map(mapProject);
+  const all = await Promise.all(
+    (data as ProjectRow[]).map((row) => mapProjectWithProjection(db, row))
+  );
   return paginate(all, limit, cursor);
 }
 
@@ -774,7 +947,10 @@ export async function listPublicProjects(
     .eq("visibility", "public")
     .neq("status", "deleted");
   throwOnError(error, "listPublicProjects");
-  return paginate((data as ProjectRow[]).map(mapProject), limit, cursor);
+  const all = await Promise.all(
+    (data as ProjectRow[]).map((row) => mapProjectWithProjection(db, row))
+  );
+  return paginate(all, limit, cursor);
 }
 
 export async function setBrief(
@@ -783,19 +959,8 @@ export async function setBrief(
   brief: VideoBrief
 ): Promise<V1Project> {
   const db = getServiceSupabase();
-  // Enforce tenancy: only update a row that matches both ids and is not deleted.
-  const { data, error } = await db
-    .from("projects")
-    .update({ brief, updated_at: new Date().toISOString() })
-    .eq("id", projectId)
-    .eq("workspace_id", workspaceId)
-    .neq("status", "deleted")
-    .select("*")
-    .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
-  throwOnError(error, "setBrief");
-  if (!data) throw notFound(`Project not found: ${projectId}`);
-  return mapProject(data as ProjectRow);
+  const { project } = await createBriefVersion(workspaceId, projectId, brief);
+  return project;
 }
 
 export async function createBriefVersion(
@@ -804,38 +969,24 @@ export async function createBriefVersion(
   brief: VideoBrief
 ): Promise<{ project: V1Project; briefVersion: V1BriefVersion }> {
   // Confirm the project exists within the workspace before writing the version.
-  await getProject(workspaceId, projectId);
-
   const db = getServiceSupabase();
-  const now = new Date().toISOString();
-  const insertedBrief = await db
-    .from("brief_versions")
-    .insert({
-      schema_version: SCHEMA_VERSIONS.briefVersion,
-      project_id: projectId,
-      brief,
-      created_at: now,
-    })
-    .select("*")
-    .single();
-  throwOnError(insertedBrief.error, "createBriefVersion insert");
-  const briefVersion = mapBriefVersion(insertedBrief.data as BriefVersionRow);
-
-  const updatedProject = await db
-    .from("projects")
-    .update({
-      brief,
-      current_brief_version_id: briefVersion.id,
-      updated_at: now,
-    })
-    .eq("id", projectId)
-    .eq("workspace_id", workspaceId)
-    .neq("status", "deleted")
-    .select("*")
-    .single();
-  throwOnError(updatedProject.error, "createBriefVersion update project");
-
-  return { project: mapProject(updatedProject.data as ProjectRow), briefVersion };
+  await getProject(workspaceId, projectId);
+  const previous = await selectedDataAsset(db, projectId, "brief", "brief");
+  const briefAsset = await insertDataAsset({
+    db,
+    workspaceId,
+    projectId,
+    kind: "brief",
+    role: "current_brief",
+    content: brief,
+    lineageId: previous?.lineage_id,
+    version: previous ? previous.version + 1 : undefined,
+  });
+  await setActiveAssetSelection(db, projectId, "brief", briefAsset.id);
+  return {
+    project: await getProject(workspaceId, projectId),
+    briefVersion: mapBriefVersion(briefAsset),
+  };
 }
 
 export async function listBriefVersions(
@@ -847,11 +998,13 @@ export async function listBriefVersions(
   await getProject(workspaceId, projectId);
   const db = getServiceSupabase();
   const { data, error } = await db
-    .from("brief_versions")
+    .from("assets")
     .select("*")
-    .eq("project_id", projectId);
+    .eq("project_id", projectId)
+    .eq("kind", "brief")
+    .eq("media", "data");
   throwOnError(error, "listBriefVersions");
-  const all = (data as BriefVersionRow[]).map(mapBriefVersion);
+  const all = (data as DataAssetRow[]).map(mapBriefVersion);
   return paginate(all, limit, cursor);
 }
 
@@ -1039,9 +1192,20 @@ export async function updateAsset(
   current.updatedAt = new Date().toISOString();
 
   const db = getServiceSupabase();
+  const row = assetToRow(current);
   const { data, error } = await db
     .from("assets")
-    .update(assetToRow(current))
+    .update({
+      status: row.status,
+      filename: row.filename,
+      remote_url: row.remote_url,
+      storage_key: row.storage_key,
+      duration_sec: row.duration_sec,
+      description: row.description,
+      context: row.context,
+      semantic_analysis: row.semantic_analysis,
+      updated_at: row.updated_at,
+    })
     .eq("id", assetId)
     .eq("project_id", projectId)
     .eq("workspace_id", workspaceId)
@@ -1107,7 +1271,8 @@ export async function listAssets(
     .from("assets")
     .select("*")
     .eq("project_id", projectId)
-    .eq("workspace_id", workspaceId);
+    .eq("workspace_id", workspaceId)
+    .neq("media", "data");
   throwOnError(error, "listAssets");
   const all = (data as AssetRow[]).map(mapAsset);
   return paginate(all, limit, cursor);
@@ -1149,23 +1314,27 @@ export async function listWorkspaceAssets(
     .from("assets")
     .select("*, projects!inner(name, status)")
     .eq("workspace_id", workspaceId)
-    .neq("projects.status", "deleted");
-  if (opts.kind) query = query.eq("kind", opts.kind);
+    .neq("projects.status", "deleted")
+    .neq("media", "data");
+  if (opts.kind) query = query.eq("media", opts.kind);
   if (opts.projectId) query = query.eq("project_id", opts.projectId);
-  // "generated" assets carry provenance; uploaded/imported ones do not.
-  if (opts.source === "generated") query = query.not("provenance", "is", null);
-  if (opts.source === "uploaded") query = query.is("provenance", null);
 
   const { data, error } = await query;
   throwOnError(error, "listWorkspaceAssets");
-  const all: WorkspaceAssetSummary[] = (data as WorkspaceAssetJoinRow[]).map((row) => {
+  const filtered = (data as WorkspaceAssetJoinRow[]).filter((row) => {
+    const isGenerated = row.params?.provenance != null;
+    if (opts.source === "generated") return isGenerated;
+    if (opts.source === "uploaded") return !isGenerated;
+    return true;
+  });
+  const all: WorkspaceAssetSummary[] = filtered.map((row) => {
     const source = row.source as { type?: string } | null;
     return {
       id: row.id,
       assetId: row.id,
       projectId: row.project_id,
       projectName: row.projects?.name ?? "Untitled project",
-      kind: row.kind,
+      kind: assetMediaToKind(row.media, row.kind),
       status: row.status,
       source: typeof source?.type === "string" ? source.type : "imported",
       filename: row.filename,
@@ -1422,10 +1591,11 @@ export async function listPublicAssets(
     .select("*, projects!inner(id, visibility, status)")
     .eq("visibility", "public")
     .eq("projects.visibility", "public")
-    .neq("projects.status", "deleted");
+    .neq("projects.status", "deleted")
+    .neq("media", "data");
 
   if (kind) {
-    query = query.eq("kind", kind);
+    query = query.eq("media", kind);
   }
 
   const { data, error } = await query;
@@ -1451,7 +1621,7 @@ export async function searchPublicContent(
     db.rpc("search_public_projects", { search_query: normalized }),
     db.rpc("search_public_assets", {
       search_query: normalized,
-      asset_kind_filter: kind ?? null,
+      media_filter: kind ?? null,
     }),
   ]);
 
@@ -1493,7 +1663,8 @@ export async function listCharacterAnchorAssets(
     .from("assets")
     .select("*")
     .eq("project_id", projectId)
-    .eq("workspace_id", workspaceId);
+    .eq("workspace_id", workspaceId)
+    .neq("media", "data");
   throwOnError(error, "listCharacterAnchorAssets");
   const anchors = (data as AssetRow[]).map(mapAsset).filter(isCharacterAnchorAsset);
   return paginate(anchors, limit, cursor);

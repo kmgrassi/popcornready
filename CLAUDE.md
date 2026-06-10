@@ -33,6 +33,18 @@ DB/Storage/auth work targets the split, not the monolith.** Full plan + PR
 breakdown: [docs/scopes/supabase-cutover-prs.md](docs/scopes/supabase-cutover-prs.md).
 Identity rules: [docs/supabase-identity-and-rls.md](docs/supabase-identity-and-rls.md).
 
+## Asset-Graph Migration Rule
+
+The North Star data model is the immutable asset graph:
+`assets` + `asset_edges` + `selections` + `actions`. When a migration retires a
+legacy surface such as `projects.brief`, `projects.plan`, `brief_versions`,
+generation stage tables, composition/edit-graph/timeline tables, or
+asset-level `provenance`, do **not** restore that surface as a compatibility
+unblock. Update the API/store/orchestrator code to read and write the new model
+instead, and return any still-needed response fields as projections from graph
+state. If a caller still depends on a retired table or column, treat that as code
+migration work, not a schema rollback.
+
 ## Where things live
 
 - **Full directory map (active monorepo vs legacy `src/`):**
