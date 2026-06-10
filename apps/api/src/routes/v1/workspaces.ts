@@ -4,6 +4,7 @@ import { ApiError } from "@/core/errors";
 import type { AssetKind, GenerationRunStatus } from "@popcorn/shared/v1/types";
 import { parsePagination } from "@/lib/api/v1/schemas";
 import {
+  getWorkspaceDashboardSummary,
   listWorkspaceAssets,
   listWorkspaceGenerationRuns,
   listWorkspaceOutputs,
@@ -19,6 +20,8 @@ const GENERATION_RUN_STATUS_VALUES: GenerationRunStatus[] = [
 ];
 
 export const workspacesRouter = Router();
+
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
 // The :workspaceId path segment must match the authenticated workspace — the
 // session is the source of truth, the param is a guard. Shared by every
@@ -39,6 +42,27 @@ function requireOwnWorkspace(
   }
   return workspaceId;
 }
+
+// One-request summary for the guided Home surface. The response is intentionally
+// denormalized so the client can render the hero and recent-output strip without
+// fan-out calls.
+workspacesRouter.get(
+  "/workspaces/:workspaceId/dashboard",
+  route(async ({ auth }, params) => {
+    const workspaceId = requireOwnWorkspace(
+      params.workspaceId,
+      auth.workspaceId,
+      "dashboard state"
+    );
+
+    const summary = await getWorkspaceDashboardSummary(workspaceId);
+    return {
+      status: 200,
+      body: { summary },
+      headers: NO_STORE_HEADERS,
+    };
+  })
+);
 
 // Cross-project asset list for the dashboard. Scoped to the caller's own
 // workspace.
@@ -123,6 +147,7 @@ workspacesRouter.get(
     return {
       status: 200,
       body: { runs: items, pagination: { limit, nextCursor } },
+      headers: NO_STORE_HEADERS,
     };
   })
 );
