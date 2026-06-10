@@ -75,7 +75,7 @@ function formatDuration(seconds?: number) {
  * the latest v1 project timeline internally, then starts the mounted v1 timeline
  * export route and resolves the resulting artifact for the done state.
  */
-export function ExportStep({ back, projectId }: StepProps) {
+export function ExportStep({ back, projectId, completeDraft }: StepProps) {
   const [timeline, setTimeline] = useState<VersionedTimeline | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(Boolean(projectId));
   const [timelineError, setTimelineError] = useState<string | null>(null);
@@ -146,6 +146,7 @@ export function ExportStep({ back, projectId }: StepProps) {
 
     if (nextJob.status === "succeeded") {
       await resolveArtifact(nextJob);
+      await completeDraft?.();
       return;
     }
 

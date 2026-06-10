@@ -41,6 +41,7 @@ export function StudioPage() {
   const initialStep = parseStudioStep(params.get("step"));
   const openPanel = params.get("panel") ?? undefined;
   const reviewGates = parseReviewGates(params.get("reviewGates"));
+  const draftId = params.get("draft");
 
   const initialBrief: Partial<BriefDraft> = {
     ...(goal ? { goal } : {}),
@@ -54,6 +55,7 @@ export function StudioPage() {
       initialStep={initialStep}
       initialStarted={params.has("start") || Boolean(initialStep || goal)}
       openPanel={openPanel}
+      draftId={draftId}
     />
   );
 }
