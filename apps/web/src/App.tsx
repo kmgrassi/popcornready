@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import {
   AppLayout,
   AuthenticatedAppLayout,
@@ -12,13 +12,11 @@ import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
 import { BrandKitPage } from "./routes/BrandKitPage";
-import { AssetsPage, OutputsPage, RunsPage } from "./routes/DashboardCollectionsPage";
-import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
 import { LaunchpadPage } from "./routes/LaunchpadPage";
+import { LibraryPage } from "./routes/LibraryPage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
-import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
 import { UploadsPage } from "./routes/UploadsPage";
@@ -37,17 +35,15 @@ export function App() {
 
         <Route element={<AuthenticatedAppLayout />}>
           <Route path="/dashboard" element={<LaunchpadPage />} />
-          <Route
-            path="/projects"
-            element={<DashboardPlaceholderPage kind="projects" />}
-          />
-          <Route path="/library" element={<Navigate to="/projects" replace />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/library/:tab" element={<LibraryPage />} />
+          <Route path="/projects" element={<RedirectWithSearch to="/library/projects" />} />
           {/* The standalone create wizard is retired — Studio owns the full
               flow. Preserve any /projects/new deep links as a redirect. */}
           <Route path="/projects/new" element={<Navigate to="/studio" replace />} />
-          <Route path="/runs" element={<RunsPage />} />
-          <Route path="/assets" element={<AssetsPage />} />
-          <Route path="/outputs" element={<OutputsPage />} />
+          <Route path="/runs" element={<RedirectWithSearch to="/library/runs" />} />
+          <Route path="/assets" element={<RedirectWithSearch to="/library/assets" />} />
+          <Route path="/outputs" element={<RedirectWithSearch to="/library/outputs" />} />
           <Route path="/studio" element={<StudioPage />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
@@ -59,7 +55,7 @@ export function App() {
           />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
-          <Route path="/evals" element={<EvalsPage />} />
+          <Route path="/evals" element={<RedirectWithSearch to="/library/evals" />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route
             path="/admin/evals"
@@ -81,6 +77,11 @@ export function App() {
       </Route>
     </Routes>
   );
+}
+
+function RedirectWithSearch({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
 }
 
 function Placeholder({ name }: { name: string }) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
-import type { AssetKind, GenerationRunStatus } from "@popcorn/shared/v1/types";
+import { Link, useSearchParams } from "react-router-dom";
+import type { AssetKind, GenerationRunStatus, V1Project } from "@popcorn/shared/v1/types";
 import {
   ApiClientError,
   v1Api,
@@ -65,7 +65,7 @@ function projectCollectionPath(projectId: string, extraParams?: Record<string, s
   for (const [key, value] of Object.entries(extraParams ?? {})) {
     if (value) params.set(key, value);
   }
-  return `/projects?${params.toString()}`;
+  return `/library/projects?${params.toString()}`;
 }
 
 function statusChipClass(status: string) {
@@ -83,7 +83,7 @@ function DashboardFrame({ title, description, children }: { title: string; descr
   return (
     <div className={styles.page}>
       <PageHeader
-        eyebrow="Dashboard"
+        eyebrow="Library"
         title={title}
         description={description}
         action={
@@ -122,6 +122,8 @@ function LoadMore({ hasMore, loading, onClick }: { hasMore: boolean; loading: bo
 }
 
 export function RunsPage() {
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get("projectId") ?? undefined;
   const [status, setStatus] = useState<RunStatusFilter>("all");
   const [state, setState] = useState<LoadState<WorkspaceGenerationRun>>(initialState<WorkspaceGenerationRun>);
   const requestIdRef = useRef(0);
@@ -134,14 +136,18 @@ export function RunsPage() {
     try {
       const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
       if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      const payload = await v1Api.listWorkspaceGenerationRuns(workspaceId, { status, limit: PAGE_SIZE, cursor }, signal);
+      const payload = await v1Api.listWorkspaceGenerationRuns(
+        workspaceId,
+        { status, projectId, limit: PAGE_SIZE, cursor },
+        signal
+      );
       if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
       setState((current) => ({ workspaceId, items: cursor ? [...current.items, ...payload.runs] : payload.runs, nextCursor: payload.pagination.nextCursor, loading: false, loadingMore: false, error: null }));
     } catch (error) {
       if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
       setState((current) => ({ ...current, loading: false, loadingMore: false, error: error instanceof Error ? error : new Error(String(error)) }));
     }
-  }, [state.workspaceId, status]);
+  }, [projectId, state.workspaceId, status]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -188,6 +194,107 @@ export function RunsPage() {
                 </div>
                 <StatusChip status={run.status} />
               </Link>
+            ))}
+          </div>
+          <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
+        </>
+      ) : null}
+    </DashboardFrame>
+  );
+}
+
+export function ProjectsPage() {
+  const [state, setState] = useState<LoadState<V1Project>>(initialState<V1Project>);
+  const requestIdRef = useRef(0);
+
+  const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setState((current) => ({ ...current, loading: !cursor, loadingMore: Boolean(cursor), error: null }));
+
+    try {
+      const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
+      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
+      const payload = await v1Api.listProjects({ limit: PAGE_SIZE, cursor });
+      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
+      setState((current) => ({
+        workspaceId,
+        items: cursor ? [...current.items, ...payload.projects] : payload.projects,
+        nextCursor: payload.pagination.nextCursor,
+        loading: false,
+        loadingMore: false,
+        error: null,
+      }));
+    } catch (error) {
+      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
+      setState((current) => ({
+        ...current,
+        loading: false,
+        loadingMore: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      }));
+    }
+  }, [state.workspaceId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(null, controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  return (
+    <DashboardFrame title="Projects" description="All active video projects in this workspace.">
+      {state.loading ? <DashboardSkeleton variant="grid" /> : null}
+      {!state.loading && state.error ? (
+        <ErrorState
+          title="Unable to load projects"
+          body="We couldn’t load projects for this workspace."
+          error={state.error}
+          onRetry={() => void load(null)}
+        />
+      ) : null}
+      {!state.loading && !state.error && state.items.length === 0 ? (
+        <EmptyState
+          title="No projects yet"
+          body="Create a video to start building your project library."
+          action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
+        />
+      ) : null}
+      {!state.loading && !state.error && state.items.length > 0 ? (
+        <>
+          <div className={`${styles.grid} ${styles.gridProjects}`}>
+            {state.items.map((project) => (
+              <article className={styles.projectCard} key={project.id}>
+                <div className={styles.projectCardBody}>
+                  <div>
+                    <span className={styles.rowTitle}>{project.name}</span>
+                    <span className={styles.rowSub}>Updated {formatDate(project.updatedAt)}</span>
+                  </div>
+                  <div className={styles.cardMeta}>
+                    <span className={`${styles.chip} ${statusChipClass(project.status)}`}>
+                      {titleCase(project.status)}
+                    </span>
+                    <span>{project.plan ? "Storyboard ready" : "No storyboard yet"}</span>
+                    <span>Created {formatDate(project.createdAt)}</span>
+                  </div>
+                </div>
+                <div className={styles.cardActions}>
+                  <ButtonLink
+                    variant="secondary"
+                    size="sm"
+                    to={`/projects/${encodeURIComponent(project.id)}/storyboard`}
+                  >
+                    Storyboard
+                  </ButtonLink>
+                  <ButtonLink
+                    variant="ghost"
+                    size="sm"
+                    to={`/library/runs?projectId=${encodeURIComponent(project.id)}`}
+                  >
+                    Runs
+                  </ButtonLink>
+                </div>
+              </article>
             ))}
           </div>
           <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
