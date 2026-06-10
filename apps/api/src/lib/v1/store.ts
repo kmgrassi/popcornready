@@ -110,31 +110,49 @@ interface BriefVersionRow {
   id: string;
   schema_version: string;
   project_id: string;
-  brief: BriefVersion["brief"];
+  content: BriefVersion["brief"];
   created_at: string;
 }
 
 function rowToBriefVersion(r: BriefVersionRow): BriefVersion {
   return {
     id: r.id,
-    schemaVersion: r.schema_version as BriefVersion["schemaVersion"],
+    schemaVersion: "brief.v1",
     projectId: r.project_id,
-    brief: r.brief,
+    brief: r.content,
     createdAt: r.created_at,
   };
 }
+
+type GraphAssetKind =
+  | "source_footage"
+  | "brief"
+  | "beat"
+  | "anchor"
+  | "keyframe"
+  | "clip"
+  | "audio_track"
+  | "narration_script"
+  | "critique"
+  | "plan"
+  | "composite"
+  | "render";
+
+type AssetMedia = "data" | "image" | "video" | "audio";
 
 interface AssetRow {
   id: string;
   schema_version: string;
   workspace_id: string;
   project_id: string;
-  kind: V1Asset["kind"];
+  kind: GraphAssetKind;
+  media: AssetMedia;
   status: V1Asset["status"];
   filename: string;
   url: string | null;
   remote_url: string | null;
   storage_key: string | null;
+  params: { generatedAssetJobId?: string } | null;
   duration_sec: number | null;
   description: string | null;
   context: { userContext?: V1Asset["userContext"]; agentContext?: V1Asset["agentContext"] } | null;
@@ -143,7 +161,6 @@ interface AssetRow {
     clipUnderstanding?: V1Asset["clipUnderstanding"];
   } | null;
   source: unknown;
-  generated_asset_job_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -191,13 +208,26 @@ export function renderableAssetUrlFromRow(
   return row.storage_key ?? "";
 }
 
+function mediaToV1Kind(media: AssetMedia, kind: GraphAssetKind): V1Asset["kind"] {
+  if (media === "image" || media === "video" || media === "audio") return media;
+  if (kind === "audio_track") return "audio";
+  if (kind === "anchor" || kind === "keyframe") return "image";
+  return "video";
+}
+
+function v1AssetKindToGraphKind(asset: V1Asset): GraphAssetKind {
+  if (asset.kind === "audio") return "audio_track";
+  if (asset.kind === "image") return asset.source === "generated" ? "keyframe" : "anchor";
+  return asset.source === "generated" ? "clip" : "source_footage";
+}
+
 function rowToAsset(r: AssetRow): V1Asset {
   const asset: V1Asset = {
     id: r.id,
     schemaVersion: r.schema_version as V1Asset["schemaVersion"],
     projectId: r.project_id,
     workspaceId: r.workspace_id,
-    kind: r.kind,
+    kind: mediaToV1Kind(r.media, r.kind),
     status: r.status,
     filename: r.filename,
     url: renderableAssetUrlFromRow(r),
@@ -213,8 +243,8 @@ function rowToAsset(r: AssetRow): V1Asset {
     asset.assetKnowledge = r.semantic_analysis.assetKnowledge;
   if (r.semantic_analysis?.clipUnderstanding)
     asset.clipUnderstanding = r.semantic_analysis.clipUnderstanding;
-  if (r.generated_asset_job_id != null)
-    asset.generatedAssetJobId = r.generated_asset_job_id;
+  if (r.params?.generatedAssetJobId != null)
+    asset.generatedAssetJobId = r.params.generatedAssetJobId;
   return asset;
 }
 
@@ -230,18 +260,19 @@ function assetToRow(a: V1Asset): AssetRow {
     schema_version: a.schemaVersion,
     workspace_id: a.workspaceId,
     project_id: a.projectId,
-    kind: a.kind,
+    kind: v1AssetKindToGraphKind(a),
+    media: a.kind,
     status: a.status,
     filename: a.filename,
     url: a.url ?? null,
     remote_url: a.source === "remote_url" ? a.url : null,
     storage_key: null,
+    params: a.generatedAssetJobId ? { generatedAssetJobId: a.generatedAssetJobId } : null,
     duration_sec: a.durationSec ?? null,
     description: a.description ?? null,
     context: Object.keys(context).length ? context : null,
     semantic_analysis: Object.keys(semantic).length ? semantic : null,
     source: a.source,
-    generated_asset_job_id: a.generatedAssetJobId ?? null,
     created_at: a.createdAt,
     updated_at: a.updatedAt,
   };
@@ -499,7 +530,7 @@ export function createSupabaseStore(
       return row ? rowToProject(row) : null;
     },
     async getBriefVersion(id) {
-      const row = await getOne<BriefVersionRow>("brief_versions", "id", id);
+      const row = await getOne<BriefVersionRow>("assets", "id", id);
       return row ? rowToBriefVersion(row) : null;
     },
     async getAsset(id) {
@@ -510,7 +541,8 @@ export function createSupabaseStore(
       const { data, error } = await db
         .from("assets")
         .select("*")
-        .eq("project_id", projectId);
+        .eq("project_id", projectId)
+        .neq("media", "data");
       if (error) fail("list assets", error);
       return ((data as AssetRow[]) ?? []).map(rowToAsset);
     },
@@ -604,16 +636,30 @@ export function createSupabaseStore(
       return { ...project, id };
     },
     async saveBriefVersion(brief) {
-      const id = await saveWithGeneratedId("brief_versions", {
+      const project = await getOne<ProjectRow>("projects", "id", brief.projectId);
+      if (!project) {
+        throw new Error(`project not found for brief version: ${brief.projectId}`);
+      }
+      const id = await saveWithGeneratedId("assets", {
         id: brief.id,
-        schema_version: brief.schemaVersion,
+        schema_version: "asset.v2",
+        workspace_id: project.workspace_id,
         project_id: brief.projectId,
-        brief: brief.brief,
+        kind: "brief",
+        media: "data",
+        status: "ready",
+        role: "current_brief",
+        content: brief.brief,
         created_at: brief.createdAt,
+        updated_at: brief.createdAt,
       });
       return { ...brief, id };
     },
     async saveAsset(asset) {
+      if (asset.id) {
+        const existing = await getOne<AssetRow>("assets", "id", asset.id);
+        if (existing) return rowToAsset(existing);
+      }
       const id = await saveWithGeneratedId("assets", assetToRow(asset));
       return { ...asset, id };
     },
