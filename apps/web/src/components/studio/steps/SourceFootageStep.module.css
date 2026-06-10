@@ -1,0 +1,127 @@
+.choiceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.choiceCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.choiceCard input {
+  align-self: flex-start;
+}
+
+.choiceCard:has(input:checked) {
+  border-color: var(--cta);
+  background: var(--panel-2);
+  box-shadow: 0 0 0 1px var(--cta);
+}
+
+.choiceTitle {
+  font-weight: 700;
+}
+
+.choiceText {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.uploadPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.uploadHeader {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.uploadTitle {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.uploadHelp {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.fileInput {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fileItem {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.fileMeta {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 760px) {
+  .choiceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fileItem {
+    flex-direction: column;
+  }
+
+  .fileMeta {
+    flex: initial;
+  }
+}

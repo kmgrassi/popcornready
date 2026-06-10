@@ -4,6 +4,7 @@
 // generation run; useStudioFlow.startGeneration() calls it.
 
 import type {
+  AssetKind,
   GateableGenerationStageType,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
@@ -63,6 +64,74 @@ function compositionModeFromDraft(draft: BriefDraft): CompositionMode {
   return "prompt_only";
 }
 
+function assetKindForFile(file: File): AssetKind | null {
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("audio/")) return "audio";
+
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  if (!ext) return null;
+  if (["mp4", "mov", "m4v", "webm"].includes(ext)) return "video";
+  if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
+  if (["mp3", "wav", "m4a", "aac", "ogg"].includes(ext)) return "audio";
+  return null;
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
+
+async function registerSelectedFootage(
+  projectId: string,
+  draft: BriefDraft,
+): Promise<string[]> {
+  if (draft.footageChoice !== "upload") return [];
+  if (draft.selectedFootage.length === 0) {
+    throw new Error("Select at least one video or image before generating with footage.");
+  }
+
+  const uploads = await Promise.all(
+    draft.selectedFootage.map(async (selected) => {
+      const kind = assetKindForFile(selected.file);
+      if (!kind) {
+        throw new Error(`Could not determine asset kind for ${selected.name}.`);
+      }
+      const dataBase64 = await fileToBase64(selected.file);
+      const { asset } = await v1Api.registerProjectUpload(projectId, {
+        source: {
+          type: "multipart_upload",
+          dataBase64,
+          mimeType: selected.file.type || undefined,
+        },
+        kind,
+        filename: selected.name,
+        durationSec: selected.durationSec,
+        userContext: {
+          description: `Selected in Studio Source Footage: ${selected.name}`,
+          intendedUse:
+            kind === "audio" ? ["music", "voiceover", "dialogue"] : ["primary_footage"],
+        },
+      });
+      return asset;
+    }),
+  );
+
+  const visualAssetIds = uploads
+    .filter((asset) => asset.kind === "video" || asset.kind === "image")
+    .map((asset) => asset.id);
+
+  if (visualAssetIds.length === 0) {
+    throw new Error("Select at least one video or image before generating with footage.");
+  }
+
+  return visualAssetIds;
+}
+
 /**
  * Create the project, kick off a prompt generation run, and return the ids the
  * shell needs to poll. Throws on any API failure or a missing run id so the
@@ -72,10 +141,31 @@ export async function createAndStartRun(draft: BriefDraft): Promise<StartRunResu
   const brief = briefInputFromDraft(draft);
   const reviewGates: GateableGenerationStageType[] = draft.reviewGates;
 
-  const { project } = await v1Api.createProject({
+  const { project, briefVersion } = await v1Api.createProject({
     name: draft.projectName.trim() || deriveProjectName(draft.goal),
     brief,
   });
+
+  if (draft.footageChoice === "upload") {
+    if (!briefVersion?.id) {
+      throw new Error("Project was created without a brief version.");
+    }
+    const assetIds = await registerSelectedFootage(project.id, draft);
+    const { runId } = await v1Api.startUploadedFootageGenerationRun(project.id, {
+      briefVersionId: briefVersion.id,
+      assetIds,
+      mode: compositionModeFromDraft(draft),
+      allowGeneratedGapFill: draft.footageMode === "hybrid",
+      reviewGates,
+      showCaptions: draft.showCaptions,
+    });
+
+    if (!runId) {
+      throw new Error("Generation started without a run ID.");
+    }
+
+    return { projectId: project.id, runId };
+  }
 
   const effectiveSeedKind =
     draft.provider === "gemini" ? "video" : draft.seedKind;

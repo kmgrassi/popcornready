@@ -7,6 +7,7 @@ import type {
   GenerationJob,
   GenerationRun,
   GenerationRunStatus,
+  V1Asset,
   V1Project,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
@@ -212,6 +213,34 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
+export interface RegisterProjectUploadInput {
+  source: {
+    type: "multipart_upload";
+    dataBase64: string;
+    mimeType?: string;
+  };
+  kind: AssetKind;
+  filename: string;
+  durationSec?: number;
+  userContext?: {
+    description?: string;
+    intendedUse?: Array<
+      | "primary_footage"
+      | "b_roll"
+      | "style_reference"
+      | "music"
+      | "voiceover"
+      | "dialogue"
+      | "sound_effect"
+    >;
+  };
+}
+
+export interface RegisterProjectUploadResponse {
+  asset: V1Asset;
+  job: GenerationJob;
+}
+
 export interface RejectGenerationRunInput {
   stageType?: GateableGenerationStageType;
   note?: string;
@@ -299,6 +328,14 @@ export const v1Api = {
       method: "POST",
       body: input,
     }),
+  registerProjectUpload: (projectId: string, input: RegisterProjectUploadInput) =>
+    apiRequest<RegisterProjectUploadResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/uploads`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
   getProject: (projectId: string) =>
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`

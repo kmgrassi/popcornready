@@ -16,6 +16,7 @@ import type {
 import type { StoryContext } from "@popcorn/shared/types";
 import { v1Api } from "../../lib/api-client";
 import { createAndStartRun } from "../../lib/startRun";
+import type { SelectedFootage } from "../../lib/upload";
 
 // --- State / step vocabularies ---------------------------------------------
 
@@ -61,6 +62,7 @@ export interface BriefDraft {
   // Source footage (step 2).
   footageChoice: FootageChoice;
   footageMode: FootageMode;
+  selectedFootage: SelectedFootage[];
 
   // Advanced creative direction (collapsed in Brief + Story steps).
   audience: string;
@@ -90,6 +92,7 @@ export const EMPTY_BRIEF_DRAFT: BriefDraft = {
   projectName: "",
   footageChoice: "prompt_only",
   footageMode: "asset_driven",
+  selectedFootage: [],
   audience: "",
   platform: "tiktok",
   format: "visual_reveal",
