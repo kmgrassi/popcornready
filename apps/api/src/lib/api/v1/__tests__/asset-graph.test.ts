@@ -83,6 +83,24 @@ test("inputsFingerprint is stable across input order and changes when params cha
   );
 });
 
+test("inputsFingerprint covers prompt-only params when there are no graph inputs", () => {
+  const params = {
+    schema_version: "asset_params.v1",
+    provenance: { provider: "mock", prompt: "prompt-only shot", model: "mock-v1" },
+  };
+
+  const fingerprint = inputsFingerprint([], params);
+  assert.equal(typeof fingerprint, "string");
+  assert.equal(fingerprint.length, 64);
+  assert.notEqual(
+    fingerprint,
+    inputsFingerprint([], {
+      ...params,
+      provenance: { provider: "mock", prompt: "changed shot", model: "mock-v1" },
+    })
+  );
+});
+
 test("canonicalContentHash is stable for semantically identical object key order", () => {
   assert.equal(
     canonicalContentHash({ prompt: "x", params: { seed: 1, model: "m" } }),

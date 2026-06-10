@@ -695,7 +695,9 @@ function assetToRow(asset: V1Asset): AssetRow {
     content_hash: asset.contentHash ?? null,
     inputs_fingerprint:
       asset.inputsFingerprint ??
-      (asset.graphInputs?.length ? inputsFingerprint(asset.graphInputs, params) : null),
+      (asset.graphInputs !== undefined || params
+        ? inputsFingerprint(asset.graphInputs ?? [], params)
+        : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
     source: asset.source,
@@ -745,7 +747,6 @@ async function withGraphMetadataForInsert(
   const graphInputs =
     asset.graphInputs ??
     graphInputsFromProvenance(asset.provenance, contentHashByAssetId);
-  if (graphInputs.length === 0) return asset;
 
   const params = asset.provenance
     ? { schema_version: "asset_params.v1", provenance: asset.provenance }
