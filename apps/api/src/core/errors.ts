@@ -17,6 +17,7 @@ export type ApiErrorCode =
   | "model_output_invalid"
   | "rate_limited"
   | "not_implemented"
+  | "database_error"
   | "internal_error";
 
 const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
@@ -35,6 +36,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   model_output_invalid: 502,
   rate_limited: 429,
   not_implemented: 501,
+  database_error: 500,
   internal_error: 500,
 };
 

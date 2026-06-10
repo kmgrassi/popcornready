@@ -25,6 +25,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { EditPlan } from "@popcorn/shared/types";
+import { isMissingRow, throwDatabaseError } from "../../supabase/db-errors";
 import {
   DASHBOARD_SCHEMA_VERSION,
   type DashboardSummary,
@@ -264,17 +265,12 @@ function iso(value: string | null | undefined): string {
   return new Date(value).toISOString();
 }
 
-// supabase-js returns `error.code === "PGRST116"` (or null data) when a
-// `.single()` lookup matches no rows. Callers translate that into notFound.
-function isNoRows(error: { code?: string } | null): boolean {
-  return Boolean(error && error.code === "PGRST116");
-}
-
-function throwOnError(error: { message?: string } | null, context: string): void {
-  if (error) {
-    throw new Error(`store: ${context}: ${error.message ?? String(error)}`);
-  }
-}
+// supabase-js returns `PGRST116` when a `.single()` lookup matches no rows.
+// Callers translate that into notFound/null; other DB failures use the typed
+// database_error envelope instead of leaking as generic internal errors.
+const isNoRows = isMissingRow;
+const throwOnError = (error: Parameters<typeof throwDatabaseError>[1], context: string) =>
+  throwDatabaseError(`store.${context}`, error);
 
 async function defaultVisibilityForWorkspace(
   db: SupabaseClient,
