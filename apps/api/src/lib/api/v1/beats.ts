@@ -191,6 +191,8 @@ async function buildBeatMediaBody(
       kind: mediaKind === "keyframe" ? "image" : "video",
       prompt,
       referenceAssetIds: input.anchorIds,
+      beatId,
+      anchorIds: input.anchorIds,
     },
   };
 }

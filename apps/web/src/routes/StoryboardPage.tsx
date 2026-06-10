@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { Asset } from "@popcorn/shared/assets/types";
-import type { EditPlan } from "@popcorn/shared/types";
+import type { ProjectStoryboard } from "@popcorn/shared/v1/types";
 import { StoryboardEditor } from "../components/storyboard/StoryboardEditor";
 import { v1Api } from "../lib/api-client";
 
@@ -9,24 +8,12 @@ import { v1Api } from "../lib/api-client";
 // the requested project; the dashboard route falls back to the current studio
 // project selector until the project list has first-class storyboard links.
 
-function emptyPlan(): EditPlan {
-  return {
-    targetLengthSec: 30,
-    // The editor exposes no style field, so a scaffolded plan must carry a
-    // non-empty default or the first Save fails with no way to recover in the UI.
-    style: "fast-paced social ad",
-    aspectRatio: "9:16",
-    scenes: [],
-  };
-}
-
 export function StoryboardPage() {
   const { projectId: routeProjectId } = useParams();
   const [projectId, setProjectId] = useState<string | null>(
     routeProjectId ?? null
   );
-  const [plan, setPlan] = useState<EditPlan | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [storyboard, setStoryboard] = useState<ProjectStoryboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -36,19 +23,23 @@ export function StoryboardPage() {
     setProjectId(routeProjectId ?? null);
 
     const request = routeProjectId
-      ? v1Api.getProject(routeProjectId).then((res) => ({
-          projectId: res.project.id,
-          plan: res.project.plan,
-          assets: [] as Asset[],
+      ? v1Api.getProjectStoryboard(routeProjectId).then((res) => ({
+          projectId: routeProjectId,
+          storyboard: res.storyboard,
         }))
-      : v1Api.getStoryboard();
+      : v1Api.getStudioProject().then(async (res) => {
+          if (!res.project) {
+            return { projectId: null, storyboard: null };
+          }
+          const storyboardRes = await v1Api.getProjectStoryboard(res.project.id);
+          return { projectId: res.project.id, storyboard: storyboardRes.storyboard };
+        });
 
     request
       .then((result) => {
         if (cancelled) return;
         setProjectId(result.projectId);
-        setPlan(result.plan ?? emptyPlan());
-        setAssets(result.assets);
+        setStoryboard(result.storyboard);
         setError(result.projectId ? null : "No project found for storyboard editing.");
       })
       .catch((err: unknown) => {
@@ -68,16 +59,16 @@ export function StoryboardPage() {
     return (
       <main className="sb-shell">
         <h1>Storyboard</h1>
-        <p className="muted">Loading plan...</p>
+        <p className="muted">Loading storyboard...</p>
       </main>
     );
   }
 
-  if (error || !projectId || !plan) {
+  if (error || !projectId) {
     return (
       <main className="sb-shell">
         <h1>Storyboard</h1>
-        <p className="muted">{error ?? "No plan found for this project."}</p>
+        <p className="muted">{error ?? "No project found for this storyboard."}</p>
         <Link className="sb-btn" to="/studio">
           Back to studio
         </Link>
@@ -85,5 +76,5 @@ export function StoryboardPage() {
     );
   }
 
-  return <StoryboardEditor projectId={projectId} initialPlan={plan} assets={assets} />;
+  return <StoryboardEditor projectId={projectId} initialStoryboard={storyboard} />;
 }

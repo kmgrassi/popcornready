@@ -22,15 +22,21 @@
 //     `assets` stores METADATA only — the bytes live in storage (separate PR).
 
 import { AsyncLocalStorage } from "async_hooks";
+import { randomUUID } from "crypto";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { EditPlan } from "@popcorn/shared/types";
 import { isMissingRow, throwDatabaseError } from "../../supabase/db-errors";
+import {
+  canonicalContentHash,
+  graphInputsFromProvenance,
+  inputsFingerprint,
+  type GraphAssetInput,
+} from "./asset-graph";
 import {
   DASHBOARD_SCHEMA_VERSION,
   type DashboardSummary,
 } from "@popcorn/shared/v1/dashboard";
-import { notFound } from "./errors";
+import { ApiError, notFound } from "./errors";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
 import {
@@ -40,6 +46,12 @@ import {
   type Job,
   type JobStatus,
   type JobType,
+  type ProjectStoryboard,
+  type StoryboardBeat,
+  type StoryboardItemStatus,
+  type StoryboardPanel,
+  type StoryboardScene,
+  type StoryboardStatus,
   SCHEMA as CONTRACT_SCHEMA,
 } from "@popcorn/shared/v1/types";
 import {
@@ -53,6 +65,7 @@ import {
   getGenerationRunStore,
   type GenerationRunsStore,
 } from "../../v1/generation-runs/store";
+import { getRequestSupabase } from "../../supabase/clients";
 import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
 import {
   AgentAssetSource,
@@ -82,8 +95,7 @@ export interface V1Project {
   status: "active" | "deleted";
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
-  // Editable storyboard plan (Scenes -> Beats). Null until a plan exists.
-  plan: EditPlan | null;
+  hasStoryboard?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -135,6 +147,9 @@ export interface V1Asset {
   analysis?: V1AssetAnalysis;
   // Present for assets produced by the generated-assets endpoint (PR2).
   provenance?: GeneratedAssetProvenance;
+  graphInputs?: GraphAssetInput[];
+  contentHash?: string;
+  inputsFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,6 +187,36 @@ export interface IdempotencyRecord {
   status: number;
   responseBody: unknown;
   createdAt: string;
+}
+
+export interface AssetGraphSelectionRef {
+  slotOwnerLineageId: string | null;
+  slotRole: string;
+  seq: number;
+}
+
+export interface StaleCandidateAsset {
+  assetId: string;
+  depth: number;
+  ref: string | null;
+  kind: string;
+  status: string;
+  role: string | null;
+  lineageId: string;
+  version: number;
+  contentHash: string | null;
+  inputsFingerprint: string | null;
+  selections: AssetGraphSelectionRef[];
+}
+
+export interface StaleCandidatesResult {
+  changedAsset: {
+    assetId: string;
+    ref: string | null;
+    kind: string;
+    contentHash: string | null;
+  };
+  candidates: StaleCandidateAsset[];
 }
 
 export type ActionStatus =
@@ -305,6 +350,14 @@ function getServiceSupabase(): SupabaseClient {
   return serviceClient;
 }
 
+function getRequestSupabaseOrService(): SupabaseClient {
+  try {
+    return getRequestSupabase();
+  } catch {
+    return getServiceSupabase();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers: timestamps, errors, mapping
 // ---------------------------------------------------------------------------
@@ -369,7 +422,7 @@ function mapProject(
   projection: {
     brief?: VideoBrief | null;
     currentBriefVersionId?: string | null;
-    plan?: EditPlan | null;
+    hasStoryboard?: boolean;
   } = {}
 ): V1Project {
   return {
@@ -380,7 +433,7 @@ function mapProject(
     status: row.status,
     brief: projection.brief ?? null,
     currentBriefVersionId: projection.currentBriefVersionId ?? null,
-    plan: projection.plan ?? null,
+    hasStoryboard: projection.hasStoryboard ?? false,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -399,6 +452,8 @@ interface DataAssetRow {
   status: "ready" | "pending";
   role: string | null;
   content: unknown;
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -408,7 +463,7 @@ interface DataAssetRow {
 // it when projecting the payload back out as a domain object.
 const CONTENT_SCHEMA_KEY = "schema_version";
 
-function markedContent(kind: "brief" | "plan", content: unknown): Record<string, unknown> {
+function markedContent(kind: "brief" | "beat", content: unknown): Record<string, unknown> {
   return { [CONTENT_SCHEMA_KEY]: `${kind}.v1`, ...(content as Record<string, unknown>) };
 }
 
@@ -428,6 +483,34 @@ function mapBriefVersion(row: DataAssetRow): V1BriefVersion {
     brief: unmarkedContent<VideoBrief>(row.content),
     createdAt: iso(row.created_at),
   };
+}
+
+interface CurrentSelectionRow {
+  active_asset_id: string;
+}
+
+interface GraphAssetSummaryRow {
+  id: string;
+  ref: string | null;
+  kind: string;
+  status: string;
+  role: string | null;
+  lineage_id: string;
+  version: number;
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
+}
+
+interface DownstreamAssetRow {
+  asset_id: string;
+  depth: number;
+}
+
+interface CurrentSelectionSummaryRow {
+  slot_owner_lineage_id: string | null;
+  slot_role: string;
+  seq: number;
+  active_asset_id: string;
 }
 
 interface ActionRow {
@@ -505,10 +588,6 @@ function mapAction(row: ActionRow): V1Action {
   return action;
 }
 
-interface CurrentSelectionRow {
-  active_asset_id: string;
-}
-
 async function dataAssetById(
   db: SupabaseClient,
   assetId: string
@@ -570,16 +649,29 @@ async function projectProjection(
 ): Promise<{
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
-  plan: EditPlan | null;
+  hasStoryboard: boolean;
 }> {
-  const [briefAsset, planAsset] = await Promise.all([
+  const [briefAsset, storyboard] = await Promise.all([
     selectedDataAsset(db, projectId, "brief", "brief"),
-    selectedDataAsset(db, projectId, "plan", "plan"),
+    db
+      .from("storyboards")
+      .select("id")
+      .eq("project_id", projectId)
+      .limit(1)
+      .maybeSingle(),
   ]);
+  if (isNoRows(storyboard.error)) {
+    return {
+      brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
+      currentBriefVersionId: briefAsset?.id ?? null,
+      hasStoryboard: false,
+    };
+  }
+  throwOnError(storyboard.error, "projectProjection storyboard");
   return {
     brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
     currentBriefVersionId: briefAsset?.id ?? null,
-    plan: planAsset ? unmarkedContent<EditPlan>(planAsset.content) : null,
+    hasStoryboard: Boolean(storyboard.data),
   };
 }
 
@@ -593,7 +685,7 @@ async function mapProjectWithProjection(
 async function setActiveAssetSelection(
   db: SupabaseClient,
   projectId: string,
-  slotRole: "brief" | "plan",
+  slotRole: "brief",
   activeAssetId: string,
   setByActionId?: string
 ): Promise<void> {
@@ -731,7 +823,7 @@ async function insertDataAsset(input: {
   db: SupabaseClient;
   workspaceId: string;
   projectId: string;
-  kind: "brief" | "plan";
+  kind: "brief" | "beat";
   role: string;
   content: unknown;
   lineageId?: string;
@@ -740,6 +832,7 @@ async function insertDataAsset(input: {
 }): Promise<DataAssetRow> {
   const now = new Date().toISOString();
   const visibility = await defaultVisibilityForWorkspace(input.db, input.workspaceId);
+  const content = markedContent(input.kind, input.content);
   const row: Record<string, unknown> = {
     schema_version: "asset.v2",
     workspace_id: input.workspaceId,
@@ -748,7 +841,9 @@ async function insertDataAsset(input: {
     media: "data",
     status: "ready",
     role: input.role,
-    content: markedContent(input.kind, input.content),
+    content,
+    content_hash: canonicalContentHash(content),
+    inputs_fingerprint: inputsFingerprint([], null),
     visibility,
     created_at: now,
     updated_at: now,
@@ -869,6 +964,9 @@ interface AssetRow {
   filename: string;
   content: unknown | null;
   params: { schema_version?: string; provenance?: GeneratedAssetProvenance } | null;
+  inputs: GraphAssetInput[];
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
   source: AgentAssetSource;
@@ -909,6 +1007,9 @@ function assetContextEnvelope(asset: V1Asset): AssetContextEnvelope | null {
 }
 
 function assetToRow(asset: V1Asset): AssetRow {
+  const params = asset.provenance
+    ? { schema_version: "asset_params.v1", provenance: asset.provenance }
+    : null;
   return {
     id: asset.id,
     schema_version: asset.schemaVersion,
@@ -919,9 +1020,14 @@ function assetToRow(asset: V1Asset): AssetRow {
     status: asset.status,
     filename: asset.filename,
     content: null,
-    params: asset.provenance
-      ? { schema_version: "asset_params.v1", provenance: asset.provenance }
-      : null,
+    params,
+    inputs: asset.graphInputs ?? [],
+    content_hash: asset.contentHash ?? null,
+    inputs_fingerprint:
+      asset.inputsFingerprint ??
+      (asset.graphInputs !== undefined || params
+        ? inputsFingerprint(asset.graphInputs ?? [], params)
+        : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
     source: asset.source,
@@ -931,6 +1037,54 @@ function assetToRow(asset: V1Asset): AssetRow {
     semantic_analysis: asset.semanticAnalysis ?? null,
     created_at: asset.createdAt,
     updated_at: asset.updatedAt,
+  };
+}
+
+async function contentHashesForAssets(
+  db: SupabaseClient,
+  projectId: string,
+  assetIds: string[]
+): Promise<Map<string, string | null>> {
+  const uniqueIds = [...new Set(assetIds)].filter(Boolean);
+  if (uniqueIds.length === 0) return new Map();
+
+  const { data, error } = await db
+    .from("assets")
+    .select("id, content_hash")
+    .eq("project_id", projectId)
+    .in("id", uniqueIds);
+  throwOnError(error, "contentHashesForAssets");
+
+  const rows = (data ?? []) as Array<{ id: string; content_hash: string | null }>;
+  return new Map(rows.map((row) => [row.id, row.content_hash]));
+}
+
+async function withGraphMetadataForInsert(
+  db: SupabaseClient,
+  asset: V1Asset
+): Promise<V1Asset> {
+  if (!asset.provenance && asset.graphInputs === undefined) return asset;
+
+  const provenanceAssetIds = [
+    ...(asset.provenance?.referenceAssetIds ?? []),
+    ...(asset.provenance?.anchorIds ?? []),
+  ];
+  const existingInputIds = asset.graphInputs?.map((input) => input.assetId) ?? [];
+  const contentHashByAssetId = await contentHashesForAssets(db, asset.projectId, [
+    ...provenanceAssetIds,
+    ...existingInputIds,
+  ]);
+  const graphInputs =
+    asset.graphInputs ??
+    graphInputsFromProvenance(asset.provenance, contentHashByAssetId);
+
+  const params = asset.provenance
+    ? { schema_version: "asset_params.v1", provenance: asset.provenance }
+    : null;
+  return {
+    ...asset,
+    graphInputs,
+    inputsFingerprint: asset.inputsFingerprint ?? inputsFingerprint(graphInputs, params),
   };
 }
 
@@ -961,6 +1115,13 @@ function mapAsset(row: AssetRow): V1Asset {
   if (envelope.analysis !== undefined) asset.analysis = envelope.analysis;
   if (row.semantic_analysis != null) asset.semanticAnalysis = row.semantic_analysis;
   if (row.params?.provenance != null) asset.provenance = row.params.provenance;
+  if (Array.isArray(row.inputs) && row.inputs.length > 0) {
+    asset.graphInputs = row.inputs;
+  }
+  if (row.content_hash != null) asset.contentHash = row.content_hash;
+  if (row.inputs_fingerprint != null) {
+    asset.inputsFingerprint = row.inputs_fingerprint;
+  }
   if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
 }
@@ -1169,49 +1330,626 @@ export async function getProject(
   return mapProjectWithProjection(db, data as ProjectRow);
 }
 
-// Persist the project's editable storyboard plan (Scenes -> Beats). Replaces the
-// whole plan; callers (the storyboard editor) keep scene/beat ids stable across
-// edits so downstream assets/provenance keep referencing the same nodes.
-export async function updateProjectPlan(
-  workspaceId: string,
+interface StoryboardRow {
+  id: string;
+  project_id: string;
+  plan_asset_id: string | null;
+  status: StoryboardStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+interface StoryboardSceneRow {
+  id: string;
+  project_id: string;
+  storyboard_id: string;
+  scene_index: number;
+  title: string | null;
+  summary: string | null;
+  setting: string | null;
+  mood: string | null;
+  duration_sec: number | null;
+  scene_asset_id: string | null;
+  status: StoryboardItemStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+interface StoryboardBeatRow {
+  id: string;
+  project_id: string;
+  scene_id: string;
+  beat_index: number;
+  intent: string;
+  visual_description: string | null;
+  dialogue_summary: string | null;
+  narration: string | null;
+  duration_sec: number | null;
+  status: StoryboardItemStatus;
+  beat_asset_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface StoryboardPanelRow {
+  id: string;
+  project_id: string;
+  beat_id: string;
+  panel_index: number;
+  image_asset_id: string | null;
+  prompt_asset_id: string | null;
+  status: StoryboardItemStatus;
+  is_selected: boolean;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveStoryboardSceneInput {
+  id: string;
+  title: string | null;
+  summary?: string | null;
+  setting?: string | null;
+  mood?: string | null;
+  durationSec?: number | null;
+  status?: StoryboardItemStatus;
+  beats: SaveStoryboardBeatInput[];
+}
+
+export interface SaveStoryboardBeatInput {
+  id: string;
+  intent: string;
+  visualDescription?: string | null;
+  dialogueSummary?: string | null;
+  narration?: string | null;
+  durationSec?: number | null;
+  status?: StoryboardItemStatus;
+}
+
+export interface SaveStoryboardInput {
+  id?: string | null;
+  status?: StoryboardStatus;
+  scenes: SaveStoryboardSceneInput[];
+}
+
+function mapStoryboardPanel(row: StoryboardPanelRow): StoryboardPanel {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    beatId: row.beat_id,
+    panelIndex: row.panel_index,
+    imageAssetId: row.image_asset_id,
+    promptAssetId: row.prompt_asset_id,
+    status: row.status,
+    isSelected: row.is_selected,
+    approvedAt: row.approved_at ? iso(row.approved_at) : null,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+function mapStoryboardBeat(
+  row: StoryboardBeatRow,
+  panels: StoryboardPanel[]
+): StoryboardBeat {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    sceneId: row.scene_id,
+    beatIndex: row.beat_index,
+    intent: row.intent,
+    visualDescription: row.visual_description,
+    dialogueSummary: row.dialogue_summary,
+    narration: row.narration,
+    durationSec: row.duration_sec,
+    status: row.status,
+    beatAssetId: row.beat_asset_id,
+    panels,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+function mapStoryboardScene(
+  row: StoryboardSceneRow,
+  beats: StoryboardBeat[]
+): StoryboardScene {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    storyboardId: row.storyboard_id,
+    sceneIndex: row.scene_index,
+    title: row.title,
+    summary: row.summary,
+    setting: row.setting,
+    mood: row.mood,
+    durationSec: row.duration_sec,
+    sceneAssetId: row.scene_asset_id,
+    status: row.status,
+    beats,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+function mapStoryboard(
+  row: StoryboardRow,
+  scenes: StoryboardScene[]
+): ProjectStoryboard {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    planAssetId: row.plan_asset_id,
+    status: row.status,
+    scenes,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+async function getStoryboardRow(
+  db: SupabaseClient,
   projectId: string,
-  plan: EditPlan
-): Promise<V1Project> {
+  storyboardId?: string | null
+): Promise<StoryboardRow | null> {
+  let query = db
+    .from("storyboards")
+    .select("*")
+    .eq("project_id", projectId);
+  if (storyboardId) query = query.eq("id", storyboardId);
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, "getStoryboardRow");
+  return (data as StoryboardRow | null) ?? null;
+}
+
+async function requireProjectRow(
+  db: SupabaseClient,
+  workspaceId: string,
+  projectId: string
+): Promise<ProjectRow> {
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "requireProjectRow");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  return data as ProjectRow;
+}
+
+export async function getProjectStoryboard(
+  workspaceId: string,
+  projectId: string
+): Promise<ProjectStoryboard | null> {
   const db = getServiceSupabase();
-  const project = await getProject(workspaceId, projectId);
-  const previous = await selectedDataAsset(db, projectId, "plan", "plan");
-  const inputAssetIds = previous ? [previous.id] : [];
-  const action = await createAction({
-    projectId,
-    tool: previous ? "update_plan" : "create_plan",
-    status: "running",
-    params: { source: "updateProjectPlan" },
-    inputAssetIds,
-    rationale: previous
-      ? "Create a new immutable storyboard plan asset version."
-      : "Create the initial storyboard plan asset.",
-  });
-  const planAsset = await insertDataAsset({
-    db,
-    workspaceId,
-    projectId,
-    kind: "plan",
-    role: "storyboard_plan",
-    content: plan,
+  await requireProjectRow(db, workspaceId, projectId);
+  const storyboard = await getStoryboardRow(db, projectId);
+  if (!storyboard) return null;
+
+  const scenesResult = await db
+    .from("storyboard_scenes")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("storyboard_id", storyboard.id)
+    .order("scene_index", { ascending: true });
+  throwOnError(scenesResult.error, "getProjectStoryboard scenes");
+  const sceneRows = (scenesResult.data ?? []) as StoryboardSceneRow[];
+  const sceneIds = sceneRows.map((scene) => scene.id);
+
+  const beatsResult = sceneIds.length
+    ? await db
+        .from("storyboard_beats")
+        .select("*")
+        .eq("project_id", projectId)
+        .in("scene_id", sceneIds)
+        .order("beat_index", { ascending: true })
+    : { data: [], error: null };
+  throwOnError(beatsResult.error, "getProjectStoryboard beats");
+  const beatRows = (beatsResult.data ?? []) as StoryboardBeatRow[];
+  const beatIds = beatRows.map((beat) => beat.id);
+
+  const panelsResult = beatIds.length
+    ? await db
+        .from("storyboard_panels")
+        .select("*")
+        .eq("project_id", projectId)
+        .in("beat_id", beatIds)
+        .order("panel_index", { ascending: true })
+    : { data: [], error: null };
+  throwOnError(panelsResult.error, "getProjectStoryboard panels");
+  const panelRows = (panelsResult.data ?? []) as StoryboardPanelRow[];
+
+  const panelsByBeat = new Map<string, StoryboardPanel[]>();
+  for (const panel of panelRows.map(mapStoryboardPanel)) {
+    panelsByBeat.set(panel.beatId, [...(panelsByBeat.get(panel.beatId) ?? []), panel]);
+  }
+
+  const beatsByScene = new Map<string, StoryboardBeat[]>();
+  for (const beatRow of beatRows) {
+    const beat = mapStoryboardBeat(beatRow, panelsByBeat.get(beatRow.id) ?? []);
+    beatsByScene.set(beat.sceneId, [...(beatsByScene.get(beat.sceneId) ?? []), beat]);
+  }
+
+  return mapStoryboard(
+    storyboard,
+    sceneRows.map((scene) => mapStoryboardScene(scene, beatsByScene.get(scene.id) ?? []))
+  );
+}
+
+function semanticBeatChanged(
+  before: StoryboardBeatRow,
+  after: SaveStoryboardBeatInput
+): boolean {
+  return (
+    before.intent !== after.intent ||
+    before.visual_description !== (after.visualDescription ?? null) ||
+    before.dialogue_summary !== (after.dialogueSummary ?? null) ||
+    before.narration !== (after.narration ?? null) ||
+    before.duration_sec !== (after.durationSec ?? null)
+  );
+}
+
+async function nextBeatSnapshotAssetId(input: {
+  db: SupabaseClient;
+  workspaceId: string;
+  projectId: string;
+  existing: StoryboardBeatRow | undefined;
+  beat: SaveStoryboardBeatInput;
+}): Promise<string | null> {
+  if (!input.existing?.beat_asset_id) return input.existing?.beat_asset_id ?? null;
+  if (!semanticBeatChanged(input.existing, input.beat)) return input.existing.beat_asset_id;
+
+  const previous = await dataAssetById(input.db, input.existing.beat_asset_id);
+  const asset = await insertDataAsset({
+    db: input.db,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    kind: "beat",
+    role: "beat_snapshot",
+    content: {
+      intent: input.beat.intent,
+      visual_description: input.beat.visualDescription ?? null,
+      dialogue_summary: input.beat.dialogueSummary ?? null,
+      narration: input.beat.narration ?? null,
+      duration_sec: input.beat.durationSec ?? null,
+    },
     lineageId: previous?.lineage_id,
     version: previous ? previous.version + 1 : undefined,
-    createdByActionId: action.id,
   });
-  await setActiveAssetSelection(db, projectId, "plan", planAsset.id, action.id);
-  await updateAction(action.id, {
-    status: "applied",
-    outputAssetIds: [planAsset.id],
+  return asset.id;
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertUuid(value: string | null | undefined, path: string): void {
+  if (value && !UUID_RE.test(value)) {
+    throw new ApiError("validation_failed", `${path} must be a UUID.`);
+  }
+}
+
+async function assertStoryboardIdAvailable(
+  db: SupabaseClient,
+  projectId: string,
+  storyboardId: string | null | undefined
+): Promise<void> {
+  assertUuid(storyboardId, "id");
+  if (!storyboardId) return;
+  const { data, error } = await db
+    .from("storyboards")
+    .select("id, project_id")
+    .eq("id", storyboardId)
+    .maybeSingle();
+  if (isNoRows(error)) return;
+  throwOnError(error, "assertStoryboardIdAvailable");
+  if (data && (data as StoryboardRow).project_id !== projectId) {
+    throw new ApiError("validation_failed", "Storyboard id belongs to another project.");
+  }
+}
+
+async function assertStoryboardRowsAreWritable(input: {
+  db: SupabaseClient;
+  projectId: string;
+  storyboardId: string;
+  storyboard: SaveStoryboardInput;
+}): Promise<void> {
+  const sceneIds = input.storyboard.scenes.map((scene) => scene.id);
+  const beatIds = input.storyboard.scenes.flatMap((scene) =>
+    scene.beats.map((beat) => beat.id)
+  );
+  for (const [index, scene] of input.storyboard.scenes.entries()) {
+    assertUuid(scene.id, `scenes[${index}].id`);
+    for (const [beatIndex, beat] of scene.beats.entries()) {
+      assertUuid(beat.id, `scenes[${index}].beats[${beatIndex}].id`);
+    }
+  }
+
+  if (sceneIds.length > 0) {
+    const { data, error } = await input.db
+      .from("storyboard_scenes")
+      .select("id, project_id, storyboard_id")
+      .in("id", sceneIds);
+    throwOnError(error, "assertStoryboardRowsAreWritable scenes");
+    for (const row of (data ?? []) as StoryboardSceneRow[]) {
+      if (row.project_id !== input.projectId || row.storyboard_id !== input.storyboardId) {
+        throw new ApiError(
+          "validation_failed",
+          `Scene id belongs to another storyboard: ${row.id}.`
+        );
+      }
+    }
+  }
+
+  if (beatIds.length === 0) return;
+  const beats = await input.db
+    .from("storyboard_beats")
+    .select("id, project_id, scene_id")
+    .in("id", beatIds);
+  throwOnError(beats.error, "assertStoryboardRowsAreWritable beats");
+  const existingBeatRows = (beats.data ?? []) as Pick<
+    StoryboardBeatRow,
+    "id" | "project_id" | "scene_id"
+  >[];
+  const existingBeatSceneIds = [
+    ...new Set(existingBeatRows.map((beat) => beat.scene_id)),
+  ];
+  const beatScenes = existingBeatSceneIds.length
+    ? await input.db
+        .from("storyboard_scenes")
+        .select("id, project_id, storyboard_id")
+        .in("id", existingBeatSceneIds)
+    : { data: [], error: null };
+  throwOnError(beatScenes.error, "assertStoryboardRowsAreWritable beat scenes");
+  const sceneById = new Map(
+    ((beatScenes.data ?? []) as StoryboardSceneRow[]).map((scene) => [scene.id, scene])
+  );
+  for (const row of existingBeatRows) {
+    const scene = sceneById.get(row.scene_id);
+    if (
+      row.project_id !== input.projectId ||
+      !scene ||
+      scene.project_id !== input.projectId ||
+      scene.storyboard_id !== input.storyboardId
+    ) {
+      throw new ApiError(
+        "validation_failed",
+        `Beat id belongs to another storyboard: ${row.id}.`
+      );
+    }
+  }
+}
+
+async function restoreStoryboardOrder(
+  db: SupabaseClient,
+  projectId: string,
+  scenes: Array<{ id: string; sceneIndex: number }>,
+  beats: Array<{ id: string; beatIndex: number }>
+): Promise<void> {
+  for (const scene of scenes) {
+    const { error } = await db
+      .from("storyboard_scenes")
+      .update({ scene_index: scene.sceneIndex })
+      .eq("project_id", projectId)
+      .eq("id", scene.id);
+    throwOnError(error, "restoreStoryboardOrder scene");
+  }
+  for (const beat of beats) {
+    const { error } = await db
+      .from("storyboard_beats")
+      .update({ beat_index: beat.beatIndex })
+      .eq("project_id", projectId)
+      .eq("id", beat.id);
+    throwOnError(error, "restoreStoryboardOrder beat");
+  }
+}
+
+export async function saveProjectStoryboard(
+  workspaceId: string,
+  projectId: string,
+  input: SaveStoryboardInput
+): Promise<ProjectStoryboard> {
+  const db = getServiceSupabase();
+  await requireProjectRow(db, workspaceId, projectId);
+  const now = new Date().toISOString();
+  await assertStoryboardIdAvailable(db, projectId, input.id);
+  let storyboard = await getStoryboardRow(db, projectId, input.id);
+  const storyboardId = storyboard?.id ?? input.id ?? randomUUID();
+  await assertStoryboardRowsAreWritable({
+    db,
+    projectId,
+    storyboardId,
+    storyboard: input,
   });
-  return {
-    ...project,
-    plan,
-    updatedAt: new Date().toISOString(),
-  };
+  if (!storyboard) {
+    const { data, error } = await db
+      .from("storyboards")
+      .insert({
+        id: storyboardId,
+        project_id: projectId,
+        status: input.status ?? "draft",
+        created_at: now,
+        updated_at: now,
+      })
+      .select("*")
+      .single();
+    throwOnError(error, "saveProjectStoryboard create storyboard");
+    storyboard = data as StoryboardRow;
+  }
+
+  const current = await getProjectStoryboard(workspaceId, projectId);
+  const existingScenes = new Map(
+    (current?.scenes ?? []).map((scene) => [scene.id, scene])
+  );
+  const existingBeats = new Map<string, StoryboardBeatRow>();
+  for (const scene of current?.scenes ?? []) {
+    for (const beat of scene.beats) {
+      existingBeats.set(beat.id, {
+        id: beat.id,
+        project_id: beat.projectId,
+        scene_id: beat.sceneId,
+        beat_index: beat.beatIndex,
+        intent: beat.intent,
+        visual_description: beat.visualDescription,
+        dialogue_summary: beat.dialogueSummary,
+        narration: beat.narration,
+        duration_sec: beat.durationSec,
+        status: beat.status,
+        beat_asset_id: beat.beatAssetId,
+        created_at: beat.createdAt,
+        updated_at: beat.updatedAt,
+      });
+    }
+  }
+
+  const sceneRows = input.scenes.map((scene, index) => ({
+    id: scene.id,
+    project_id: projectId,
+    storyboard_id: storyboardId,
+    scene_index: index,
+    title: scene.title,
+    summary: scene.summary ?? null,
+    setting: scene.setting ?? null,
+    mood: scene.mood ?? null,
+    duration_sec: scene.durationSec ?? null,
+    status: scene.status ?? "draft",
+    updated_at: now,
+  }));
+  const beatRowsByScene = new Map<string, Record<string, unknown>[]>();
+  for (const scene of input.scenes) {
+    const beatRows = [];
+    for (const [index, beat] of scene.beats.entries()) {
+      const existing = existingBeats.get(beat.id);
+      beatRows.push({
+        id: beat.id,
+        project_id: projectId,
+        scene_id: scene.id,
+        beat_index: index,
+        intent: beat.intent,
+        visual_description: beat.visualDescription ?? null,
+        dialogue_summary: beat.dialogueSummary ?? null,
+        narration: beat.narration ?? null,
+        duration_sec: beat.durationSec ?? null,
+        status: beat.status ?? "draft",
+        beat_asset_id: await nextBeatSnapshotAssetId({
+          db,
+          workspaceId,
+          projectId,
+          existing,
+          beat,
+        }),
+        updated_at: now,
+      });
+    }
+    beatRowsByScene.set(scene.id, beatRows);
+  }
+
+  const sceneOrderBackup = (current?.scenes ?? []).map((scene) => ({
+    id: scene.id,
+    sceneIndex: scene.sceneIndex,
+  }));
+  const beatOrderBackup = (current?.scenes ?? []).flatMap((scene) =>
+    scene.beats.map((beat) => ({ id: beat.id, beatIndex: beat.beatIndex }))
+  );
+
+  try {
+    const keepSceneIds = new Set(input.scenes.map((scene) => scene.id));
+    const keepBeatIds = new Set(
+      input.scenes.flatMap((scene) => scene.beats.map((beat) => beat.id))
+    );
+    const removeSceneIds = [...existingScenes.keys()].filter((id) => !keepSceneIds.has(id));
+    const removeBeatIds = [...existingBeats.keys()].filter((id) => !keepBeatIds.has(id));
+
+    const existingSceneIds = [...existingScenes.keys()];
+    if (existingSceneIds.length > 0) {
+      const updates = existingSceneIds.map((id, index) =>
+        db
+          .from("storyboard_scenes")
+          .update({ scene_index: 10000 + index })
+          .eq("project_id", projectId)
+          .eq("id", id)
+      );
+      for (const update of updates) throwOnError((await update).error, "saveProjectStoryboard offset scenes");
+    }
+
+    for (const sceneRow of sceneRows) {
+      if (existingScenes.has(sceneRow.id)) {
+        const { error } = await db
+          .from("storyboard_scenes")
+          .update(sceneRow)
+          .eq("project_id", projectId)
+          .eq("id", sceneRow.id);
+        throwOnError(error, "saveProjectStoryboard update scene");
+      } else {
+        const { error } = await db.from("storyboard_scenes").insert(sceneRow);
+        throwOnError(error, "saveProjectStoryboard insert scene");
+      }
+    }
+
+    const existingBeatIds = [...existingBeats.keys()];
+    for (const [index, id] of existingBeatIds.entries()) {
+      const { error } = await db
+        .from("storyboard_beats")
+        .update({ beat_index: 10000 + index })
+        .eq("project_id", projectId)
+        .eq("id", id);
+      throwOnError(error, "saveProjectStoryboard offset beats");
+    }
+
+    for (const scene of input.scenes) {
+      for (const beatRow of beatRowsByScene.get(scene.id) ?? []) {
+        const id = String(beatRow.id);
+        if (existingBeats.has(id)) {
+          const { error } = await db
+            .from("storyboard_beats")
+            .update(beatRow)
+            .eq("project_id", projectId)
+            .eq("id", id);
+          throwOnError(error, "saveProjectStoryboard update beat");
+        } else {
+          const { error } = await db.from("storyboard_beats").insert(beatRow);
+          throwOnError(error, "saveProjectStoryboard insert beat");
+        }
+      }
+    }
+
+    if (removeBeatIds.length > 0) {
+      const { error } = await db
+        .from("storyboard_beats")
+        .delete()
+        .eq("project_id", projectId)
+        .in("id", removeBeatIds);
+      throwOnError(error, "saveProjectStoryboard remove beats");
+    }
+    if (removeSceneIds.length > 0) {
+      const { error } = await db
+        .from("storyboard_scenes")
+        .delete()
+        .eq("project_id", projectId)
+        .in("id", removeSceneIds);
+      throwOnError(error, "saveProjectStoryboard remove scenes");
+    }
+
+    const { error } = await db
+      .from("storyboards")
+      .update({ status: input.status ?? storyboard.status, updated_at: now })
+      .eq("project_id", projectId)
+      .eq("id", storyboard.id);
+    throwOnError(error, "saveProjectStoryboard update storyboard");
+  } catch (err) {
+    await restoreStoryboardOrder(db, projectId, sceneOrderBackup, beatOrderBackup);
+    throw err;
+  }
+
+  const saved = await getProjectStoryboard(workspaceId, projectId);
+  if (!saved) throw notFound(`Storyboard not found: ${storyboard.id}`);
+  return saved;
 }
 
 export async function listProjects(
@@ -1460,11 +2198,12 @@ export async function addAsset(
   options: { createdByActionId?: string } = {}
 ): Promise<V1Asset> {
   const db = getServiceSupabase();
+  const assetWithGraph = await withGraphMetadataForInsert(db, asset);
   // Omit `id` so Postgres assigns it (gen_random_uuid); any id on the incoming
   // object is a placeholder and is read back from the inserted row.
-  const { id: _omit, ...row } = assetToRow(asset);
+  const { id: _omit, ...row } = assetToRow(assetWithGraph);
   void _omit;
-  row.visibility = await defaultVisibilityForWorkspace(db, asset.workspaceId);
+  row.visibility = await defaultVisibilityForWorkspace(db, assetWithGraph.workspaceId);
   if (options.createdByActionId) {
     row.created_by_action_id = options.createdByActionId;
   }
@@ -2232,6 +2971,125 @@ export async function listJobs(
   throwOnError(error, "listJobs");
   const all = (data as JobRow[]).map(mapJob);
   return paginate(all, limit, cursor);
+}
+
+export async function getProjectManifest(
+  workspaceId: string,
+  projectId: string
+): Promise<unknown> {
+  await getProject(workspaceId, projectId);
+  const db = getRequestSupabaseOrService();
+  const { data, error } = await db.rpc("project_manifest", {
+    p_project_id: projectId,
+  });
+  throwOnError(error, "getProjectManifest");
+  return data ?? {};
+}
+
+export async function getStaleCandidates(
+  workspaceId: string,
+  projectId: string,
+  changedAssetId: string
+): Promise<StaleCandidatesResult> {
+  await getProject(workspaceId, projectId);
+  const db = getRequestSupabaseOrService();
+
+  const changed = await db
+    .from("assets")
+    .select("id, ref, kind, status, role, lineage_id, version, content_hash, inputs_fingerprint")
+    .eq("id", changedAssetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(changed.error)) {
+    throw notFound(`Asset not found: ${changedAssetId}`);
+  }
+  throwOnError(changed.error, "getStaleCandidates.changedAsset");
+  if (!changed.data) {
+    throw notFound(`Asset not found: ${changedAssetId}`);
+  }
+  const changedAsset = changed.data as GraphAssetSummaryRow;
+
+  const downstream = await db.rpc("downstream_assets", {
+    p_asset_id: changedAssetId,
+  });
+  throwOnError(downstream.error, "getStaleCandidates.downstreamAssets");
+  const rows = ((downstream.data ?? []) as DownstreamAssetRow[]).sort(
+    (a, b) => a.depth - b.depth || a.asset_id.localeCompare(b.asset_id)
+  );
+  const candidateIds = rows.map((row) => row.asset_id);
+  if (candidateIds.length === 0) {
+    return {
+      changedAsset: {
+        assetId: changedAsset.id,
+        ref: changedAsset.ref,
+        kind: changedAsset.kind,
+        contentHash: changedAsset.content_hash,
+      },
+      candidates: [],
+    };
+  }
+
+  const [assetsResult, selectionsResult] = await Promise.all([
+    db
+      .from("assets")
+      .select("id, ref, kind, status, role, lineage_id, version, content_hash, inputs_fingerprint")
+      .eq("project_id", projectId)
+      .eq("workspace_id", workspaceId)
+      .in("id", candidateIds),
+    db
+      .from("current_selections")
+      .select("slot_owner_lineage_id, slot_role, seq, active_asset_id")
+      .eq("project_id", projectId)
+      .in("active_asset_id", candidateIds),
+  ]);
+  throwOnError(assetsResult.error, "getStaleCandidates.assets");
+  throwOnError(selectionsResult.error, "getStaleCandidates.selections");
+
+  const assetsById = new Map(
+    ((assetsResult.data ?? []) as GraphAssetSummaryRow[]).map((asset) => [
+      asset.id,
+      asset,
+    ])
+  );
+  const selectionsByAssetId = new Map<string, AssetGraphSelectionRef[]>();
+  for (const selection of (selectionsResult.data ?? []) as CurrentSelectionSummaryRow[]) {
+    const refs = selectionsByAssetId.get(selection.active_asset_id) ?? [];
+    refs.push({
+      slotOwnerLineageId: selection.slot_owner_lineage_id,
+      slotRole: selection.slot_role,
+      seq: selection.seq,
+    });
+    selectionsByAssetId.set(selection.active_asset_id, refs);
+  }
+
+  return {
+    changedAsset: {
+      assetId: changedAsset.id,
+      ref: changedAsset.ref,
+      kind: changedAsset.kind,
+      contentHash: changedAsset.content_hash,
+    },
+    candidates: rows.flatMap((row) => {
+      const asset = assetsById.get(row.asset_id);
+      if (!asset) return [];
+      return [
+        {
+          assetId: asset.id,
+          depth: row.depth,
+          ref: asset.ref,
+          kind: asset.kind,
+          status: asset.status,
+          role: asset.role,
+          lineageId: asset.lineage_id,
+          version: asset.version,
+          contentHash: asset.content_hash,
+          inputsFingerprint: asset.inputs_fingerprint,
+          selections: selectionsByAssetId.get(asset.id) ?? [],
+        },
+      ];
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
