@@ -164,42 +164,69 @@ create trigger actions_guard_immutable
   for each row execute function public.actions_guard_immutable();
 ```
 
-### 3.2 `assets` — the pool (transform of the existing table)
+### 3.2 `assets` — the pool (fresh create; the old table is dropped)
 
-Final shape (existing columns kept: `workspace_id`, `project_id`, `status`,
-`url`, `remote_url`, `storage_key`, `storage_bucket`, `source`, `duration_sec`,
-`description`, `context`, `semantic_analysis`, `visibility`, timestamps).
-`filename` becomes nullable (meaningless for data kinds). Dropped:
-`provenance`, `generated_asset_job_id` (subsumed by `inputs` / `created_by_action_id`),
-and the old `kind asset_kind` (split into `kind graph_asset_kind` + `media`).
+The database holds no data worth porting (§5), so the old `assets` table — and
+everything hanging off it — is **dropped outright** and recreated in its final
+shape. No backfill, no column renames. Versus the old table: `kind asset_kind`
+splits into `kind graph_asset_kind` + `media`; `provenance` and
+`generated_asset_job_id` are subsumed by `inputs` / `created_by_action_id`;
+`filename` and `source` become nullable (meaningless for data kinds). The
+delivery columns (`url`, `storage_key`, `storage_bucket`, …), `visibility`, and
+the analysis jsonb columns carry over unchanged.
 
 ```sql
-alter table public.assets
-  alter column filename drop not null,
-  add column ref                  text,
-  add column lineage_id           uuid    not null default gen_random_uuid(),
-  add column version              integer not null default 1,
-  add column media                asset_media,
+-- Drop the old pool and its dependents (recreated below / in §3.7).
+drop function if exists public.search_public_assets(text, public.asset_kind);
+drop table if exists public.saved_assets;
+drop table if exists public.assets;
+drop type if exists public.asset_kind;
+
+create table public.assets (
+  id                   uuid              primary key default gen_random_uuid(),
+  schema_version       text              not null default 'asset.v2',
+  workspace_id         uuid              not null references public.workspaces (id) on delete cascade,
+  project_id           uuid              not null references public.projects (id) on delete cascade,
+  -- agent-legible short id, set by trigger: beat_x7f2c1, clip_9k3d0a, ...
+  ref                  text,
+  lineage_id           uuid              not null default gen_random_uuid(),
+  version              integer           not null default 1,
+  kind                 graph_asset_kind  not null,
+  media                asset_media       not null,
+  status               asset_status      not null default 'pending',
   -- what it depicts / is for: 'hero', 'beat:opening', 'background-music', ...
-  add column role                 text,
-  -- the body of data kinds (brief text, beat fields, composite child summary, ...)
-  add column content              jsonb,
+  role                 text,
+  -- the body of data kinds (brief text, beat fields, composite children, ...)
+  content              jsonb,
   -- generation request: { provider, model, prompt, providerPrompt, seed, ... }
-  add column params               jsonb,
+  params               jsonb,
   -- write-once snapshot of inputs, mirrored to asset_edges by trigger:
   -- [{ assetId, relation, role?, position?, contentHash }]
-  add column inputs               jsonb   not null default '[]'::jsonb,
+  inputs               jsonb             not null default '[]'::jsonb,
   -- hash of this asset's own semantic content (media: set when bytes land)
-  add column content_hash         text,
+  content_hash         text,
   -- hash over sorted (inputs[].contentHash) + hash(params): the staleness signal
-  add column inputs_fingerprint   text,
-  add column created_by_action_id uuid    references public.actions (id) on delete set null;
+  inputs_fingerprint   text,
+  created_by_action_id uuid              references public.actions (id) on delete set null,
+  -- media delivery + analysis (unchanged semantics from the old table)
+  filename             text,
+  url                  text,
+  remote_url           text,
+  storage_key          text,
+  storage_bucket       text,
+  source               jsonb,
+  duration_sec         double precision,
+  description          text,
+  context              jsonb,
+  semantic_analysis    jsonb,
+  visibility           public.visibility not null default 'public',
+  created_at           timestamptz       not null default now(),
+  updated_at           timestamptz       not null default now()
+);
 
--- (backfill old rows + drop/rename old kind column — see §5 transform steps —
---  then:)
-alter table public.assets
-  alter column media set not null,
-  alter column kind  set not null;   -- new graph_asset_kind column, post-rename
+create trigger assets_set_updated_at
+  before update on public.assets
+  for each row execute function public.set_updated_at();
 
 create unique index assets_project_ref_idx     on public.assets (project_id, ref);
 create unique index assets_lineage_version_idx on public.assets (lineage_id, version);
@@ -582,8 +609,32 @@ create policy actions_public_read on public.actions
   using (public.project_is_public(project_id));
 ```
 
-(`assets` keeps its existing owner + public-read policies and the
-tier→visibility trigger unchanged.)
+Because `assets` is dropped and recreated (§3.2), its security surface is
+recreated verbatim from the init schema:
+
+```sql
+alter table public.assets enable row level security;
+
+create policy assets_owner on public.assets
+  for all using (public.owns_workspace(workspace_id) and public.owns_project(project_id))
+  with check (public.owns_workspace(workspace_id) and public.owns_project(project_id));
+create policy assets_public_read on public.assets
+  for select to anon, authenticated
+  using (visibility = 'public' and public.project_is_public(project_id));
+
+create trigger assets_visibility_tier
+  before insert or update of visibility, workspace_id, project_id on public.assets
+  for each row execute function public.enforce_visibility_tier();
+
+-- saved_assets: recreate exactly as in the init schema §13 (definition and
+-- policies unchanged — it references assets only by id).
+```
+
+Discovery artifacts are recreated against the new columns: the partial
+visibility/feed indexes verbatim, the search GIN index over
+`description || content->>'summary' || context->>'summary'`, and
+`search_public_assets(search_query text, media_filter asset_media default null)`
+replacing the old `asset_kind`-typed RPC.
 
 ## 4. What this replaces
 
@@ -600,35 +651,51 @@ tier→visibility trigger unchanged.)
 
 `jobs`, `idempotency`, identity/tenancy, visibility/tier enforcement, and the
 eval framework are untouched — except `eval_runs.stop_after` and `judgments`'
-loose `stage_id` pointers, which referenced the stage enum (see §5 step 8).
+loose `stage_id` pointers, which referenced the stage enum (see §5).
 
-## 5. Transform path (one migration, clean break)
+## 5. Migration mechanics (empty database — drop, don't port)
 
-Dev-stage data: identity, workspaces, projects, jobs, eval, and uploaded assets
-are preserved; in-flight creative state (compositions/edit graphs/timelines) is
-**not ported** — projects regenerate under the new engine. No compat shims.
+The database holds no meaningful rows — no assets, no in-flight creative state
+(decided 2026-06-10). So there is **no transform or backfill path**: dead
+objects are dropped outright and `assets` is created fresh in its final shape.
+**Guard step before landing:** confirm the linked DB is actually disposable —
+row counts over `users` / `workspaces` / `projects` / `assets` via the
+Management API query endpoint (don't trust a stale assumption).
 
-1. Create enums (§3.0) and `actions` (§3.1).
-2. Drop `search_public_assets(text, asset_kind)` (depends on the old `kind`).
-3. `assets`: add new columns; backfill
-   `media := kind::text::asset_media`;
-   `kind_v2 := case when source ->> 'type' = 'generated' then` (video→`clip`,
-   image→`keyframe`, audio→`audio_track`) `else 'source_footage' end`;
-   `ref` via the trigger expression; drop old `kind`; rename `kind_v2 → kind`;
-   set not-nulls; add constraints, indexes, triggers (§3.2). Drop `provenance`,
-   `generated_asset_job_id`.
-4. Create `asset_edges` (§3.3), `selections` + view (§3.4).
-5. Graph functions (§3.6), RLS (§3.7).
-6. Recreate asset search RPC against `media` / `kind` / `content`.
-7. Slim `generation_runs` (§3.5).
-8. Drop `generation_stage_artifacts`, `generation_stage_items`,
-   `generation_stages`, `timelines`, `edit_graphs`, `compositions`,
-   `brief_versions` (drop `projects.current_brief_version_id` FK first), then
-   `projects.brief`, `projects.plan`. Convert `eval_runs.stop_after` to `text`
-   (`using stop_after::text`), then drop enums `generation_stage_type`,
-   `stage_item_kind`, `composition_mode`, `composition_status`, `asset_kind`.
-9. Add `'agent_action'`-adjacent job types only if needed — `job_type` keeps
-   working as-is; `actions.job_ids` links the two.
+Two ways to land it — **prefer the baseline squash**:
+
+- **A (preferred): squashed baseline.** Fold this DDL into a single new
+  baseline migration replacing the current history — the exact precedent of
+  `20260603000000_init_schema.sql`, which is itself a squash. Reset the linked
+  database (`supabase db reset --linked`). Future readers never see the dead
+  tables at all, which is the point: nothing left to confuse later work.
+  Cost: the reset wipes `auth.users`, so dev logins re-sign-up.
+- **B: additive migration.** One new migration (fresh, unique timestamp —
+  parallel agents have collided on versions before) that drops the dead
+  objects and creates the new ones. Keeps history and auth users, but the
+  retired tables stay visible in past migrations.
+
+**Dead objects (deleted entirely; nothing references them after this DDL):**
+
+- **Tables:** `compositions`, `edit_graphs`, `timelines`, `brief_versions`,
+  `generation_stages`, `generation_stage_items`, `generation_stage_artifacts`;
+  plus the old `assets` and `saved_assets` (both recreated fresh, §3.2/§3.7).
+- **Columns:** `projects.brief`, `projects.plan`,
+  `projects.current_brief_version_id` (drop its FK with `brief_versions`);
+  `generation_runs.{brief_version_id, review_gates, review_gate,
+  current_stage_type}` (§3.5).
+- **Enums:** `asset_kind`, `composition_mode`, `composition_status`,
+  `stage_item_kind`, and `generation_stage_type` — convert
+  `eval_runs.stop_after` to `text` first (`using stop_after::text`).
+- **Functions:** `search_public_assets(text, asset_kind)` (recreated against
+  `media`/`kind`/`content`, §3.7).
+- **`job_type` enum values** `composition` and `revision` are orphaned
+  vocabulary: under option A, recreate the enum without them; under option B,
+  leave them (Postgres can't drop enum values in place; they're harmless).
+
+**Kept untouched:** identity/tenancy (`users`, `workspaces`, `workspace_members`,
+`workspace_invites`), `projects` (minus the dropped columns), `jobs`,
+`idempotency`, the eval framework, and the tier/visibility machinery.
 
 ## 6. Code impact (for the PR that lands this)
 
