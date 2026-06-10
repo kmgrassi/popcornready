@@ -216,6 +216,8 @@ function timelineFromArtifactContent(content: unknown): Timeline | null {
 export interface UseStudioFlowOptions {
   /** Seed the draft (e.g. from `?goal=`/`?length=` query params). */
   initialBrief?: Partial<BriefDraft>;
+  /** Seed the active step for palette and deep-link entry. */
+  initialStep?: StudioStep;
   /** Active server-side draft id; when missing, the flow remains in-memory. */
   draftId?: string;
   /** Saved draft payload loaded by the Studio start screen. */
@@ -242,7 +244,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     restoredRun ? "generating" : "initial",
   );
   const [step, setStep] = useState<StudioStep>(
-    restoredRun ? "generate" : options.initialPayload?.step ?? "brief",
+    restoredRun ? "generate" : options.initialStep ?? options.initialPayload?.step ?? "brief",
   );
   const [brief, setBrief] = useState<BriefDraft>(() => ({
     ...EMPTY_BRIEF_DRAFT,

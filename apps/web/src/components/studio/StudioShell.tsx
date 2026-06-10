@@ -34,9 +34,35 @@ import styles from "./StudioShell.module.css";
 
 const LOCAL_DRAFT_ID = "local";
 
+function studioDraftPath({
+  draftId,
+  step,
+  openPanel,
+  started,
+}: {
+  draftId?: string;
+  step: StudioStep;
+  openPanel?: string;
+  started?: boolean;
+}) {
+  const params = new URLSearchParams();
+  if (draftId) params.set("draft", draftId);
+  if (started) params.set("start", "1");
+  if (step !== "brief") params.set("step", step);
+  if (openPanel) params.set("panel", openPanel);
+  const query = params.toString();
+  return query ? `/studio?${query}` : "/studio";
+}
+
 export interface StudioShellProps {
   /** Seed the brief draft, e.g. from `?goal=`/`?length=` query params. */
   initialBrief?: Partial<BriefDraft>;
+  /** Seed the active step, e.g. from palette deep links. */
+  initialStep?: StudioStep;
+  /** Skip the empty state when the route is opened for a specific action. */
+  initialStarted?: boolean;
+  /** Optional panel key the active step should open by default. */
+  openPanel?: string;
   /** Optional saved draft id from `/studio?draft=:id`. */
   draftId?: string | null;
 }
@@ -49,7 +75,13 @@ export interface StudioShellProps {
  * checklist (generating), and the preview + timeline (review). Steps plug in by
  * implementing `StepProps`; the shell owns navigation and the run lifecycle.
  */
-export function StudioShell({ initialBrief, draftId }: StudioShellProps) {
+export function StudioShell({
+  initialBrief,
+  initialStep,
+  initialStarted = false,
+  openPanel,
+  draftId,
+}: StudioShellProps) {
   const navigate = useNavigate();
   const seededBrief = useMemo(
     () => ({
@@ -101,21 +133,30 @@ export function StudioShell({ initialBrief, draftId }: StudioShellProps) {
     void openDraft(draftId);
   }, [activeDraftId, draftId, openDraft]);
 
-  async function startNewDraft() {
+  const startNewDraft = useCallback(async (step: StudioStep = "brief") => {
     setDraftsError(null);
     try {
-      const record = await createDraft({ ...EMPTY_BRIEF_DRAFT, ...seededBrief }, "brief");
+      const record = await createDraft({ ...EMPTY_BRIEF_DRAFT, ...seededBrief }, step);
       setActiveDraftId(record.draftId);
       setInitialPayload(record.payload);
       setFlowKey((current) => current + 1);
-      navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
+      navigate(studioDraftPath({ draftId: record.draftId, step, openPanel }), {
+        replace: true,
+      });
     } catch {
       setActiveDraftId(LOCAL_DRAFT_ID);
       setInitialPayload(null);
       setFlowKey((current) => current + 1);
-      navigate("/studio", { replace: true });
+      navigate(studioDraftPath({ step, openPanel, started: initialStarted }), {
+        replace: true,
+      });
     }
-  }
+  }, [initialStarted, navigate, openPanel, seededBrief]);
+
+  useEffect(() => {
+    if (!initialStarted || activeDraftId || draftId) return;
+    void startNewDraft(initialStep ?? "brief");
+  }, [activeDraftId, draftId, initialStarted, initialStep, startNewDraft]);
 
   async function removeDraft(nextDraftId: string) {
     setDraftsError(null);
@@ -153,6 +194,8 @@ export function StudioShell({ initialBrief, draftId }: StudioShellProps) {
       draftId={activeDraftId}
       initialBrief={seededBrief}
       initialPayload={initialPayload}
+      initialStep={initialStep}
+      openPanel={openPanel}
     />
   );
 }
@@ -161,16 +204,26 @@ function StudioFlowView({
   draftId,
   initialBrief,
   initialPayload,
+  initialStep,
+  openPanel,
 }: {
   draftId: string;
   initialBrief?: Partial<BriefDraft>;
   initialPayload: StudioDraftPayload | null;
+  initialStep?: StudioStep;
+  openPanel?: string;
 }) {
   const flow = useStudioFlow({
     initialBrief,
     draftId: draftId === LOCAL_DRAFT_ID ? undefined : draftId,
     initialPayload,
+    initialStep,
   });
+  const goToStep = flow.goTo;
+
+  useEffect(() => {
+    if (initialStep) goToStep(initialStep);
+  }, [goToStep, initialStep]);
 
   if (flow.state === "generating") {
     const items = buildChecklistItems(flow.stages, flow.run?.status ?? "queued");
@@ -244,7 +297,12 @@ function StudioFlowView({
       </div>
       <StudioStepper step={flow.step} onStepClick={flow.goTo} />
       <section className={styles.stepBody}>
-        <ActiveStep step={flow.step} flow={flow} />
+        <ActiveStep
+          key={`${flow.step}:${openPanel ?? ""}`}
+          step={flow.step}
+          flow={flow}
+          openPanel={openPanel}
+        />
       </section>
     </main>
   );
@@ -253,9 +311,11 @@ function StudioFlowView({
 function ActiveStep({
   step,
   flow,
+  openPanel,
 }: {
   step: StudioStep;
   flow: ReturnType<typeof useStudioFlow>;
+  openPanel?: string;
 }) {
   const stepProps = {
     draft: flow.brief,
@@ -268,7 +328,7 @@ function ActiveStep({
 
   switch (step) {
     case "brief":
-      return <BriefStep {...stepProps} />;
+      return <BriefStep {...stepProps} openPanel={openPanel} />;
     case "footage":
       return <SourceFootageStep {...stepProps} />;
     case "story":
@@ -279,6 +339,7 @@ function ActiveStep({
           {...stepProps}
           error={flow.error}
           onGenerate={flow.startGeneration}
+          openPanel={openPanel}
         />
       );
     case "review":

@@ -3,11 +3,17 @@ import { formatOptions, platformOptions, studioCopy } from "./copy";
 import type { StepProps } from "./useStudioFlow";
 import styles from "./AdvancedDirection.module.css";
 
-type AdvancedDirectionProps = Pick<StepProps, "draft" | "update">;
+type AdvancedDirectionProps = Pick<StepProps, "draft" | "update"> & {
+  defaultOpen?: boolean;
+};
 
-export function AdvancedDirection({ draft, update }: AdvancedDirectionProps) {
+export function AdvancedDirection({
+  draft,
+  update,
+  defaultOpen = false,
+}: AdvancedDirectionProps) {
   return (
-    <Disclosure summary={studioCopy.brief.advancedSummary}>
+    <Disclosure summary={studioCopy.brief.advancedSummary} defaultOpen={defaultOpen}>
       <div className={styles.grid}>
         <label className={styles.field}>
           <span className={styles.label}>{studioCopy.advanced.audience}</span>

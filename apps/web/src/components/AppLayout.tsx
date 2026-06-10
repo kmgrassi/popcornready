@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { canAccessAdminSurface } from "./auth/AdminRoute";
 import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
+import { CommandPalette } from "./palette/Palette";
 import ThemeToggle from "./ThemeToggle";
 import { ButtonLink } from "./ui/Button";
 import { v1Api, type MeResponse } from "../lib/api-client";
@@ -230,6 +231,7 @@ export function AuthenticatedAppLayout() {
 
       <div className={styles.content}>
         <header className={styles.topbar}>
+          <CommandPalette showAdminCommands={showAdmin} />
           <div className={styles.account}>
             {meError && auth.configured ? (
               <span className={`${styles.authMode} ${styles.authError}`} title={meError}>
