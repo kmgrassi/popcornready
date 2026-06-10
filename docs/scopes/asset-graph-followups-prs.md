@@ -55,25 +55,6 @@ running pre-#268 code, every brief/plan save (`createProject`,
 the #268 merge, then exercise a brief save and confirm the new row's `content`
 contains `schema_version`.
 
-## PR 1 — backfill schema markers + validate the JSONB constraints
-
-Small maintenance migration (fresh unique timestamp; never edit applied
-migrations):
-
-1. Disable the `assets_guard_immutable` trigger (it blocks `content` updates by
-   design).
-2. Stamp markers onto the nine legacy rows:
-   `content = jsonb_build_object('schema_version','brief.v1') || content` for
-   `kind='brief'` (resp. `'plan.v1'` for `kind='plan'`) where the marker is
-   missing.
-3. Re-enable the trigger.
-4. `validate constraint` on all five checks: `assets_content_schema_check`,
-   `assets_params_schema_check`, `actions_params_schema_check`,
-   `actions_proposal_schema_check`, `actions_error_schema_check`.
-
-Validate against a scratch Supabase Postgres with the full migration chain
-before pushing (established pattern: docker postgres + stub `auth`/`storage`).
-
 ## PR 2 — storyboard write paths in the API
 
 Store functions + Express routes (own route file under
@@ -146,11 +127,10 @@ bridge is removed." When the v1 compatibility bridge dies, add the typed check
 
 ```
 P0 (deploy check)
-PR 1 (backfill/validate)          — independent, do early
 PR 2 (storyboard API)  ──▶  PR 3 (editor port, blob retirement)
 PR 4 (provenance/fingerprints) ──▶ PR 6 (staleness surface) ──▶ P2 orchestrator
 PR 5 (actions log)             ──▶ PR 6
 PR 7 — whenever the v1 bridge is removed
 ```
 
-PRs 1, 2, 4, 5 are mutually independent and can run in parallel.
+PRs 2, 4, 5 are mutually independent and can run in parallel.
