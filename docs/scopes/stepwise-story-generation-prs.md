@@ -23,8 +23,11 @@ The "review gate" scaffolding is half-built. What already works:
   with **Approve & continue / Reject / regenerate / Cancel**; `RunProgressPage.tsx` polls
   and calls `approve`/`reject`/`cancel`.
 - **Endpoints** — `routes/v1/generation-runs.ts`: `POST …/approve`, `…/reject` (`{stageType?, note?}`), `…/cancel`, `GET …/:runId`.
-- **Data model** — `generation_runs(review_gates, review_gate, current_stage_type, status)`,
-  `generation_stages(is_review_gate, reviewed_at, status)`, `generation_stage_artifacts`.
+- **Data model** — this existed on the pre-asset-graph model as
+  `generation_runs` plus `generation_stage_*` tables. The current target is
+  `generation_runs` as a slim run grouping, `actions`/`jobs` for tool progress,
+  relational storyboard rows for user-facing scenes/beats/panels, and assets /
+  selections / edges for durable outputs.
 
 **The three real gaps:**
 
@@ -73,16 +76,18 @@ These are the seams between workstreams; build against them as stubs.
     advances). Either path with an empty/absent note leaves `review_feedback` untouched.
   - Both return the full run payload. Resume runs forward until the next gate/terminal state
     (mirror the entrypoint's await-then-202; frontend keeps polling `GET …/:runId`).
-- **Data**: `generation_runs.review_feedback text` (nullable). `GenerationRun.reviewFeedback?: string | null`
-  in `packages/shared/src/v1/types.ts`.
+- **Data**: feedback and approvals should flow through typed action/tool state
+  and relational product rows. Any `generation_runs.gates` or v1 stage-shaped
+  state is a temporary compatibility bridge, not the durable model.
 - **Agent**: `planEdit(input)` gains `feedback?: string` (`apps/api/src/lib/agent/index.ts:97`).
 - **Resumability invariant**: re-invoking `runGenerationJob` for a run whose earlier stages are
-  `succeeded` must NOT recompute them — it loads their output from `generation_stage_artifacts`
-  (or stored assets) and runs only `queued` stages.
+  `succeeded` must NOT recompute them — it loads their output from relational
+  storyboard rows, assets/selections, actions, and jobs, then runs only queued
+  or explicitly requested work.
 - **Durable tool-call boundary**: an LLM tool call is a request for the server to
   perform and persist work, not an in-memory return value that can be
   daisy-chained into the next function. The tool handler must write the relevant
-  database rows / `generation_stage_artifacts` / generated assets first, mark the
+  database rows / assets / selections / action outputs first, mark the
   invocation or stage complete, and only then may the next stage/model turn read
   that persisted state. If the tool returns `waiting_for_job` or
   `waiting_for_approval`, the run stays `waiting` and no next model turn starts
@@ -106,14 +111,15 @@ There are two phases of this migration:
 The dashboard can keep starting a normal `generation_run`, and the server can
 keep the current default stage order. The behavior changes at every boundary:
 
-1. A stage starts by loading its required inputs from storage (`briefVersionId`,
-   prior `generation_stage_artifacts`, ready asset IDs, active selections).
+1. A stage starts by loading its required inputs from storage (active brief
+   asset, storyboard rows, prior action outputs, ready asset IDs, active
+   selections).
 2. The stage runs its leaf model/provider work.
 3. The stage persists its canonical output and links it to the stage:
-   - `creative_plan` -> `EditPlan` artifact
-   - `storyboard` -> storyboard asset IDs plus a stage artifact snapshot
-   - `timeline_assembly` -> `Timeline` / `EditGraph` artifact or row IDs
-   - `quality_review` -> critic report, patches, and revised timeline pointer
+   - `creative_plan` -> `storyboards` / scenes / beats plus optional `plan` asset snapshot
+   - `storyboard` -> `storyboard_panels` plus image/prompt assets
+   - `timeline_assembly` -> `composite`/cut asset or future timeline rows
+   - `quality_review` -> critique asset, action proposal, and revised selection pointers
 4. Only after persistence succeeds does the stage become `succeeded`.
 5. The next stage loads by ID from persisted state. It must not consume a hidden
    local variable from the previous stage.
@@ -154,8 +160,8 @@ present.
 ### A — Resumable engine *(foundation; highest risk)*
 Make `runGenerationJob` skip-and-load instead of recompute.
 - **Files:** `apps/api/src/lib/v1/generation.ts`, a new `loadStageOutput(runId, stageType)` helper
-  reading `generation_stage_artifacts` (plan persisted as `kind:"timeline"`, timeline likewise;
-  assets via stage items), `generation-runs/store.ts` (read stage statuses).
+  reading relational storyboard rows, action outputs, active selections, and
+  generated assets), `generation-runs/store.ts` (read projected stage statuses).
 - **Work:** at each stage block, branch `stage.status === "succeeded" ? loadOutput() : compute()`;
   load the run's stages at job start; ensure `briefVersion`/`storyContext` are reloaded, not
   recomputed-with-side-effects. Sub-tasks split cleanly per stage (creative_plan, storyboard,

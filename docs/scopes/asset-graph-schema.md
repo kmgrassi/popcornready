@@ -1,35 +1,44 @@
 # Asset-graph schema — design record (North Star P1)
 
-> **Status:** Schema authored. The DDL lives in
+> **Status:** Schema authored. The core asset graph DDL lives in
 > [`supabase/migrations/20260610120000_asset_graph_model.sql`](../../supabase/migrations/20260610120000_asset_graph_model.sql)
 > — an **additive migration on top of the intact, applied history** (§5: we
-> never rewrite applied migrations); this doc is the rationale record. **Not
-> yet applied to the linked database** — run the §5 verify-empty guard, then a
-> normal `supabase db push`. No reset; auth users unaffected. Validated
-> against a scratch Supabase Postgres (full historical chain + this migration
-> + seed + functional smoke of edges/selections/guards/graph queries). This is
-> the concrete schema for [NORTH_STAR.md](../NORTH_STAR.md) §5 ("Target data
-> model") — the immutable project-scoped asset pool, dependency/provenance
-> edges, moving selections, and the agent action log. All §8 design decisions
-> are treated as constraints. Last updated 2026-06-10.
+> never rewrite applied migrations); this doc is the rationale record.
+> [`20260610130000_storyboard_relational_model.sql`](../../supabase/migrations/20260610130000_storyboard_relational_model.sql)
+> amends the design with first-class storyboard tables and typed-JSONB
+> guardrails. No reset; auth users unaffected. Validated against a scratch
+> Supabase Postgres (full historical chain + asset graph migration + seed +
+> functional smoke of edges/selections/guards/graph queries). This is the
+> concrete schema for [NORTH_STAR.md](../NORTH_STAR.md) §5 ("Target data model")
+> — the immutable project-scoped asset pool, dependency/provenance edges,
+> moving selections, first-class product structure where it matters, and the
+> agent action log. All §8 design decisions are treated as constraints. Last
+> updated 2026-06-10.
 
 ## 1. The model in one paragraph
 
-Everything the system produces or ingests — source footage, the brief, **each
-beat**, anchors, keyframes, clips, audio, critiques, the plan, the cut, renders —
-is an **immutable row in `assets`** (the pool). Rows are **never updated
-semantically and never deleted**; editing something inserts a **new version**
-sharing a `lineage_id`. **`asset_edges`** records what each asset was built from
+Everything the system produces or ingests — source footage, briefs, anchors,
+keyframes, clips, audio, critiques, plan snapshots, cuts, renders — is an
+**immutable row in `assets`** (the pool). Rows are **never updated semantically
+and never deleted**; editing something inserts a **new version** sharing a
+`lineage_id`. **`asset_edges`** records what each asset was built from
 (provenance) and what a composite contains (ordered children) — together this is
 the dependency graph, and because new rows can only reference existing rows, it
 is a DAG by construction. **`selections`** is an append-only log of which asset
-is *active* in each slot (active version of a lineage, a beat's active keyframe,
-the project's active cut); the current state of a project is just the latest
-selection per slot. **`actions`** is the agent's decision log — every tool call
-with its inputs (by id), rationale, proposal/approval, and cost — replacing the
-edit graph's revision operations and the `Patch` persistence concept. `jobs`
-stays as the async execution substrate; `generation_runs` slims down to a
-session/budget grouping over actions.
+is *active* in each slot (active version of a lineage, a beat's active panel or
+clip, the project's active cut); the current asset state of a project is just
+the latest selection per slot. **`actions`** is the agent's decision log — every
+tool call with its inputs (by id), rationale, proposal/approval, and cost —
+replacing the edit graph's revision operations and the `Patch` persistence
+concept. `jobs` stays as the async execution substrate; `generation_runs` slims
+down to a session/budget grouping over actions.
+
+The asset graph is the **provenance spine**, not a generic document database.
+Stable product objects that users inspect, edit, approve, reorder, or ask an
+agent to target by name must be relational. Storyboards therefore live in
+`storyboards`, `storyboard_scenes`, `storyboard_beats`, and
+`storyboard_panels`, with generated media/prompts/snapshots linked through
+`assets`, `asset_edges`, and `selections`.
 
 Invariants the schema enforces:
 
@@ -45,6 +54,9 @@ Invariants the schema enforces:
   (prompt/model/seed), `inputs` (what it was built from, by id + content hash),
   `content_hash`, and `inputs_fingerprint` — the agent can reason over the pool
   without reading media.
+- **Typed JSONB only:** JSONB is allowed for versioned payloads at the edge
+  (provider params, raw responses, structured errors, audit/replay snapshots),
+  not as the primary store for first-class product structure.
 
 ## 2. Worked example (the §3 gap, closed)
 
@@ -490,7 +502,89 @@ order by project_id, slot_owner_lineage_id, slot_role, seq desc;
 unique index enforces compare-and-set against the state the proposal was
 computed on.
 
-### 3.5 `generation_runs` — slimmed to a session/budget grouping
+### 3.5 Storyboards — relational product structure
+
+Storyboard is a first-class product object, not incidental metadata. Users
+inspect scenes and beats, drag/reorder them, regenerate a specific panel,
+approve a beat, and ask agents to revise "scene 2" or "beat 4." Those operations
+need stable rows and columns, not ad hoc parsing of `assets.content`.
+
+The asset graph still owns provenance and generated artifacts:
+
+- `storyboards.plan_asset_id` points at the immutable plan/snapshot asset.
+- `storyboard_scenes.scene_asset_id` and `storyboard_beats.beat_asset_id` link
+  product rows to graph assets when a scene/beat should have lineage.
+- `storyboard_panels.image_asset_id` points at the sketch/keyframe image asset.
+- `storyboard_panels.prompt_asset_id` points at the prompt/request asset when
+  that prompt is durable enough to inspect or replay.
+- `asset_edges` records prompt/reference/beat/panel/media dependencies.
+- `selections` records active asset choices, such as the selected panel or clip.
+
+```sql
+create type storyboard_status as enum
+  ('draft','generating','ready','reviewing','approved','archived');
+create type storyboard_item_status as enum
+  ('draft','queued','generating','ready','approved','rejected','failed');
+
+create table public.storyboards (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects (id) on delete cascade,
+  plan_asset_id uuid references public.assets (id) on delete set null,
+  status storyboard_status not null default 'draft',
+  active_version integer not null default 1,
+  created_by_action_id uuid references public.actions (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.storyboard_scenes (
+  id uuid primary key default gen_random_uuid(),
+  storyboard_id uuid not null references public.storyboards (id) on delete cascade,
+  scene_index integer not null,
+  title text,
+  summary text,
+  setting text,
+  mood text,
+  duration_sec double precision,
+  scene_asset_id uuid references public.assets (id) on delete set null,
+  status storyboard_item_status not null default 'draft',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.storyboard_beats (
+  id uuid primary key default gen_random_uuid(),
+  scene_id uuid not null references public.storyboard_scenes (id) on delete cascade,
+  beat_index integer not null,
+  intent text not null default '',
+  visual_description text,
+  dialogue_summary text,
+  narration text,
+  duration_sec double precision,
+  status storyboard_item_status not null default 'draft',
+  beat_asset_id uuid references public.assets (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.storyboard_panels (
+  id uuid primary key default gen_random_uuid(),
+  beat_id uuid not null references public.storyboard_beats (id) on delete cascade,
+  panel_index integer not null default 0,
+  image_asset_id uuid references public.assets (id) on delete set null,
+  prompt_asset_id uuid references public.assets (id) on delete set null,
+  status storyboard_item_status not null default 'queued',
+  is_selected boolean not null default false,
+  approved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+```
+
+Indexes enforce scene/beat/panel order and at most one selected panel per beat.
+RLS follows the owning `project_id` through `storyboards`.
+
+### 3.6 `generation_runs` — slimmed to a session/budget grouping
 
 ```sql
 alter table public.generation_runs
@@ -512,7 +606,7 @@ are **dropped** (§5): stage progress becomes a UI projection over
 artifact store. The hardcoded `generation_stage_type` order was the conveyor
 belt the North Star forbids.
 
-### 3.6 Graph queries (the payoff)
+### 3.7 Graph queries (the payoff)
 
 ```sql
 -- Candidate stale set: everything downstream of a changed asset. This is a
@@ -537,7 +631,8 @@ as $$
   group by d.asset_id
 $$;
 
--- The orchestrator's working context: the whole project graph, token-compact.
+-- The orchestrator's working context: the project graph plus relational
+-- storyboard structure, token-compact.
 -- (SQL function without SECURITY DEFINER -> runs under caller's RLS.)
 create or replace function public.project_manifest(p_project_id uuid)
 returns jsonb
@@ -575,13 +670,17 @@ as $$
 $$;
 ```
 
+`20260610130000_storyboard_relational_model.sql` replaces this function to add a
+`storyboards` array with nested scenes, beats, and panels. The manifest keeps
+assets/selections for provenance while exposing product structure directly.
+
 **Staleness is computed on read, never stored.** A derived asset is a stale
 *candidate* when, for any of its input lineages, the slot's current active
 asset's `content_hash` differs from the hash recorded in its `inputs` snapshot.
 No `stale` flag, no cascade-update writes — and a flag would imply a command,
 where the doc wants a signal.
 
-### 3.7 RLS
+### 3.8 RLS
 
 ```sql
 alter table public.asset_edges enable row level security;
@@ -646,8 +745,9 @@ replacing the old `asset_kind`-typed RPC.
 
 | Today | Where it goes |
 |---|---|
-| `projects.brief`, `projects.plan`, `brief_versions` | `brief` / `beat` / `plan` pool assets + selections |
-| `compositions` (`planned_beats`, `ready_asset_ids`, …) | `plan` asset + per-beat slots + `actions` |
+| `projects.brief`, `brief_versions` | `brief` pool assets + selections |
+| `projects.plan` / storyboard JSON | `storyboards` / `storyboard_scenes` / `storyboard_beats` / `storyboard_panels`, linked to plan/beat/panel assets |
+| `compositions` (`planned_beats`, `ready_asset_ids`, …) | storyboard/timeline relational rows + `plan` / `composite` assets + `actions` |
 | `edit_graphs.document` (jsonb megalith) | `asset_edges` (queryable rows) + `actions` (rationale/alternatives) |
 | `timelines` (+ `VersionedTimeline`) | `composite` assets (`cut_*`); Remotion renders the compiled projection of the active cut |
 | `generation_stage_artifacts` | pool assets — one store (Principle 9) |
@@ -685,16 +785,16 @@ they no longer exist in the schema itself. Landing is a normal
 
 - **Tables:** `compositions`, `edit_graphs`, `timelines`, `brief_versions`,
   `generation_stages`, `generation_stage_items`, `generation_stage_artifacts`;
-  plus the old `assets` and `saved_assets` (both recreated fresh, §3.2/§3.7).
+  plus the old `assets` and `saved_assets` (both recreated fresh, §3.2/§3.8).
 - **Columns:** `projects.brief`, `projects.plan`,
   `projects.current_brief_version_id` (drop its FK with `brief_versions`);
   `generation_runs.{brief_version_id, review_gates, review_gate,
-  current_stage_type}` (§3.5).
+  current_stage_type}` (§3.6).
 - **Enums:** `asset_kind`, `composition_mode`, `composition_status`,
   `stage_item_kind`, and `generation_stage_type` — convert
   `eval_runs.stop_after` to `text` first (`using stop_after::text`).
 - **Functions:** `search_public_assets(text, asset_kind)` (recreated against
-  `media`/`kind`/`content`, §3.7).
+  `media`/`kind`/`content`, §3.8).
 - **`job_type` enum values** `composition` and `revision` are orphaned
   vocabulary and stay in place — Postgres can't drop enum values; they're
   harmless and nothing writes them anymore.
@@ -703,18 +803,26 @@ they no longer exist in the schema itself. Landing is a normal
 `workspace_invites`), `projects` (minus the dropped columns), `jobs`,
 `idempotency`, the eval framework, and the tier/visibility machinery.
 
+**Follow-up amendment:** `20260610130000_storyboard_relational_model.sql` adds
+`storyboards`, `storyboard_scenes`, `storyboard_beats`, and
+`storyboard_panels` so storyboard is no longer represented as first-class
+product structure inside `assets.content`. It also adds typed-JSONB check
+constraints for asset/action payload columns. The constraints are `not valid`
+so existing transitional rows are not scanned, but new writes must carry
+`schema` or `schema_version` markers where the constraint applies.
+
 ## 6. Code impact (for the PR that lands this)
 
 - `packages/shared`: add `GraphAsset`, `AssetEdge`, `Selection`, `AgentAction`,
   `AssetKind`, `EdgeRelation`; delete `CompositionPlan`, `VersionedTimeline`,
   `VersionedEditGraph`, the whole `edit-graph.ts` module, and `Patch`.
 - `apps/api` `V1Store`: collapses to `assets` / `asset_edges` / `selections` /
-  `actions` / `jobs` accessors + `projectManifest()` / `downstreamAssets()`
-  RPC wrappers.
+  `actions` / `jobs` accessors + storyboard relational accessors +
+  `projectManifest()` / `downstreamAssets()` RPC wrappers.
 - Agent functions (`planEdit`, `revise`, …) become tools that read the manifest
-  and emit actions + pool inserts; `revise`'s patch output is replaced by the
-  regeneration vocabulary (`change_beat`, `swap_selection`, `regenerate_*`,
-  `assemble`).
+  and storyboard rows, then emit actions + pool inserts; `revise`'s patch output
+  is replaced by the regeneration vocabulary (`change_beat`, `swap_selection`,
+  `regenerate_*`, `assemble`).
 - Remotion render input: a pure compile of the active `cut` composite. Trims,
   captions, and transitions live in the composite's own `content.children[]`
   (keyed by position, decided §7.1); edges carry ordering only, so the renderer
@@ -754,3 +862,12 @@ are constraints for the implementing PR.
    refresh orchestration and make the one table whose job is "current state"
    itself potentially stale. `selections_current_idx` (§3.4) gives the view a
    plain-column path the coalesce-expression CAS index can't provide.
+4. ~~**JSONB for core product structure**~~ **— DECIDED: no.** JSONB is allowed
+   for typed, versioned payloads at the edge: provider/model params, raw model
+   responses, structured tool errors, audit/replay snapshots, and temporary
+   migration bridges. It is not the primary representation for product objects
+   users edit or agents target. Storyboards, scenes, beats, panels, approvals,
+   and future timeline tracks/items should be relational rows that link back to
+   assets for lineage and provenance. If the UI renders it, a user edits it, or
+   an agent should address it by name, start with relational columns and add
+   graph edges for provenance.
