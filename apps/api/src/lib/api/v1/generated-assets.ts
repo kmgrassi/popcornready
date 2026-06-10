@@ -13,6 +13,7 @@ import { measureAudioDurationSec } from "@/lib/generative/audio-duration";
 import { withDerivedAssetKnowledge } from "./assets";
 import { preflightGenerationContent } from "@/lib/generative/preflight";
 import { providerFor } from "@/lib/generative/providers";
+import { estimateCostUsd } from "@/lib/generative/pricing";
 import {
   AudioGenerationMode,
   DialogueInput,
@@ -38,11 +39,16 @@ import {
 import { AssetKind, SCHEMA_VERSIONS } from "./schemas";
 import {
   addAsset,
+  assertRunBudgetAllows,
+  createAction,
+  getAssetFingerprintPins,
   getAsset,
   getProject,
   localDir,
   mediaGeneratedDir,
+  updateAction,
   updateAsset,
+  V1Action,
   V1Asset,
 } from "./store";
 
@@ -101,6 +107,7 @@ interface ParsedRequest {
   guidanceScale?: number;
   negativePrompt?: string;
   resolution?: string;
+  runId?: string;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -294,6 +301,41 @@ function parseGeneratedAssetRequest(body: unknown): ParsedRequest {
       ? String(body.negativePrompt)
       : undefined,
     resolution: body.resolution ? String(body.resolution) : undefined,
+    runId: body.runId ? String(body.runId) : undefined,
+  };
+}
+
+function actionToolForKind(kind: GenerativeAssetKind): string {
+  if (kind === "audio") return "generate_audio";
+  if (kind === "video") return "generate_clip";
+  return "generate_keyframe";
+}
+
+function buildGenerationActionProposal(args: {
+  parsed: ParsedRequest;
+  jobId: string;
+  estimatedCostUsd: number;
+  pinnedFingerprints: Record<string, string>;
+}): Record<string, unknown> {
+  return {
+    summary: `Generate ${args.parsed.kind} asset with ${args.parsed.provider}.`,
+    plannedWork: [
+      {
+        tool: actionToolForKind(args.parsed.kind),
+        provider: args.parsed.provider,
+        kind: args.parsed.kind,
+        durationSec: args.parsed.durationSec,
+        jobId: args.jobId,
+      },
+    ],
+    pinnedFingerprints: args.pinnedFingerprints,
+    estimate: {
+      costUsd: args.estimatedCostUsd,
+      unit:
+        args.parsed.kind === "image"
+          ? "generation"
+          : `${args.parsed.durationSec}s`,
+    },
   };
 }
 
@@ -301,7 +343,8 @@ async function runGeneration(
   auth: AuthContext,
   projectId: string,
   parsed: ParsedRequest,
-  item: RunStageItemHandle | null
+  item: RunStageItemHandle | null,
+  action: V1Action
 ): Promise<V1Asset> {
   // Resolve reference assets to local file paths the provider can read.
   const referencePaths: string[] = [];
@@ -544,17 +587,25 @@ async function runGeneration(
     updatedAt: now,
   };
 
-  const created = await addAsset(withDerivedAssetKnowledge(asset, now));
+  const created = await addAsset(withDerivedAssetKnowledge(asset, now), {
+    createdByActionId: action.id,
+  });
 
   // Stamp the DB-generated id onto the asset's self-referential fields (these
   // could not be known before the row existed).
-  return updateAsset(auth.workspaceId, projectId, created.id, (a) => {
+  const updated = await updateAsset(auth.workspaceId, projectId, created.id, (a) => {
     a.source = { type: "generated", generatedAssetId: created.id };
     if (a.semanticAnalysis) a.semanticAnalysis.assetId = created.id;
     if (a.provenance?.characterBinding) {
       a.provenance.characterBinding.assetId = created.id;
     }
   });
+  await updateAction(action.id, {
+    status: "applied",
+    outputAssetIds: [updated.id],
+    actualCostUsd: result.costUsd ?? action.estimatedCostUsd,
+  });
+  return updated;
 }
 
 export interface CreateGeneratedAssetArgs {
@@ -654,30 +705,73 @@ export async function runGeneratedAssetJob(args: {
   }
 
   const parsed = parseGeneratedAssetRequest(generatedAssetJobInput(job).body);
+  const estimatedCostUsd = estimateCostUsd({
+    provider: parsed.provider,
+    kind: parsed.kind,
+    durationSec: parsed.durationSec,
+    model: parsed.model,
+  });
   const running = await updateJob(job.id, {
     status: "running",
     progress: { currentStep: "generating_assets", percent: 10 },
     error: null,
   });
-
-  // Bind a stage item to this asset so the progress UI can show a per-asset
-  // card. The item lives for the duration of this call and is closed before
-  // the function returns (success, validation failure, or provider error).
-  const item: RunStageItemHandle | null = progress
-    ? await progress.startItem({
-        kind: stageItemKindForAssetKind(parsed.kind),
-        label:
-          parsed.description ||
-          clipPromptPreview(parsed.prompt) ||
-          `Generated ${parsed.kind}`,
-        provider: parsed.provider,
-        promptPreview: clipPromptPreview(parsed.prompt),
-      })
-    : null;
-  if (progress) await progress.attachJob(running.id);
+  let action: V1Action | null = null;
+  let item: RunStageItemHandle | null = null;
 
   try {
-    const asset = await runGeneration(auth, projectId, parsed, item);
+    const pinnedFingerprints = await getAssetFingerprintPins(
+      projectId,
+      parsed.referenceAssetIds
+    );
+    await assertRunBudgetAllows({
+      runId: parsed.runId,
+      additionalCostUsd: estimatedCostUsd,
+    });
+    action = await createAction({
+      projectId,
+      runId: parsed.runId,
+      tool: actionToolForKind(parsed.kind),
+      status: "running",
+      params: {
+        provider: parsed.provider,
+        kind: parsed.kind,
+        model: parsed.model,
+        prompt: parsed.prompt,
+        durationSec: parsed.durationSec,
+        referenceAssetIds: parsed.referenceAssetIds,
+        beatId: parsed.beatId,
+        anchorIds: parsed.anchorIds,
+      },
+      inputAssetIds: parsed.referenceAssetIds,
+      rationale: `Generate a ${parsed.kind} asset for the project.`,
+      proposal: buildGenerationActionProposal({
+        parsed,
+        jobId: running.id,
+        estimatedCostUsd,
+        pinnedFingerprints,
+      }),
+      estimatedCostUsd,
+      jobIds: [running.id],
+    });
+
+    // Bind a stage item to this asset so the progress UI can show a per-asset
+    // card. The item lives for the duration of this call and is closed before
+    // the function returns (success, validation failure, or provider error).
+    item = progress
+      ? await progress.startItem({
+          kind: stageItemKindForAssetKind(parsed.kind),
+          label:
+            parsed.description ||
+            clipPromptPreview(parsed.prompt) ||
+            `Generated ${parsed.kind}`,
+          provider: parsed.provider,
+          promptPreview: clipPromptPreview(parsed.prompt),
+        })
+      : null;
+    if (progress) await progress.attachJob(running.id);
+
+    const asset = await runGeneration(auth, projectId, parsed, item, action);
     const finished = await updateJob(running.id, {
       status: "succeeded",
       progress: { currentStep: "saving_artifact", percent: 100 },
@@ -695,6 +789,12 @@ export async function runGeneratedAssetJob(args: {
     const apiErr =
       err instanceof ApiError
         ? err
+        : err instanceof Error && /^Run budget exceeded:/.test(err.message)
+          ? new ApiError("validation_failed", err.message, {
+              reason: "budget_exceeded",
+              estimatedCostUsd,
+              runId: parsed.runId,
+            })
         : new ApiError(
             "job_failed",
             err instanceof Error ? err.message : "Asset generation failed."
@@ -703,6 +803,15 @@ export async function runGeneratedAssetJob(args: {
       status: "failed",
       error: { code: apiErr.code, message: apiErr.message },
     });
+    if (action) {
+      await updateAction(action.id, {
+        status: "failed",
+        error: {
+          code: apiErr.code,
+          message: apiErr.message,
+        },
+      });
+    }
     if (item) {
       await item.fail(
         toErrorSummary(apiErr, { fallbackCode: "job_failed" })

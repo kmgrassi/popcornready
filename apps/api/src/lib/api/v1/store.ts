@@ -174,6 +174,57 @@ export interface IdempotencyRecord {
   createdAt: string;
 }
 
+export type ActionStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "applied"
+  | "failed";
+
+export interface V1Action {
+  id: string;
+  schemaVersion: "action.v1";
+  projectId: string;
+  runId?: string;
+  tool: string;
+  status: ActionStatus;
+  params: Record<string, unknown>;
+  inputAssetIds: string[];
+  rationale?: string;
+  proposal?: Record<string, unknown>;
+  estimatedCostUsd?: number;
+  actualCostUsd?: number;
+  jobIds: string[];
+  outputAssetIds: string[];
+  error?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateActionInput {
+  projectId: string;
+  runId?: string;
+  tool: string;
+  status?: ActionStatus;
+  params?: Record<string, unknown>;
+  inputAssetIds?: string[];
+  rationale?: string;
+  proposal?: Record<string, unknown>;
+  estimatedCostUsd?: number;
+  actualCostUsd?: number;
+  jobIds?: string[];
+  outputAssetIds?: string[];
+  error?: Record<string, unknown>;
+}
+
+export type UpdateActionPatch = Partial<
+  Pick<
+    V1Action,
+    "status" | "estimatedCostUsd" | "actualCostUsd" | "jobIds" | "outputAssetIds" | "error"
+  >
+>;
+
 // ---------------------------------------------------------------------------
 // Local media paths (asset BYTES, not DB rows)
 // ---------------------------------------------------------------------------
@@ -379,6 +430,80 @@ function mapBriefVersion(row: DataAssetRow): V1BriefVersion {
   };
 }
 
+interface ActionRow {
+  id: string;
+  schema_version: "action.v1";
+  project_id: string;
+  run_id: string | null;
+  tool: string;
+  status: ActionStatus;
+  params: Record<string, unknown>;
+  input_asset_ids: string[];
+  rationale: string | null;
+  proposal: Record<string, unknown> | null;
+  estimated_cost_usd: number | null;
+  actual_cost_usd: number | null;
+  job_ids: string[];
+  output_asset_ids: string[];
+  error: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RunBudgetRow {
+  id: string;
+  budget_usd: number | null;
+}
+
+interface AssetFingerprintRow {
+  id: string;
+  content_hash: string | null;
+  inputs_fingerprint: string | null;
+}
+
+function markedJson(
+  marker: string,
+  value: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  return { schema_version: marker, ...value };
+}
+
+function unmarkedJson(
+  value: Record<string, unknown> | null
+): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  const { schema_version: _schemaVersion, schema: _schema, ...rest } = value;
+  void _schemaVersion;
+  void _schema;
+  return rest;
+}
+
+function mapAction(row: ActionRow): V1Action {
+  const action: V1Action = {
+    id: row.id,
+    schemaVersion: "action.v1",
+    projectId: row.project_id,
+    tool: row.tool,
+    status: row.status,
+    params: unmarkedJson(row.params) ?? {},
+    inputAssetIds: row.input_asset_ids ?? [],
+    jobIds: row.job_ids ?? [],
+    outputAssetIds: row.output_asset_ids ?? [],
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+  if (row.run_id != null) action.runId = row.run_id;
+  if (row.rationale != null) action.rationale = row.rationale;
+  const proposal = unmarkedJson(row.proposal);
+  if (proposal) action.proposal = proposal;
+  if (row.estimated_cost_usd != null) action.estimatedCostUsd = row.estimated_cost_usd;
+  if (row.actual_cost_usd != null) action.actualCostUsd = row.actual_cost_usd;
+  const error = unmarkedJson(row.error);
+  if (error) action.error = error;
+  return action;
+}
+
 interface CurrentSelectionRow {
   active_asset_id: string;
 }
@@ -468,7 +593,8 @@ async function setActiveAssetSelection(
   db: SupabaseClient,
   projectId: string,
   slotRole: "brief" | "plan",
-  activeAssetId: string
+  activeAssetId: string,
+  setByActionId?: string
 ): Promise<void> {
   const { error } = await db
     .from("selections")
@@ -477,8 +603,118 @@ async function setActiveAssetSelection(
       slot_owner_lineage_id: null,
       slot_role: slotRole,
       active_asset_id: activeAssetId,
+      set_by_action_id: setByActionId ?? null,
     });
   throwOnError(error, `setActiveAssetSelection ${slotRole}`);
+}
+
+export async function createAction(input: CreateActionInput): Promise<V1Action> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("actions")
+    .insert({
+      schema_version: "action.v1",
+      project_id: input.projectId,
+      run_id: input.runId ?? null,
+      tool: input.tool,
+      status: input.status ?? "proposed",
+      params: markedJson("action_params.v1", input.params ?? {}) ?? {},
+      input_asset_ids: input.inputAssetIds ?? [],
+      rationale: input.rationale ?? null,
+      proposal: markedJson("action_proposal.v1", input.proposal) ?? null,
+      estimated_cost_usd: input.estimatedCostUsd ?? null,
+      actual_cost_usd: input.actualCostUsd ?? null,
+      job_ids: input.jobIds ?? [],
+      output_asset_ids: input.outputAssetIds ?? [],
+      error: markedJson("action_error.v1", input.error) ?? null,
+    })
+    .select("*")
+    .single();
+  throwOnError(error, `createAction ${input.tool}`);
+  return mapAction(data as ActionRow);
+}
+
+export async function updateAction(
+  actionId: string,
+  patch: UpdateActionPatch
+): Promise<V1Action> {
+  const row: Record<string, unknown> = {};
+  if (patch.status !== undefined) row.status = patch.status;
+  if (patch.estimatedCostUsd !== undefined) {
+    row.estimated_cost_usd = patch.estimatedCostUsd;
+  }
+  if (patch.actualCostUsd !== undefined) row.actual_cost_usd = patch.actualCostUsd;
+  if (patch.jobIds !== undefined) row.job_ids = patch.jobIds;
+  if (patch.outputAssetIds !== undefined) row.output_asset_ids = patch.outputAssetIds;
+  if (patch.error !== undefined) row.error = markedJson("action_error.v1", patch.error) ?? null;
+
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("actions")
+    .update(row)
+    .eq("id", actionId)
+    .select("*")
+    .single();
+  throwOnError(error, `updateAction ${actionId}`);
+  return mapAction(data as ActionRow);
+}
+
+export async function assertRunBudgetAllows(input: {
+  runId?: string;
+  additionalCostUsd: number;
+}): Promise<void> {
+  if (!input.runId) return;
+  const db = getServiceSupabase();
+  const { data: run, error: runError } = await db
+    .from("generation_runs")
+    .select("id,budget_usd")
+    .eq("id", input.runId)
+    .maybeSingle();
+  if (isNoRows(runError)) return;
+  throwOnError(runError, "assertRunBudgetAllows run");
+
+  const budgetUsd = (run as RunBudgetRow | null)?.budget_usd;
+  if (budgetUsd == null || budgetUsd <= 0) return;
+
+  const { data: actions, error: actionsError } = await db
+    .from("actions")
+    .select("estimated_cost_usd,actual_cost_usd,status")
+    .eq("run_id", input.runId)
+    .in("status", ["proposed", "approved", "running", "applied"]);
+  throwOnError(actionsError, "assertRunBudgetAllows actions");
+
+  const committedUsd = ((actions as Pick<
+    ActionRow,
+    "estimated_cost_usd" | "actual_cost_usd" | "status"
+  >[]) ?? []).reduce((sum, action) => {
+    return sum + (action.actual_cost_usd ?? action.estimated_cost_usd ?? 0);
+  }, 0);
+  if (committedUsd + input.additionalCostUsd > budgetUsd) {
+    throw new Error(
+      `Run budget exceeded: ${committedUsd + input.additionalCostUsd} exceeds ${budgetUsd}.`
+    );
+  }
+}
+
+export async function getAssetFingerprintPins(
+  projectId: string,
+  assetIds: string[]
+): Promise<Record<string, string>> {
+  const uniqueIds = [...new Set(assetIds)].filter(Boolean);
+  if (uniqueIds.length === 0) return {};
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("id,content_hash,inputs_fingerprint")
+    .eq("project_id", projectId)
+    .in("id", uniqueIds);
+  throwOnError(error, "getAssetFingerprintPins");
+  const pins: Record<string, string> = {};
+  for (const row of ((data as AssetFingerprintRow[]) ?? [])) {
+    const fingerprint = row.inputs_fingerprint ?? row.content_hash;
+    if (fingerprint) pins[row.id] = fingerprint;
+  }
+  return pins;
 }
 
 async function insertDataAsset(input: {
@@ -490,6 +726,7 @@ async function insertDataAsset(input: {
   content: unknown;
   lineageId?: string;
   version?: number;
+  createdByActionId?: string;
 }): Promise<DataAssetRow> {
   const now = new Date().toISOString();
   const visibility = await defaultVisibilityForWorkspace(input.db, input.workspaceId);
@@ -506,6 +743,7 @@ async function insertDataAsset(input: {
     created_at: now,
     updated_at: now,
   };
+  if (input.createdByActionId) row.created_by_action_id = input.createdByActionId;
   if (input.lineageId) row.lineage_id = input.lineageId;
   if (input.version) row.version = input.version;
 
@@ -628,6 +866,7 @@ interface AssetRow {
   description: string | null;
   context: AssetContextEnvelope | null;
   semantic_analysis: AssetSemanticAnalysis | null;
+  created_by_action_id?: string | null;
   visibility?: "public" | "private";
   created_at: string;
   updated_at: string;
@@ -875,6 +1114,13 @@ export async function createProject(input: {
 
   let briefVersion: V1BriefVersion | null = null;
   if (input.brief) {
+    const action = await createAction({
+      projectId,
+      tool: "create_brief",
+      status: "running",
+      params: { source: "createProject" },
+      rationale: "Create the initial project brief asset.",
+    });
     const briefAsset = await insertDataAsset({
       db,
       workspaceId: input.workspaceId,
@@ -882,8 +1128,13 @@ export async function createProject(input: {
       kind: "brief",
       role: "current_brief",
       content: input.brief,
+      createdByActionId: action.id,
     });
-    await setActiveAssetSelection(db, projectId, "brief", briefAsset.id);
+    await setActiveAssetSelection(db, projectId, "brief", briefAsset.id, action.id);
+    await updateAction(action.id, {
+      status: "applied",
+      outputAssetIds: [briefAsset.id],
+    });
     briefVersion = mapBriefVersion(briefAsset);
   }
 
@@ -919,6 +1170,17 @@ export async function updateProjectPlan(
   const db = getServiceSupabase();
   const project = await getProject(workspaceId, projectId);
   const previous = await selectedDataAsset(db, projectId, "plan", "plan");
+  const inputAssetIds = previous ? [previous.id] : [];
+  const action = await createAction({
+    projectId,
+    tool: previous ? "update_plan" : "create_plan",
+    status: "running",
+    params: { source: "updateProjectPlan" },
+    inputAssetIds,
+    rationale: previous
+      ? "Create a new immutable storyboard plan asset version."
+      : "Create the initial storyboard plan asset.",
+  });
   const planAsset = await insertDataAsset({
     db,
     workspaceId,
@@ -928,8 +1190,13 @@ export async function updateProjectPlan(
     content: plan,
     lineageId: previous?.lineage_id,
     version: previous ? previous.version + 1 : undefined,
+    createdByActionId: action.id,
   });
-  await setActiveAssetSelection(db, projectId, "plan", planAsset.id);
+  await setActiveAssetSelection(db, projectId, "plan", planAsset.id, action.id);
+  await updateAction(action.id, {
+    status: "applied",
+    outputAssetIds: [planAsset.id],
+  });
   return {
     ...project,
     plan,
@@ -991,6 +1258,16 @@ export async function createBriefVersion(
   const db = getServiceSupabase();
   await getProject(workspaceId, projectId);
   const previous = await selectedDataAsset(db, projectId, "brief", "brief");
+  const action = await createAction({
+    projectId,
+    tool: previous ? "update_brief" : "create_brief",
+    status: "running",
+    params: { source: "createBriefVersion" },
+    inputAssetIds: previous ? [previous.id] : [],
+    rationale: previous
+      ? "Create a new immutable brief asset version."
+      : "Create the initial brief asset.",
+  });
   const briefAsset = await insertDataAsset({
     db,
     workspaceId,
@@ -1000,8 +1277,13 @@ export async function createBriefVersion(
     content: brief,
     lineageId: previous?.lineage_id,
     version: previous ? previous.version + 1 : undefined,
+    createdByActionId: action.id,
   });
-  await setActiveAssetSelection(db, projectId, "brief", briefAsset.id);
+  await setActiveAssetSelection(db, projectId, "brief", briefAsset.id, action.id);
+  await updateAction(action.id, {
+    status: "applied",
+    outputAssetIds: [briefAsset.id],
+  });
   return {
     project: await getProject(workspaceId, projectId),
     briefVersion: mapBriefVersion(briefAsset),
@@ -1163,13 +1445,19 @@ export async function deleteStudioDraft(
 // ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
-export async function addAsset(asset: V1Asset): Promise<V1Asset> {
+export async function addAsset(
+  asset: V1Asset,
+  options: { createdByActionId?: string } = {}
+): Promise<V1Asset> {
   const db = getServiceSupabase();
   // Omit `id` so Postgres assigns it (gen_random_uuid); any id on the incoming
   // object is a placeholder and is read back from the inserted row.
   const { id: _omit, ...row } = assetToRow(asset);
   void _omit;
   row.visibility = await defaultVisibilityForWorkspace(db, asset.workspaceId);
+  if (options.createdByActionId) {
+    row.created_by_action_id = options.createdByActionId;
+  }
   const { data, error } = await db
     .from("assets")
     .insert(row)
