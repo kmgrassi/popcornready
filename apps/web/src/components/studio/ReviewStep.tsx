@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Clip, Project, Timeline } from "@popcorn/shared/types";
+import type { Clip, Project, Timeline, TimelineSegment } from "@popcorn/shared/types";
 import { DEFAULT_DURATION_POLICY } from "@popcorn/shared/audio-alignment";
 import { Button } from "../ui/Button";
 import { PreviewPanel } from "../editor/PreviewPanel";
@@ -12,9 +12,12 @@ interface ReviewStepProps {
   timeline: Timeline | null | undefined;
   timelineId?: string;
   clips: Clip[];
+  segmentNotes: Record<string, string>;
   loading: boolean;
   error?: string;
   onFeedback(note: string): Promise<void>;
+  onSegmentChange(segmentId: string, patch: Partial<TimelineSegment>): void;
+  onSegmentNoteChange(segmentId: string, note: string): void;
   onExport(): void;
 }
 
@@ -23,9 +26,12 @@ export function ReviewStep({
   timeline,
   timelineId,
   clips,
+  segmentNotes,
   loading,
   error,
   onFeedback,
+  onSegmentChange,
+  onSegmentNoteChange,
   onExport,
 }: ReviewStepProps) {
   const [note, setNote] = useState("");
@@ -131,7 +137,15 @@ export function ReviewStep({
           ) : null}
         </div>
 
-        {hasTimeline ? <TimelinePanel timeline={timeline} clips={clips} /> : null}
+        {hasTimeline ? (
+          <TimelinePanel
+            timeline={timeline}
+            clips={clips}
+            segmentNotes={segmentNotes}
+            onSegmentChange={onSegmentChange}
+            onSegmentNoteChange={onSegmentNoteChange}
+          />
+        ) : null}
       </div>
     </section>
   );

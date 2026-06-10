@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   type Clip,
   type Timeline,
@@ -10,34 +10,26 @@ import styles from "./TimelinePanel.module.css";
 interface TimelinePanelProps {
   timeline: Timeline;
   clips: Clip[];
-}
-
-interface EditableSegment {
-  caption: string;
-  note: string;
+  segmentNotes: Record<string, string>;
+  onSegmentChange(segmentId: string, patch: Partial<TimelineSegment>): void;
+  onSegmentNoteChange(segmentId: string, note: string): void;
 }
 
 function segmentLabel(segment: TimelineSegment, clip?: Clip): string {
   return clip?.filename || segment.clipId;
 }
 
-export function TimelinePanel({ timeline, clips }: TimelinePanelProps) {
-  const [edits, setEdits] = useState<Record<string, EditableSegment>>({});
+export function TimelinePanel({
+  timeline,
+  clips,
+  segmentNotes,
+  onSegmentChange,
+  onSegmentNoteChange,
+}: TimelinePanelProps) {
   const clipById = useMemo(
     () => Object.fromEntries(clips.map((clip) => [clip.id, clip])),
     [clips],
   );
-
-  function updateSegment(segmentId: string, patch: Partial<EditableSegment>) {
-    setEdits((current) => ({
-      ...current,
-      [segmentId]: {
-        caption: current[segmentId]?.caption ?? "",
-        note: current[segmentId]?.note ?? "",
-        ...patch,
-      },
-    }));
-  }
 
   return (
     <aside className={styles.panel} aria-label="Timeline editor">
@@ -54,7 +46,6 @@ export function TimelinePanel({ timeline, clips }: TimelinePanelProps) {
       <ol className={styles.segmentList}>
         {timeline.segments.map((segment, index) => {
           const clip = clipById[segment.clipId];
-          const draft = edits[segment.id];
           return (
             <li className={styles.segment} key={segment.id}>
               <span className={styles.index}>{index + 1}</span>
@@ -72,9 +63,9 @@ export function TimelinePanel({ timeline, clips }: TimelinePanelProps) {
                 <label className={styles.field}>
                   <span>Caption</span>
                   <input
-                    value={draft?.caption ?? segment.caption ?? ""}
+                    value={segment.caption ?? ""}
                     onChange={(event) =>
-                      updateSegment(segment.id, { caption: event.target.value })
+                      onSegmentChange(segment.id, { caption: event.target.value })
                     }
                     placeholder="Add or edit caption text"
                   />
@@ -82,9 +73,9 @@ export function TimelinePanel({ timeline, clips }: TimelinePanelProps) {
                 <label className={styles.field}>
                   <span>Scene note</span>
                   <textarea
-                    value={draft?.note ?? ""}
+                    value={segmentNotes[segment.id] ?? ""}
                     onChange={(event) =>
-                      updateSegment(segment.id, { note: event.target.value })
+                      onSegmentNoteChange(segment.id, event.target.value)
                     }
                     placeholder="What should change in this scene?"
                     rows={2}

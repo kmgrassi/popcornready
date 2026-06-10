@@ -72,19 +72,35 @@ export function StudioShell({ initialBrief }: StudioShellProps) {
   }
 
   if (flow.state === "review") {
+    const stepProps = {
+      draft: flow.brief,
+      update: flow.update,
+      next: flow.next,
+      back: flow.back,
+    };
+
     return (
       <main className={styles.shell}>
         <StudioStepper step={flow.step} onStepClick={flow.goTo} />
-        <ReviewStep
-          project={flow.reviewProject}
-          timeline={flow.reviewTimeline}
-          timelineId={flow.reviewTimelineId}
-          clips={flow.reviewClips}
-          loading={flow.reviewLoading}
-          error={flow.reviewError ?? flow.error}
-          onFeedback={flow.requestRevision}
-          onExport={() => flow.goTo("export")}
-        />
+        {flow.step === "export" ? (
+          <section className={styles.stepBody}>
+            <ExportStep {...stepProps} />
+          </section>
+        ) : (
+          <ReviewStep
+            project={flow.reviewProject}
+            timeline={flow.reviewTimeline}
+            timelineId={flow.reviewTimelineId}
+            clips={flow.reviewClips}
+            segmentNotes={flow.reviewSegmentNotes}
+            loading={flow.reviewLoading}
+            error={flow.reviewError ?? flow.error}
+            onFeedback={flow.requestRevision}
+            onSegmentChange={flow.updateReviewSegment}
+            onSegmentNoteChange={flow.updateReviewSegmentNote}
+            onExport={() => flow.goTo("export")}
+          />
+        )}
       </main>
     );
   }

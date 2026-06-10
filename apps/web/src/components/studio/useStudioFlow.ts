@@ -7,7 +7,7 @@
 // the polling that drives the generation checklist + review handoff.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Clip, Project, Timeline } from "@popcorn/shared/types";
+import type { Clip, Project, Timeline, TimelineSegment } from "@popcorn/shared/types";
 import type {
   AspectRatio,
   GateableGenerationStageType,
@@ -134,6 +134,7 @@ export interface StudioFlow {
   reviewTimeline?: Timeline | null;
   reviewTimelineId?: string;
   reviewClips: Clip[];
+  reviewSegmentNotes: Record<string, string>;
   reviewLoading: boolean;
   reviewError?: string;
   /** Set when startGeneration() failed; cleared on retry. */
@@ -153,6 +154,10 @@ export interface StudioFlow {
   rejectGate(note?: string): Promise<void>;
   /** Sends review feedback to the timeline revision endpoint when a timeline exists. */
   requestRevision(note: string): Promise<void>;
+  /** Applies inline review edits to the loaded timeline so preview/export use the current cut. */
+  updateReviewSegment(segmentId: string, patch: Partial<TimelineSegment>): void;
+  /** Stores per-segment review notes next to the timeline editor. */
+  updateReviewSegmentNote(segmentId: string, note: string): void;
 }
 
 /**
@@ -223,6 +228,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
   const [reviewProject, setReviewProject] = useState<Project | null>(null);
   const [reviewTimeline, setReviewTimeline] = useState<Timeline | null>(null);
   const [reviewTimelineId, setReviewTimelineId] = useState<string | undefined>();
+  const [reviewSegmentNotes, setReviewSegmentNotes] = useState<Record<string, string>>({});
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -257,6 +263,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       setReviewProject(null);
       setReviewTimeline(null);
       setReviewTimelineId(undefined);
+      setReviewSegmentNotes({});
       setReviewError(undefined);
       setRun({
         runId,
@@ -410,6 +417,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
         setReviewProject(project);
         setReviewTimeline(project?.timeline ?? loadedTimeline);
         setReviewTimelineId(loadedTimelineId);
+        setReviewSegmentNotes({});
       } catch (reviewLoadError) {
         if (cancelled || controller.signal.aborted) return;
         setReviewError(
@@ -451,6 +459,25 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     [projectId, reviewTimelineId],
   );
 
+  const updateReviewSegment = useCallback(
+    (segmentId: string, patch: Partial<TimelineSegment>) => {
+      setReviewTimeline((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          segments: current.segments.map((segment) =>
+            segment.id === segmentId ? { ...segment, ...patch } : segment
+          ),
+        };
+      });
+    },
+    [],
+  );
+
+  const updateReviewSegmentNote = useCallback((segmentId: string, note: string) => {
+    setReviewSegmentNotes((current) => ({ ...current, [segmentId]: note }));
+  }, []);
+
   return useMemo(
     () => ({
       state,
@@ -464,6 +491,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       reviewTimeline,
       reviewTimelineId,
       reviewClips: reviewProject?.clips ?? [],
+      reviewSegmentNotes,
       reviewLoading,
       reviewError,
       error,
@@ -475,7 +503,9 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
       approveGate,
       rejectGate,
       requestRevision,
+      updateReviewSegment,
+      updateReviewSegmentNote,
     }),
-    [state, step, brief, run, stages, resultArtifacts, projectId, reviewProject, reviewTimeline, reviewTimelineId, reviewLoading, reviewError, error, goTo, back, next, update, startGeneration, approveGate, rejectGate, requestRevision],
+    [state, step, brief, run, stages, resultArtifacts, projectId, reviewProject, reviewTimeline, reviewTimelineId, reviewSegmentNotes, reviewLoading, reviewError, error, goTo, back, next, update, startGeneration, approveGate, rejectGate, requestRevision, updateReviewSegment, updateReviewSegmentNote],
   );
 }
