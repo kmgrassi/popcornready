@@ -45,6 +45,14 @@ instead, and return any still-needed response fields as projections from graph
 state. If a caller still depends on a retired table or column, treat that as code
 migration work, not a schema rollback.
 
+The asset graph is the provenance spine, not a license to hide product structure
+inside loose JSONB. Stable user-facing objects such as storyboards, scenes,
+beats, panels, approvals, and timeline items should have relational tables that
+link back to assets for lineage/provenance. JSONB is allowed for typed,
+versioned edge payloads only (provider params, model responses, structured
+errors, audit snapshots, temporary migration bridges). If the UI renders it, the
+user edits it, or the agent targets it by name, prefer relational columns/rows.
+
 ## Where things live
 
 - **Full directory map (active monorepo vs legacy `src/`):**

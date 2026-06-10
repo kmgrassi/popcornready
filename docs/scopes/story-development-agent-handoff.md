@@ -125,27 +125,22 @@ these gates may remain optional.
 
 ### What exists and should be reused
 
-- **Brief versions.** `brief_versions.brief` stores the user input as JSONB, and
-  `VideoBriefInput` already includes goal, target length, aspect ratio, audience,
-  style, narration script/asset, and constraints.
-- **Project plan.** `projects.plan` already stores the editable storyboard plan
-  (`EditPlan`) as JSONB. This is currently the durable `Scenes -> Beats` surface.
-- **Plan model.** `EditPlan` has `scenes: Scene[]`; each `Scene` has setting,
-  mood, optional character IDs, optional anchor asset ID, and `beats`.
+- **Brief assets.** Creative briefs are `assets.kind = 'brief'` snapshots with
+  typed content; the current brief is selected through `selections`.
+- **Storyboard rows.** The editable storyboard plan is relational:
+  `storyboards` -> `storyboard_scenes` -> `storyboard_beats` ->
+  `storyboard_panels`. This is the durable user-facing `Scenes -> Beats ->
+  Panels` surface.
+- **Plan snapshots.** A `plan` asset can snapshot a storyboard version for
+  provenance/replay, but the UI and agents should target storyboard rows.
 - **Stable beat IDs.** Beats can carry stable IDs, which downstream assets and
   timeline segments should reference.
-- **Composition plan.** `compositions` stores `planned_beats`, ready asset IDs,
-  generated asset job IDs, and narration strategy. It is useful as the production
-  readiness layer after the story/shot plan exists.
-- **Generation runs and stage artifacts.** `generation_runs`,
-  `generation_stages`, `generation_stage_items`, and
-  `generation_stage_artifacts` already model stage order, review gates,
-  per-stage status, and JSONB evidence payloads. Reuse them as run evidence and
-  pointers to canonical story/script rows, not as the source of truth for
-  story/script state.
-- **Assets.** `assets.context` and `assets.provenance` already hold structured
-  metadata, while pooled assets can represent generated storyboard tiles,
-  keyframes, clips, audio, and references.
+- **Actions/jobs/runs.** `actions`, `jobs`, and `generation_runs` model tool
+  decisions, async work, and run grouping. Stage-shaped UI is a projection over
+  those rows plus storyboard/assets state, not a second artifact store.
+- **Assets.** Pooled assets represent generated storyboard tiles, keyframes,
+  clips, audio, references, critiques, renders, and immutable typed snapshots.
+  `asset_edges` records provenance.
 - **Partial visual-anchor primitives.** `character_anchor` assets exist, the
   asset role vocabulary includes `scene_anchor`, `Scene.anchorAssetId` can point
   at an establishing image, and storyboard/keyframe generation can carry anchor
@@ -179,17 +174,26 @@ these gates may remain optional.
 
 ## Data model
 
-Story blueprints and script drafts are not just transient run output. They are
-the written creative plan of the project, so they deserve dedicated tables.
+Story blueprints, script drafts, and storyboard plans are not just transient run
+output. They are the written creative plan of the project, so they deserve typed
+durable resources. After the asset-graph + relational-storyboard migrations, the
+canonical split is:
 
 The reuse boundary is:
 
-- Keep `brief_versions` as the immutable user/request input.
-- Keep `projects.plan` as the current production shot/beat plan.
-- Keep `compositions` as the generated/reused asset readiness plan.
-- Keep `generation_stage_artifacts` as run evidence and UI/eval snapshots.
-- Add dedicated `story_blueprints` and `script_drafts` as canonical story-writing
-  resources.
+- Keep briefs/story/script snapshots as typed assets or future relational rows.
+- Keep storyboard structure in `storyboards`, `storyboard_scenes`,
+  `storyboard_beats`, and `storyboard_panels`.
+- Keep generated media, prompts, critiques, and immutable snapshots in `assets`.
+- Keep dependencies/provenance in `asset_edges`.
+- Keep active choices in `selections`.
+- Keep tool decisions and async execution in `actions`, `jobs`, and
+  `generation_runs`.
+
+The SQL sketch below predates the asset-graph model and is retained only as
+historical design context. New implementation work should not add
+`brief_versions`, `projects.plan`, `compositions`, or `generation_stage_artifacts`
+back to the schema.
 
 ### Shared types
 
@@ -296,12 +300,13 @@ export interface VisualAnchorRequirement {
 Add two canonical tables:
 
 ```sql
+-- Historical sketch only; prefer typed assets or a follow-up relational story table.
 create table public.story_blueprints (
   id uuid primary key default gen_random_uuid(),
   schema_version text not null default 'storyBlueprint.v1',
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   project_id uuid not null references public.projects(id) on delete cascade,
-  brief_version_id uuid references public.brief_versions(id) on delete set null,
+  brief_asset_id uuid references public.assets(id) on delete set null,
   supersedes_id uuid references public.story_blueprints(id) on delete set null,
   status text not null default 'draft',
   content jsonb not null,
@@ -311,14 +316,15 @@ create table public.story_blueprints (
   updated_at timestamptz not null default now()
 );
 create index story_blueprints_project_id_idx on public.story_blueprints(project_id);
-create index story_blueprints_brief_version_id_idx on public.story_blueprints(brief_version_id);
+create index story_blueprints_brief_asset_id_idx on public.story_blueprints(brief_asset_id);
 
+-- Historical sketch only; prefer typed assets or a follow-up relational script table.
 create table public.script_drafts (
   id uuid primary key default gen_random_uuid(),
   schema_version text not null default 'scriptDraft.v1',
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   project_id uuid not null references public.projects(id) on delete cascade,
-  brief_version_id uuid references public.brief_versions(id) on delete set null,
+  brief_asset_id uuid references public.assets(id) on delete set null,
   story_blueprint_id uuid not null references public.story_blueprints(id) on delete cascade,
   supersedes_id uuid references public.script_drafts(id) on delete set null,
   status text not null default 'draft',
@@ -384,20 +390,20 @@ agent receives structured content plus provenance, not an implicit prose summary
 
 ```text
 Story Agent
-  input: BriefVersion + targetLengthSec
-  output: StoryBlueprint row
+  input: active brief asset + targetLengthSec
+  output: typed story resource asset or row
 
 Script Agent
-  input: BriefVersion + StoryBlueprint row + duration plan
-  output: ScriptDraft row
+  input: active brief asset + StoryBlueprint resource + duration plan
+  output: typed script/narration resource asset or row
 
 Shot Planner Agent
-  input: BriefVersion + StoryBlueprint + ScriptDraft + duration plan
-  output: EditPlan persisted to projects.plan and stage artifact
+  input: active brief asset + StoryBlueprint + ScriptDraft + duration plan
+  output: storyboard rows plus optional plan asset snapshot
 
 Storyboard Agent
-  input: EditPlan
-  output: beat_storyboard assets, one per beat
+  input: storyboard scenes/beats
+  output: storyboard_panels plus beat_storyboard image assets
 
 Media Agent
   input: approved EditPlan + storyboard assets + asset pool
@@ -456,15 +462,15 @@ and advance the run.
 
 | Stage | Caller / agent | Input loaded by server | Agent output | Server persists | Next stage receives |
 | --- | --- | --- | --- | --- | --- |
-| `brief_intake` | API / engine | request body or existing `briefVersionId` | none, deterministic validation | `brief_versions` row; run/stage status | `briefVersionId`, `VideoBriefInput` |
-| `story_development` | Story Agent (`developStoryBlueprint`) | `BriefVersion`, duration plan, project context | `StoryBlueprint` JSON | `story_blueprints` row; `projects.current_story_blueprint_id`; stage artifact snapshot/ref | `storyBlueprintId` |
-| `script_planning` | Script Agent (`draftScriptScenes`) | `BriefVersion`, `StoryBlueprint`, duration plan | `ScriptDraft` JSON | `script_drafts` row; `projects.current_script_draft_id`; stage artifact snapshot/ref | `scriptDraftId`, `storyBlueprintId` |
-| `creative_plan` | Shot Planner Agent (`planShotsFromStory`) | `BriefVersion`, `StoryBlueprint`, `ScriptDraft`, duration plan | `EditPlan` JSON with scenes/beats/durations/character IDs | `projects.plan`; stage artifact snapshot/ref; optional `compositions` seed | `EditPlan`, stable scene/beat IDs |
+| `brief_intake` | API / engine | request body or active brief asset | none, deterministic validation | `brief` asset + selection; run/action status | active brief asset ID |
+| `story_development` | Story Agent (`developStoryBlueprint`) | active brief asset, duration plan, project context | typed `StoryBlueprint` payload | typed story asset or future relational story rows; action output IDs | story resource ID |
+| `script_planning` | Script Agent (`draftScriptScenes`) | active brief/story resources, duration plan | typed `ScriptDraft` payload | typed script/narration assets or future relational script rows; action output IDs | script resource IDs |
+| `creative_plan` | Shot Planner Agent (`planShotsFromStory`) | active brief/story/script resources, duration plan | scene/beat plan | `storyboards`, `storyboard_scenes`, `storyboard_beats`; optional `plan` asset snapshot | storyboard ID, stable scene/beat row IDs |
 | `visual_anchors` | Anchor Planner + anchor generation tools | `EditPlan`, story/script characters, existing asset pool | `VisualAnchorRequirement[]` JSON plus generated/selected anchor assets | `character_anchor` / `scene_anchor` assets and selections; stage items; provenance | active anchor IDs by scene/beat |
-| `storyboard` | Storyboard tool/agent | `EditPlan`, applicable anchor IDs | `beat_storyboard` assets | pooled assets with `depicts.beatId` and anchor provenance; stage items | approved storyboard asset IDs by beat |
-| `asset_generation` | Visual media tools | `EditPlan`, applicable anchors, approved storyboard tiles, provider policy | `beat_keyframe`, `beat_clip`, and caption/visual-support assets | pooled assets, active selections, generation jobs/items, provenance input edges | ready visual asset IDs |
+| `storyboard` | Storyboard tool/agent | storyboard rows, applicable anchor IDs | `beat_storyboard` panel assets | `storyboard_panels` rows + image/prompt assets + asset edges | approved panel asset IDs by beat |
+| `asset_generation` | Visual media tools | storyboard rows, applicable anchors, approved panels, provider policy | `beat_keyframe`, `beat_clip`, and caption/visual-support assets | pooled assets, active selections, jobs, provenance input edges | ready visual asset IDs |
 | `audio_generation` | Audio/Narration Agent + audio tools | `ScriptDraft`, timeline target, existing audio policy | narration/voice/music assets or no-op decision | audio assets, measured duration, narration strategy | ready audio asset IDs |
-| `timeline_assembly` | Editor Agent (`assembleTimeline`) | `EditPlan`, ready visual/audio assets, composition | `VersionedTimeline` / `EditGraph` JSON | `timelines`, `edit_graphs`, stage artifact | timeline ID |
+| `timeline_assembly` | Editor Agent (`assembleTimeline`) | storyboard rows, ready visual/audio assets | composite/cut asset or future timeline rows | `composite` asset + edges/selections | cut asset ID |
 | `quality_review` | Critic Agent | timeline, edit graph, upstream story/script/plan/asset IDs | patch decisions or regeneration proposal JSON | critic report, patch ops, optional regeneration request | revised timeline or blocked proposal |
 | `export` | Render tool | approved timeline/render plan | render artifact metadata | export job/artifact row | final MP4 URL |
 
@@ -679,8 +685,10 @@ right downstream work:
 
 4. **Plan from script.**
    Split current `planEdit()` into `planShotsFromStory()` for the new path while
-   keeping the old prompt-to-plan call as a compatibility shortcut. Persist the
-   resulting `EditPlan` to `projects.plan` and stage artifacts.
+   keeping the old prompt-to-plan call as a compatibility shortcut. Persist
+   resulting structure to `storyboards`, `storyboard_scenes`, and
+   `storyboard_beats`; create a `plan` asset snapshot when replay/provenance
+   needs a compact immutable document.
 
 5. **Visual anchors.**
    Add a `visual_anchors` stage that derives conditional anchor requirements
@@ -714,9 +722,8 @@ right downstream work:
   render 90 minutes.
 - Should the 120-second approval threshold be configurable by workspace, or fixed
   globally for the hosted product?
-- Should `generation_stage_artifacts.kind` grow beyond the current
-  `stage_item_kind` enum to include `story_blueprint` and `script_draft`, or
-  should we initially store these as `timeline` artifacts to avoid a migration?
+- Should story blueprints and script drafts be first-class relational tables now,
+  or typed assets until their UI/editing surface stabilizes?
 - How much dialogue should the script agent write before visual generation?
 - Should character profiles be auto-created from `StoryCharacter` entries, or
   remain a separate explicit user/agent action?

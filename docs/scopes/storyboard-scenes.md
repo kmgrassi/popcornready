@@ -5,9 +5,9 @@
 Two linked changes that turn the plan from an invisible beat list into a real,
 visible storyboard:
 
-1. **A Scene tier** — model the storyboard as **Scenes → Beats** (today the plan
-   is a flat list of beats). A scene is the continuity unit: a shared setting,
-   cast, and look that its beats inherit.
+1. **A Scene tier** — model the storyboard as relational
+   **Storyboards → Scenes → Beats → Panels**. A scene is the continuity unit: a
+   shared setting, cast, and look that its beats inherit.
 2. **Visual storyboard tiles** — generate a **sketch-style image per beat** so the
    user can *see* how the video is sketched out before committing to expensive
    photoreal generation. Rendered deliberately as rough storyboard panels (pencil/
@@ -98,9 +98,11 @@ Notes & decisions:
 Generate a **sketch image per beat** — the storyboard panels — fast and cheap, so
 the whole plan is visible before any photoreal generation.
 
-- **New asset role `beat_storyboard`** (add to `AssetRole`) — a rough sketch tile,
-  `depicts: { beatId }`. Distinct from `beat_keyframe` (photoreal first frame) and
-  `beat_clip`. Lives in the project asset pool with provenance like any other asset.
+- **New asset role `beat_storyboard`** (add to `AssetRole`) — a rough sketch tile
+  linked from `storyboard_panels.image_asset_id`. Distinct from `beat_keyframe`
+  (photoreal first frame) and `beat_clip`. The image lives in the project asset
+  pool with provenance like any other asset; panel order, status, approval, and
+  selected state live in `storyboard_panels`.
 - **One panel per beat** (recommended), grouped by scene; the **scene_anchor** can
   be rendered as the scene's establishing sketch.
 - **Sketch aesthetic.** A "storyboard sketch" **style preset** layered onto the
@@ -116,8 +118,9 @@ the whole plan is visible before any photoreal generation.
 - **Consistency within a scene.** Tiles condition on the scene anchor (sketch) +
   character anchors (sketch form) so panels in a scene share style and character
   likeness.
-- **Provenance.** `beat_storyboard depicts beat; depends on beat.intent + scene
-  context + sketch anchors`. Editing a beat/scene regenerates only the affected
+- **Provenance.** `storyboard_panels` owns the product row; `asset_edges` records
+  that the `beat_storyboard` image asset depends on the beat asset, scene/anchor
+  context, and prompt asset. Editing a beat/scene regenerates only the affected
   tiles — cheap.
 
 ---

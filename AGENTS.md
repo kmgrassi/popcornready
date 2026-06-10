@@ -29,6 +29,11 @@ file calls out conventions that matter for parallel agent work.
   as projections from the new graph state.
 - Treat schema-cache errors after a retirement migration as evidence of stale
   callers, not as a reason to re-add the old column.
+- Do not put first-class product structure into untyped JSONB. Storyboards,
+  scenes, beats, panels, approvals, and timeline items should be relational rows
+  that link to `assets` for provenance/versioning. JSONB payloads must be typed,
+  versioned, and reserved for provider/tool metadata, raw responses, structured
+  errors, audit snapshots, or temporary migration bridges.
 
 ## Styling (CSS Modules + global tokens)
 

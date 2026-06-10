@@ -6,9 +6,16 @@ A high-level map of the Postgres (Supabase) schema for agents: what each table i
 + later migrations). Conventions:
 
 - **PKs are DB-generated `uuid`** (`gen_random_uuid()`); the app no longer mints ids.
-- **Loose/churning structures are `jsonb`** (briefs, segments, provenance, edit-graph
-  documents, plans, progress, errors, grades). In-JSON ids (beat/scene/segment ids)
-  live inside those blobs and are not DB columns.
+- **Asset graph is the provenance spine.** `assets`, `asset_edges`,
+  `selections`, and `actions` answer what exists, what produced it, what it
+  depends on, and which version is active.
+- **Product structure is relational.** Stable user-facing concepts such as
+  storyboards, scenes, beats, panels, approvals, and future timeline items
+  should be rows/columns, not loose JSONB.
+- **JSONB is typed edge payload only.** JSONB may hold provider params, raw
+  model responses, structured errors, audit/replay snapshots, or temporary
+  migration bridges, but payloads must carry `schema` or `schema_version` and be
+  validated by server code.
 - **Tenancy + RLS:** every app row walks back to an owning **workspace** via
   `workspace_members`; policies key on `current_app_user_id()` (the domain user),
   not `auth.uid()`. Some content is also publicly readable when `visibility='public'`.
@@ -45,20 +52,36 @@ This join table is what RLS checks for access.
 ## 2. Projects & content
 
 **`projects`** — a single video project (the main unit of work) inside a workspace.
-`id, schema_version, workspace_id, name, status, brief, current_brief_version_id, visibility, plan, created_at, updated_at`
-→ `workspace_id` → `workspaces`, `current_brief_version_id` → `brief_versions`.
-`brief` (current brief jsonb), `plan` (editable storyboard EditPlan: Scenes→Beats, jsonb),
-`status` ∈ active|deleted, `visibility` ∈ public|private.
+`id, schema_version, workspace_id, name, status, visibility, created_at, updated_at`
+→ `workspace_id` → `workspaces`.
+Briefs, plans, and storyboard state are no longer columns on `projects`; they
+live as assets plus relational storyboard rows. `status` ∈ active|deleted,
+`visibility` ∈ public|private.
 
-**`brief_versions`** — immutable history of a project's creative brief.
-`id, schema_version, project_id, brief, created_at`
-→ `project_id` → `projects`.
+**`assets`** — the immutable project-scoped pool for generated/imported
+artifacts and typed snapshots.
+`id, schema_version, workspace_id, project_id, ref, lineage_id, version, kind, media, status, role, content, params, inputs, content_hash, inputs_fingerprint, created_by_action_id, filename, url, remote_url, storage_key, storage_bucket, source, duration_sec, description, context, semantic_analysis, visibility, created_at, updated_at`
+→ `workspace_id` → `workspaces`, `project_id` → `projects`,
+`created_by_action_id` → `actions`. `kind` ∈ source_footage|brief|beat|anchor|
+keyframe|clip|audio_track|narration_script|critique|plan|composite|render.
+`media` ∈ data|image|video|audio. Semantic asset fields are immutable; insert a
+new version with the same `lineage_id` to revise.
 
-**`assets`** — uploaded or generated media (video/image/audio) for a project.
-`id, schema_version, workspace_id, project_id, kind, status, filename, url, remote_url, storage_key, storage_bucket, source, duration_sec, description, context, semantic_analysis, provenance, generated_asset_job_id, visibility, created_at, updated_at`
-→ `workspace_id` → `workspaces`, `project_id` → `projects`. `kind` ∈ video|image|audio;
-bytes live in Supabase Storage (`storage_key`/`storage_bucket`); `source`/`context`/
-`provenance`/`semantic_analysis` are jsonb metadata.
+**`asset_edges`** — dependency/provenance graph, written from asset inputs.
+`id, project_id, from_id, to_id, relation, role, position, created_at`
+→ `project_id` → `projects`, `from_id`/`to_id` → `assets`. Direction is
+consumer/derived asset → consumed/input asset. `relation` ∈ input|anchor|child.
+
+**`selections`** — append-only active pointers per slot.
+`id, project_id, slot_owner_lineage_id, slot_role, seq, active_asset_id, set_by_action_id, created_at`
+→ `project_id` → `projects`, `active_asset_id` → `assets`,
+`set_by_action_id` → `actions`. `current_selections` exposes the latest row per
+slot.
+
+**`actions`** — agent/tool decision log.
+`id, schema_version, project_id, run_id, tool, status, params, input_asset_ids, rationale, proposal, estimated_cost_usd, actual_cost_usd, job_ids, output_asset_ids, error, created_at, updated_at`
+→ `project_id` → `projects`, `run_id` → `generation_runs`. Decision fields are
+immutable; lifecycle/cost/output/error fields may update.
 
 **`saved_assets`** — user bookmarks pointing at public assets (no byte copy).
 `user_id, source_asset_id, created_at`
@@ -66,22 +89,38 @@ bytes live in Supabase Storage (`storage_key`/`storage_bucket`); `source`/`conte
 
 ---
 
-## 3. Composition, timeline & jobs
+## 3. Storyboards, composition & jobs
 
-**`compositions`** — the planned structure of a video (beats + generation plan) for a project.
-`id, schema_version, project_id, brief_version_id, mode, status, planned_beats, generated_asset_job_ids, ready_asset_ids, narration_strategy, created_at, updated_at`
-→ `project_id` → `projects`, `brief_version_id` → `brief_versions`.
-`mode` ∈ asset_driven|prompt_only|hybrid; jsonb arrays hold planned beats / job ids / ready asset ids.
+**`storyboards`** — the first-class storyboard product object.
+`id, project_id, plan_asset_id, status, created_by_action_id, created_at, updated_at`
+→ `project_id` → `projects`, `(project_id, plan_asset_id)` → `assets` (composite,
+same-project), `created_by_action_id` → `actions`. `status` ∈ draft|generating|
+ready|reviewing|approved|archived.
 
-**`edit_graphs`** — the full EditGraphDocument (nodes/edges + timeline projection + provenance) for a project.
-`id, schema_version, project_id, brief_version_id, composition_id, document, created_at, updated_at`
-→ `project_id` → `projects`, `brief_version_id` → `brief_versions`, `composition_id` → `compositions`.
-`document` is the whole graph as jsonb (internal node ids live inside it).
+**`storyboard_scenes`** — ordered scenes in a storyboard.
+`id, project_id, storyboard_id, scene_index, title, summary, setting, mood, duration_sec, scene_asset_id, status, created_at, updated_at`
+→ `(project_id, storyboard_id)` → `storyboards` (composite chain),
+`(project_id, scene_asset_id)` → `assets`.
 
-**`timelines`** — a concrete, renderable timeline (segments + render settings) derived from a composition.
-`id, schema_version, project_id, brief_version_id, composition_id, aspect_ratio, fps, show_captions, segments, provenance, derived_from, created_by, created_at`
-→ `project_id` → `projects`, `brief_version_id` → `brief_versions`, `composition_id` → `compositions`.
-`segments` (jsonb) is what Remotion renders.
+**`storyboard_beats`** — ordered beats/shots in a scene; the **mutable head**
+of the beat. `beat_asset_id` is its immutable snapshot lineage — once set,
+semantic edits must mint a new snapshot asset and move `beat_asset_id` in the
+same write (trigger-enforced) so the dependency graph sees the change.
+`id, project_id, scene_id, beat_index, intent, visual_description, dialogue_summary, narration, duration_sec, status, beat_asset_id, created_at, updated_at`
+→ `(project_id, scene_id)` → `storyboard_scenes`, `(project_id, beat_asset_id)` → `assets`.
+
+**`storyboard_panels`** — generated or uploaded storyboard panels for a beat.
+`id, project_id, beat_id, panel_index, image_asset_id, prompt_asset_id, status, is_selected, approved_at, created_at, updated_at`
+→ `(project_id, beat_id)` → `storyboard_beats`,
+`(project_id, image_asset_id)`/`(project_id, prompt_asset_id)` → `assets`.
+At most one panel is selected per beat; `is_selected` is the single source of
+truth for panel choice (`selections` is for asset-lineage slots, not panels).
+
+**Composite/cut assets** — renderable timeline/cut structure.
+There is no `timelines` or `compositions` table in the asset graph model.
+Timeline/cut snapshots are `assets.kind = 'composite'`; future high-interaction
+timeline tracks/items should become relational tables linked to composite
+assets, following the storyboard pattern.
 
 **`jobs`** — async work units (asset ingest/generation, composition, generation, revision, export, audio).
 `id, schema_version, workspace_id, project_id, request_id, type, status, progress, input, result, error, idempotency_key, created_at, updated_at`
@@ -91,28 +130,14 @@ bytes live in Supabase Storage (`storage_key`/`storage_bucket`); `source`/`conte
 
 ## 4. Generation pipeline (live runs)
 
-A **run** is one end-to-end generation, broken into ordered **stages**, each with
-per-item work and addressable output **artifacts**. This is the progress/UI + eval
-substrate.
+A **run** is one end-to-end generation session. Progress should be projected from
+`actions`, `jobs`, storyboard rows, and assets rather than stored in legacy stage
+tables.
 
 **`generation_runs`** — one generation attempt for a project; the top-level progress aggregate.
-`id, project_id, brief_version_id, status, review_gates, review_gate, current_stage_type, progress_percent, message, error, created_at, updated_at, started_at, completed_at`
-→ `project_id` → `projects`, `brief_version_id` → `brief_versions`.
-
-**`generation_stages`** — an ordered stage within a run (brief_intake, creative_plan,
-storyboard, asset_generation, audio_generation, timeline_assembly, quality_review, export, ready).
-`id, run_id, type, label, order, status, is_review_gate, reviewed_at, progress_percent, message, started_at, completed_at, job_ids, artifact_ids, error, judgment, created_at, updated_at`
-→ `run_id` → `generation_runs`. `judgment` = inline eval verdict (jsonb).
-
-**`generation_stage_items`** — per-beat/child item of a stage (one card in the UI).
-`id, stage_id, kind, label, status, progress_percent, provider, prompt_preview, asset_id, artifact_id, retryable, error, judgment, created_at, updated_at`
-→ `stage_id` → `generation_stages`, `asset_id` → `assets`. `kind` ∈ image|video|audio|caption|timeline|export.
-
-**`generation_stage_artifacts`** — the persisted output of a stage/item (the plan, the
-assembled timeline, …), so an evaluator can read it as evidence.
-`id, run_id, stage_id, item_id, kind, content, created_at`
-→ `run_id` → `generation_runs`, `stage_id` → `generation_stages`, `item_id` → `generation_stage_items`.
-`content` = the artifact bytes/structure (jsonb).
+`id, project_id, status, progress_percent, message, error, created_at, updated_at, started_at, completed_at, budget_usd, gates`
+→ `project_id` → `projects`. `gates` is opt-in pause configuration; any v1 stage
+state stored there is a temporary compatibility bridge, not the target model.
 
 ---
 
@@ -164,15 +189,16 @@ auth.users ─(auth_id)─ users ─(owner_id)─ workspaces ─< workspace_memb
                           │                    ├─< workspace_invites
                           │ (saved_assets)     │
                           └──────────────┐     ▼
-                                         │  projects ──< brief_versions
-                                         │     │  ├──< assets >── saved_assets
-                                         │     │  ├──< compositions ──< edit_graphs
-                                         │     │  │                 └─< timelines
+                                         │  projects ──< assets >── saved_assets
+                                         │     │  ├──< asset_edges
+                                         │     │  ├──< selections/current_selections
+                                         │     │  ├──< actions
+                                         │     │  ├──< storyboards
+                                         │     │  │       └──< storyboard_scenes
+                                         │     │  │              └──< storyboard_beats
+                                         │     │  │                     └──< storyboard_panels
                                          │     │  ├──< jobs
                                          │     │  └──< generation_runs
-                                         │     │           └──< generation_stages
-                                         │     │                   └──< generation_stage_items
-                                         │     │           └──< generation_stage_artifacts
                                          ▼     ▼
                                     (publicly readable when visibility='public')
 
@@ -181,8 +207,9 @@ eval_suites ──< eval_cases                judgments ── point at either a
                                   └── judgments          OR an eval_run/case (offline)
 ```
 
-**How a generation flows:** `projects` → a `generation_runs` row → ordered
-`generation_stages` → `generation_stage_items` (per beat) → each stage persists a
-`generation_stage_artifacts` row. A `judgments` row may attach to any run/stage/item
-(inline) or to an `eval_run`/`eval_case` (offline suite). The final renderable output
-is a `timelines` row (from a `composition`/`edit_graph`), which Remotion renders.
+**How a generation flows:** `projects` → a `generation_runs` row and `actions`
+for tool decisions → relational storyboard rows for user-facing story structure
+→ `jobs` for async media work → generated `assets` linked by `asset_edges` and
+activated through `selections`. A `judgments` row may attach to a run or loose
+artifact pointer. The final renderable output is a selected `composite` asset
+or future relational timeline rows compiled for Remotion.
