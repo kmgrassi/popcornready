@@ -4,6 +4,9 @@
 > [`supabase/migrations/20260610120000_asset_graph_model.sql`](../../supabase/migrations/20260610120000_asset_graph_model.sql)
 > — an **additive migration on top of the intact, applied history** (§5: we
 > never rewrite applied migrations); this doc is the rationale record.
+> [`20260610125000_asset_graph_project_scope.sql`](../../supabase/migrations/20260610125000_asset_graph_project_scope.sql)
+> retrofits composite same-project FKs onto `asset_edges`/`selections`
+> (PR #260 review follow-up), and
 > [`20260610130000_storyboard_relational_model.sql`](../../supabase/migrations/20260610130000_storyboard_relational_model.sql)
 > amends the design with first-class storyboard tables and typed-JSONB
 > guardrails. No reset; auth users unaffected. Validated against a scratch
@@ -361,18 +364,26 @@ same child at two positions (a reused scene), hence the surrogate PK.
 create table public.asset_edges (
   id         uuid primary key default gen_random_uuid(),
   project_id uuid          not null references public.projects (id) on delete cascade,
-  from_id    uuid          not null references public.assets (id) on delete cascade,
-  -- cascade, not restrict: restrict would race the project->assets cascade
-  -- (sibling-cascade order is unspecified). The "inputs are never deleted"
-  -- invariant lives in assets_guard_delete, not in this FK.
-  to_id      uuid          not null references public.assets (id) on delete cascade,
+  from_id    uuid          not null,
+  to_id      uuid          not null,
   relation   edge_relation not null,
   role       text,
   position   integer,
   created_at timestamptz   not null default now(),
   constraint asset_edges_child_position check
     (relation <> 'child' or position is not null),
-  constraint asset_edges_no_self check (from_id <> to_id)
+  constraint asset_edges_no_self check (from_id <> to_id),
+  -- Composite FKs (added by 20260610125000): both endpoints must live in THIS
+  -- project — declarative, so the intra-project invariant holds even for
+  -- direct inserts that bypass the sync trigger (which still fires first for a
+  -- clearer error). Targets assets (project_id, id) via
+  -- assets_project_id_id_unique. Cascade, not restrict: restrict would race
+  -- the project->assets cascade (sibling-cascade order is unspecified); the
+  -- "inputs are never deleted" invariant lives in assets_guard_delete.
+  constraint asset_edges_from_fk foreign key (project_id, from_id)
+    references public.assets (project_id, id) on delete cascade,
+  constraint asset_edges_to_fk foreign key (project_id, to_id)
+    references public.assets (project_id, id) on delete cascade
 );
 create index asset_edges_from_idx    on public.asset_edges (from_id);
 create index asset_edges_to_idx      on public.asset_edges (to_id);
@@ -444,9 +455,13 @@ create table public.selections (
   slot_owner_lineage_id uuid,                 -- null = project-scoped slot
   slot_role             text        not null,
   seq                   integer     not null,
-  active_asset_id       uuid        not null references public.assets (id) on delete cascade,
+  active_asset_id       uuid        not null,
   set_by_action_id      uuid        references public.actions (id) on delete set null,
-  created_at            timestamptz not null default now()
+  created_at            timestamptz not null default now(),
+  -- Composite FK (added by 20260610125000): a slot can only activate an asset
+  -- from ITS OWN project — a selection in project A never surfaces B's asset.
+  constraint selections_active_asset_fk foreign key (project_id, active_asset_id)
+    references public.assets (project_id, id) on delete cascade
 );
 create index selections_project_idx on public.selections (project_id);
 create index selections_asset_idx   on public.selections (active_asset_id);
@@ -518,7 +533,31 @@ The asset graph still owns provenance and generated artifacts:
 - `storyboard_panels.prompt_asset_id` points at the prompt/request asset when
   that prompt is durable enough to inspect or replay.
 - `asset_edges` records prompt/reference/beat/panel/media dependencies.
-- `selections` records active asset choices, such as the selected panel or clip.
+- `selections` records asset-lineage slots (active cut, active version of a
+  lineage). **Panel selection is NOT a selections slot:**
+  `storyboard_panels.is_selected` is the single source of truth for the chosen
+  panel (one per beat via partial unique index) — one owner per fact.
+
+Two design rules make the split safe:
+
+1. **Mutable head, immutable history.** The relational row is the *working
+   tree*; the linked asset lineage is its *commit history*. Once a beat has
+   entered the graph (`beat_asset_id` set), semantic edits (`intent`,
+   `visual_description`, `dialogue_summary`, `narration`, `duration_sec`)
+   **must mint a new beat-snapshot asset (same `lineage_id`) and move
+   `beat_asset_id` in the same write** — enforced by the
+   `storyboard_beats_require_snapshot` trigger. This is what keeps the North
+   Star's blast radius computable: the snapshot changes the fingerprint, and
+   `downstream_assets()` sees the edit. Drafting before first lineage
+   (`beat_asset_id` null) stays free-form.
+2. **Same-project, declaratively.** `project_id` is denormalized onto every
+   storyboard table. Composite FKs chain child → parent on
+   `(project_id, parent_id)` and every asset link targets
+   `assets (project_id, id)`, so a storyboard can never reference another
+   project's assets and a scene can never sit under another project's
+   storyboard — the same invariant as `asset_edges`/`selections`
+   (20260610125000). It also flattens RLS to a single `owns_project(project_id)`
+   check per table instead of `exists`-joins up the tree.
 
 ```sql
 create type storyboard_status as enum
@@ -529,32 +568,41 @@ create type storyboard_item_status as enum
 create table public.storyboards (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects (id) on delete cascade,
-  plan_asset_id uuid references public.assets (id) on delete set null,
+  plan_asset_id uuid,
   status storyboard_status not null default 'draft',
-  active_version integer not null default 1,
   created_by_action_id uuid references public.actions (id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint storyboards_project_id_id_unique unique (project_id, id),
+  constraint storyboards_plan_asset_fk foreign key (project_id, plan_asset_id)
+    references public.assets (project_id, id) on delete set null (plan_asset_id)
 );
 
 create table public.storyboard_scenes (
   id uuid primary key default gen_random_uuid(),
-  storyboard_id uuid not null references public.storyboards (id) on delete cascade,
+  project_id uuid not null,
+  storyboard_id uuid not null,
   scene_index integer not null,
   title text,
   summary text,
   setting text,
   mood text,
   duration_sec double precision,
-  scene_asset_id uuid references public.assets (id) on delete set null,
+  scene_asset_id uuid,
   status storyboard_item_status not null default 'draft',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint storyboard_scenes_storyboard_fk foreign key (project_id, storyboard_id)
+    references public.storyboards (project_id, id) on delete cascade,
+  constraint storyboard_scenes_project_id_id_unique unique (project_id, id),
+  constraint storyboard_scenes_scene_asset_fk foreign key (project_id, scene_asset_id)
+    references public.assets (project_id, id) on delete set null (scene_asset_id)
 );
 
 create table public.storyboard_beats (
   id uuid primary key default gen_random_uuid(),
-  scene_id uuid not null references public.storyboard_scenes (id) on delete cascade,
+  project_id uuid not null,
+  scene_id uuid not null,
   beat_index integer not null,
   intent text not null default '',
   visual_description text,
@@ -562,27 +610,42 @@ create table public.storyboard_beats (
   narration text,
   duration_sec double precision,
   status storyboard_item_status not null default 'draft',
-  beat_asset_id uuid references public.assets (id) on delete set null,
+  beat_asset_id uuid,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint storyboard_beats_scene_fk foreign key (project_id, scene_id)
+    references public.storyboard_scenes (project_id, id) on delete cascade,
+  constraint storyboard_beats_project_id_id_unique unique (project_id, id),
+  constraint storyboard_beats_asset_fk foreign key (project_id, beat_asset_id)
+    references public.assets (project_id, id) on delete set null (beat_asset_id)
 );
+-- + storyboard_beats_require_snapshot trigger (rule 1 above)
 
 create table public.storyboard_panels (
   id uuid primary key default gen_random_uuid(),
-  beat_id uuid not null references public.storyboard_beats (id) on delete cascade,
+  project_id uuid not null,
+  beat_id uuid not null,
   panel_index integer not null default 0,
-  image_asset_id uuid references public.assets (id) on delete set null,
-  prompt_asset_id uuid references public.assets (id) on delete set null,
+  image_asset_id uuid,
+  prompt_asset_id uuid,
   status storyboard_item_status not null default 'queued',
   is_selected boolean not null default false,
   approved_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint storyboard_panels_beat_fk foreign key (project_id, beat_id)
+    references public.storyboard_beats (project_id, id) on delete cascade,
+  constraint storyboard_panels_image_asset_fk foreign key (project_id, image_asset_id)
+    references public.assets (project_id, id) on delete set null (image_asset_id),
+  constraint storyboard_panels_prompt_asset_fk foreign key (project_id, prompt_asset_id)
+    references public.assets (project_id, id) on delete set null (prompt_asset_id)
 );
 ```
 
 Indexes enforce scene/beat/panel order and at most one selected panel per beat.
-RLS follows the owning `project_id` through `storyboards`.
+RLS is a flat `owns_project(project_id)` / `project_is_public(project_id)`
+check on every table. (`on delete set null (column)` is the PG15 column-list
+form — only the asset pointer is nulled, never `project_id`.)
 
 ### 3.6 `generation_runs` — slimmed to a session/budget grouping
 

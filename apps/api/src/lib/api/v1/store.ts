@@ -352,12 +352,29 @@ interface DataAssetRow {
   updated_at: string;
 }
 
+// Typed-JSONB guardrail (assets_content_schema_check / assets_params_schema_check):
+// jsonb document payloads must carry a schema marker. Stamp it on write, strip
+// it when projecting the payload back out as a domain object.
+const CONTENT_SCHEMA_KEY = "schema_version";
+
+function markedContent(kind: "brief" | "plan", content: unknown): Record<string, unknown> {
+  return { [CONTENT_SCHEMA_KEY]: `${kind}.v1`, ...(content as Record<string, unknown>) };
+}
+
+function unmarkedContent<T>(content: unknown): T {
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const { [CONTENT_SCHEMA_KEY]: _schema, ...rest } = content as Record<string, unknown>;
+    return rest as T;
+  }
+  return content as T;
+}
+
 function mapBriefVersion(row: DataAssetRow): V1BriefVersion {
   return {
     id: row.id,
     schemaVersion: SCHEMA_VERSIONS.briefVersion,
     projectId: row.project_id,
-    brief: row.content as VideoBrief,
+    brief: unmarkedContent<VideoBrief>(row.content),
     createdAt: iso(row.created_at),
   };
 }
@@ -434,9 +451,9 @@ async function projectProjection(
     selectedDataAsset(db, projectId, "plan", "plan"),
   ]);
   return {
-    brief: (briefAsset?.content as VideoBrief | undefined) ?? null,
+    brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
     currentBriefVersionId: briefAsset?.id ?? null,
-    plan: (planAsset?.content as EditPlan | undefined) ?? null,
+    plan: planAsset ? unmarkedContent<EditPlan>(planAsset.content) : null,
   };
 }
 
@@ -484,7 +501,7 @@ async function insertDataAsset(input: {
     media: "data",
     status: "ready",
     role: input.role,
-    content: input.content,
+    content: markedContent(input.kind, input.content),
     visibility,
     created_at: now,
     updated_at: now,
@@ -603,7 +620,7 @@ interface AssetRow {
   status: "ready" | "pending";
   filename: string;
   content: unknown | null;
-  params: { provenance?: GeneratedAssetProvenance } | null;
+  params: { schema_version?: string; provenance?: GeneratedAssetProvenance } | null;
   remote_url: string | null;
   storage_key: string | null;
   source: AgentAssetSource;
@@ -653,7 +670,9 @@ function assetToRow(asset: V1Asset): AssetRow {
     status: asset.status,
     filename: asset.filename,
     content: null,
-    params: asset.provenance ? { provenance: asset.provenance } : null,
+    params: asset.provenance
+      ? { schema_version: "asset_params.v1", provenance: asset.provenance }
+      : null,
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
     source: asset.source,

@@ -92,23 +92,29 @@ immutable; lifecycle/cost/output/error fields may update.
 ## 3. Storyboards, composition & jobs
 
 **`storyboards`** — the first-class storyboard product object.
-`id, project_id, plan_asset_id, status, active_version, created_by_action_id, created_at, updated_at`
-→ `project_id` → `projects`, `plan_asset_id` → `assets`,
-`created_by_action_id` → `actions`. `status` ∈ draft|generating|ready|reviewing|
-approved|archived.
+`id, project_id, plan_asset_id, status, created_by_action_id, created_at, updated_at`
+→ `project_id` → `projects`, `(project_id, plan_asset_id)` → `assets` (composite,
+same-project), `created_by_action_id` → `actions`. `status` ∈ draft|generating|
+ready|reviewing|approved|archived.
 
 **`storyboard_scenes`** — ordered scenes in a storyboard.
-`id, storyboard_id, scene_index, title, summary, setting, mood, duration_sec, scene_asset_id, status, created_at, updated_at`
-→ `storyboard_id` → `storyboards`, `scene_asset_id` → `assets`.
+`id, project_id, storyboard_id, scene_index, title, summary, setting, mood, duration_sec, scene_asset_id, status, created_at, updated_at`
+→ `(project_id, storyboard_id)` → `storyboards` (composite chain),
+`(project_id, scene_asset_id)` → `assets`.
 
-**`storyboard_beats`** — ordered beats/shots in a scene.
-`id, scene_id, beat_index, intent, visual_description, dialogue_summary, narration, duration_sec, status, beat_asset_id, created_at, updated_at`
-→ `scene_id` → `storyboard_scenes`, `beat_asset_id` → `assets`.
+**`storyboard_beats`** — ordered beats/shots in a scene; the **mutable head**
+of the beat. `beat_asset_id` is its immutable snapshot lineage — once set,
+semantic edits must mint a new snapshot asset and move `beat_asset_id` in the
+same write (trigger-enforced) so the dependency graph sees the change.
+`id, project_id, scene_id, beat_index, intent, visual_description, dialogue_summary, narration, duration_sec, status, beat_asset_id, created_at, updated_at`
+→ `(project_id, scene_id)` → `storyboard_scenes`, `(project_id, beat_asset_id)` → `assets`.
 
 **`storyboard_panels`** — generated or uploaded storyboard panels for a beat.
-`id, beat_id, panel_index, image_asset_id, prompt_asset_id, status, is_selected, approved_at, created_at, updated_at`
-→ `beat_id` → `storyboard_beats`, `image_asset_id`/`prompt_asset_id` → `assets`.
-At most one panel is selected per beat.
+`id, project_id, beat_id, panel_index, image_asset_id, prompt_asset_id, status, is_selected, approved_at, created_at, updated_at`
+→ `(project_id, beat_id)` → `storyboard_beats`,
+`(project_id, image_asset_id)`/`(project_id, prompt_asset_id)` → `assets`.
+At most one panel is selected per beat; `is_selected` is the single source of
+truth for panel choice (`selections` is for asset-lineage slots, not panels).
 
 **Composite/cut assets** — renderable timeline/cut structure.
 There is no `timelines` or `compositions` table in the asset graph model.
