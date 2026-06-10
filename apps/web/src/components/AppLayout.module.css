@@ -143,6 +143,15 @@
   gap: var(--space-1);
 }
 
+.footerLabel {
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* Content column */
 .content {
   display: flex;
@@ -156,47 +165,13 @@
   z-index: 15;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-4);
   min-height: 58px;
   padding: var(--space-3) var(--space-6);
   border-bottom: 1px solid var(--border);
   background: var(--nav-bg);
   backdrop-filter: blur(14px);
-}
-
-.topnav {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.topLink {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: var(--text-md);
-  font-weight: 700;
-  text-decoration: none;
-  transition:
-    background var(--transition),
-    color var(--transition);
-}
-
-.topLink:hover {
-  background: var(--surface-2);
-  color: var(--text-strong);
-}
-
-.topLink:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-
-.topLinkActive {
-  background: var(--accent-soft);
-  color: var(--text-strong);
 }
 
 .account {
@@ -225,11 +200,7 @@
   color: var(--danger-text);
 }
 
-.accountMenu {
-  position: relative;
-}
-
-.accountMenu summary {
+.accountLink {
   display: inline-flex;
   align-items: center;
   max-width: 200px;
@@ -242,63 +213,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-  list-style: none;
+  text-decoration: none;
 }
 
-.accountMenu summary::-webkit-details-marker {
-  display: none;
-}
-
-.accountMenu summary:hover {
+.accountLink:hover {
   background: var(--surface-2);
 }
 
-.accountMenu summary:focus-visible {
+.accountLink:focus-visible {
   outline: none;
   box-shadow: var(--ring);
-}
-
-.accountPanel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + var(--space-2));
-  z-index: 30;
-  display: grid;
-  gap: var(--space-3);
-  min-width: 220px;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-}
-
-.accountWorkspace {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Settings rows inside the account menu — e.g. the theme switcher. */
-.accountSetting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border);
-}
-
-.accountSettingLabel {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 /* The route content scroll region — each page owns its own <main>. */
