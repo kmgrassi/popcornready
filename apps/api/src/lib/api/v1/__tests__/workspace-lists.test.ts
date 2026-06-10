@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getWorkspaceDashboardSummary,
   listWorkspaceGenerationRuns,
   listWorkspaceOutputs,
+  type GetWorkspaceDashboardSummaryDeps,
   type ListWorkspaceGenerationRunsDeps,
   type ListWorkspaceOutputsDeps,
 } from "../store";
@@ -220,4 +222,83 @@ test("listWorkspaceOutputs scopes by projectId and tolerates a null url", async 
   assert.equal(items.length, 1);
   assert.equal(items[0].artifactId, "a1");
   assert.equal(items[0].url, undefined);
+});
+
+test("getWorkspaceDashboardSummary returns launchpad counts and capped newest activity", async () => {
+  const runs = [
+    makeRun("p1", {
+      runId: "r1",
+      status: "running",
+      currentStageType: "asset_generation",
+      progressPercent: 40,
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r2",
+      status: "queued",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    }),
+    makeRun("p2", {
+      runId: "r3",
+      status: "succeeded",
+      updatedAt: "2026-01-05T00:00:00.000Z",
+    }),
+  ];
+  const artifacts = [
+    makeArtifact("p1", { id: "a1", createdAt: "2026-01-01T00:00:00.000Z" }),
+    makeArtifact("p2", { id: "a2", createdAt: "2026-01-02T00:00:00.000Z" }),
+  ];
+  const deps: GetWorkspaceDashboardSummaryDeps = {
+    listProjects: async () => [
+      { id: "p1", name: "Alpha" },
+      { id: "p2", name: "Beta" },
+    ],
+    runStore: runStoreFrom(runs),
+    artifactStore: artifactStoreFrom(artifacts),
+  };
+
+  const summary = await getWorkspaceDashboardSummary("ws1", deps);
+
+  assert.equal(summary.schemaVersion, "dashboard.v1");
+  assert.deepEqual(summary.counts, {
+    projects: 2,
+    activeRuns: 2,
+    outputs: 2,
+  });
+  assert.deepEqual(
+    summary.activeRuns.map((run) => run.runId),
+    ["r2", "r1"]
+  );
+  assert.equal(summary.activeRuns[1].projectName, "Alpha");
+  assert.equal(summary.activeRuns[1].currentStageType, "asset_generation");
+  assert.equal(summary.activeRuns[1].progressPercent, 40);
+  assert.deepEqual(
+    summary.recentOutputs.map((output) => output.artifactId),
+    ["a2", "a1"]
+  );
+});
+
+test("getWorkspaceDashboardSummary includes reviewGate for gated runs", async () => {
+  const runs = [
+    makeRun("p1", {
+      runId: "r1",
+      status: "running",
+      reviewGate: {
+        stageType: "quality_review",
+        stageId: "stage_1",
+        state: "awaiting_review",
+        enteredAt: "2026-01-03T00:00:00.000Z",
+      },
+    }),
+  ];
+  const deps: GetWorkspaceDashboardSummaryDeps = {
+    listProjects: async () => [{ id: "p1", name: "Alpha" }],
+    runStore: runStoreFrom(runs),
+    artifactStore: artifactStoreFrom([]),
+  };
+
+  const summary = await getWorkspaceDashboardSummary("ws1", deps);
+
+  assert.equal(summary.activeRuns.length, 1);
+  assert.equal(summary.activeRuns[0].reviewGate?.stageType, "quality_review");
 });

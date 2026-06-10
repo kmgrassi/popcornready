@@ -25,6 +25,10 @@ import { AsyncLocalStorage } from "async_hooks";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { EditPlan } from "@popcorn/shared/types";
+import {
+  DASHBOARD_SCHEMA_VERSION,
+  type DashboardSummary,
+} from "@popcorn/shared/v1/dashboard";
 import { notFound } from "./errors";
 import { GeneratedAssetProvenance } from "./provenance";
 import { AssetSemanticAnalysis } from "../../edit-graph/types";
@@ -1105,6 +1109,98 @@ export async function listWorkspaceOutputs(
     }),
     nextCursor: paged.nextCursor,
   };
+}
+
+export interface GetWorkspaceDashboardSummaryDeps {
+  listProjects: (workspaceId: string) => Promise<WorkspaceProjectRef[]>;
+  runStore: GenerationRunsStore;
+  artifactStore: Pick<AgentApiStore, "listArtifactsForProject">;
+}
+
+export async function getWorkspaceDashboardSummary(
+  workspaceId: string,
+  deps: GetWorkspaceDashboardSummaryDeps = {
+    listProjects: listWorkspaceProjectRefs,
+    runStore: getGenerationRunStore(),
+    artifactStore: agentApiStore,
+  }
+): Promise<DashboardSummary> {
+  const projects = await deps.listProjects(workspaceId);
+
+  const [perProjectRuns, perProjectOutputs] = await Promise.all([
+    Promise.all(
+      projects.map(async (project) => {
+        const runs = await deps.runStore.listRunsForProject(project.id);
+        return runs.map((run) => ({ ...run, projectName: project.name }));
+      })
+    ),
+    Promise.all(
+      projects.map(async (project) => {
+        const artifacts = await deps.artifactStore.listArtifactsForProject(
+          project.id
+        );
+        return artifacts.map<WorkspaceOutputSummary>((artifact) => ({
+          artifactId: artifact.id,
+          projectId: project.id,
+          projectName: project.name,
+          timelineId: artifact.timelineId,
+          url: artifact.url ?? undefined,
+          durationSec: artifact.durationSec,
+          format: artifact.renderPlan?.format,
+          createdAt: artifact.createdAt,
+        }));
+      })
+    ),
+  ]);
+
+  const runs = perProjectRuns.flat();
+  const activeRuns = runs.filter((run) => isActiveRunStatus(run.status));
+  const outputs = perProjectOutputs.flat();
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    counts: {
+      projects: projects.length,
+      activeRuns: activeRuns.length,
+      outputs: outputs.length,
+    },
+    activeRuns: sortNewest(
+      activeRuns.map((run) => ({
+        runId: run.runId,
+        projectId: run.projectId,
+        projectName: run.projectName,
+        status: run.status,
+        reviewGate: run.reviewGate ?? null,
+        currentStageType: run.currentStageType,
+        progressPercent: run.progressPercent,
+        updatedAt: run.updatedAt,
+      })),
+      (run) => run.updatedAt,
+      (run) => run.runId
+    ).slice(0, 5),
+    recentOutputs: sortNewest(
+      outputs,
+      (output) => output.createdAt,
+      (output) => output.artifactId
+    ).slice(0, 5),
+  };
+}
+
+function isActiveRunStatus(status: GenerationRunStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+function sortNewest<T>(
+  items: T[],
+  dateOf: (item: T) => string,
+  idOf: (item: T) => string
+): T[] {
+  return [...items].sort((a, b) => {
+    const aDate = dateOf(a);
+    const bDate = dateOf(b);
+    if (aDate === bDate) return idOf(a) < idOf(b) ? 1 : -1;
+    return aDate < bDate ? 1 : -1;
+  });
 }
 
 export async function listPublicAssets(

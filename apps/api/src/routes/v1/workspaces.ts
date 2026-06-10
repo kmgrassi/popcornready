@@ -4,6 +4,7 @@ import { ApiError } from "@/core/errors";
 import type { AssetKind, GenerationRunStatus } from "@popcorn/shared/v1/types";
 import { parsePagination } from "@/lib/api/v1/schemas";
 import {
+  getWorkspaceDashboardSummary,
   listWorkspaceAssets,
   listWorkspaceGenerationRuns,
   listWorkspaceOutputs,
@@ -39,6 +40,26 @@ function requireOwnWorkspace(
   }
   return workspaceId;
 }
+
+// One-request summary for the guided Home launchpad. Detailed lists stay on the
+// sibling collection routes below.
+workspacesRouter.get(
+  "/workspaces/:workspaceId/dashboard",
+  route(async ({ auth }, params) => {
+    const workspaceId = requireOwnWorkspace(
+      params.workspaceId,
+      auth.workspaceId,
+      "dashboard"
+    );
+
+    const summary = await getWorkspaceDashboardSummary(workspaceId);
+    return {
+      status: 200,
+      headers: { "Cache-Control": "no-store" },
+      body: { summary },
+    };
+  })
+);
 
 // Cross-project asset list for the dashboard. Scoped to the caller's own
 // workspace.
