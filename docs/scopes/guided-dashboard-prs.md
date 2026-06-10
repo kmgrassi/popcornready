@@ -115,6 +115,12 @@ recent-outputs strip:
 | Run succeeded recently | "Review your rough cut" → Studio `review` state |
 | Otherwise | "New video" CTA + recent outputs |
 
+**Precedence (decided): urgency order.** When several states coexist, the hero
+shows the most blocked/most expensive thing first:
+**waiting gate > run in flight > unreviewed finished cut > draft in progress >
+new video.** The losers render as small secondary chips under the hero (e.g.
+"You also have a draft — continue"), never as a second hero.
+
 The hero is the dashboard. Counts, grids, and filters are L3 (the Library).
 
 ### 2. Navigation diet: 3 zones, no topnav
@@ -129,12 +135,23 @@ Sidebar reduces to **Create · Library · Settings** (logo → Home):
   workspace, account, sign-out, and workspace-level generation defaults as
   they appear.
 
-The `TOPNAV` bar is **deleted**. Storyboard and Evals move into an
-**Admin/dev section** (visible per the existing admin flag pattern) — open
-decision below if either is meant to be user-facing. `/uploads`, `/templates`,
-`/brand` lose their top-level routes: uploads surface inside the wizard's
-Footage step and as a Library filter; Templates/Brand Kit return as wizard
-affordances when they're real features, not as empty nav targets.
+The `TOPNAV` bar is **deleted**. **Storyboard and Evals are user-facing
+(decided)** — but neither earns a top-level rail slot; they get guided homes
+instead:
+
+- **Storyboard is project-scoped.** Entry points: the project's card/row in
+  the Library and the wizard's Review step. The
+  `/projects/:projectId/storyboard` route stays; the bare `/storyboard` route
+  redirects to the Library (pick a project first).
+- **Evals becomes a Library tab** (workspace-level quality view), alongside
+  the collections.
+- Both register palette commands.
+
+`/uploads`, `/templates`, `/brand` **stay routed as stubs (decided)** but
+leave primary nav: reachable via the palette and a quiet links group on the
+Settings page. They keep their IA slot for upcoming work without spending
+sidebar attention; uploads additionally surface inside the wizard's Footage
+step and as a Library assets filter.
 
 ### 3. One Library
 
@@ -148,11 +165,16 @@ survive. One sidebar item replaces four; nothing is lost.
 
 "One action at a time" requires the app to remember which action you were on:
 
-- **Draft persistence.** `BriefDraft` + active step serialize to versioned
-  `localStorage` on every `update()`; `/studio` rehydrates on mount. A stale
-  or version-mismatched draft is discarded silently (clean break, no
-  migration shims). Server-side drafts are a later upgrade behind the same
-  interface.
+- **Draft persistence — server-side from day one (decided).** `BriefDraft` +
+  active step persist to the API on `update()` (debounced) and rehydrate on
+  mount, so drafts follow the user across devices and browsers. A stale or
+  version-mismatched draft is discarded silently (clean break, no migration
+  shims). Storage: drafts exist *before* a project does (the wizard only
+  creates the project at Generate), so they cannot hang off `projects` — a
+  workspace-scoped **`studio_drafts`** table (one active draft per user per
+  workspace, upserted; versioned `jsonb` payload) on Supabase, RLS keyed on
+  `current_app_user_id()` per
+  [docs/supabase-identity-and-rls.md](../supabase-identity-and-rls.md).
 - **Active-run rehydration.** On mount, `useStudioFlow` checks for an
   in-flight run (persisted `projectId`/`runId`, verified via
   `getGenerationRun`) and enters `generating` directly. `RunProgressPage`
@@ -182,9 +204,10 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
   should the user do next."
 - **Draft persistence interface** — `loadDraft() / saveDraft(draft, step) /
   clearDraft()` in `apps/web/src/lib/draftStore.ts`, versioned payload
-  (`{ v: 1, draft, step, projectId?, runId? }`). `useStudioFlow` consumes the
-  interface; the backing store (localStorage now, server later) is swappable
-  without touching the wizard.
+  (`{ v: 1, draft, step, projectId?, runId? }`), backed by
+  `GET/PUT/DELETE /api/v1/workspaces/:workspaceId/studio-draft`.
+  `useStudioFlow` consumes only the interface; saves are debounced (~1s) and
+  last-write-wins (single active draft per user per workspace in v1).
 - **Palette command registration** — per repo convention, **no central
   `index.ts` aggregator**. Each feature owns a `commands.ts`
   (`studio/commands.ts`, `library/commands.ts`, …) exporting
@@ -209,18 +232,32 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
 - **Done when:** one request returns everything the Home hero + outputs strip
   need; works in `AUTH_MODE=local`.
 
-### PR 2 — Studio continuity: draft persistence + run rehydration *(independent; biggest UX win)*
+### PR 2a — API: server-side studio drafts *(backend-only; independent)*
+- **Files:** new Supabase migration (`studio_drafts` table + RLS), new
+  `apps/api/src/routes/v1/studio-drafts.ts` (mounted via the protected-routes
+  registration file, per repo convention — no catch-all index), shared types
+  in `packages/shared/src/v1/`.
+- **Work:** `GET/PUT/DELETE /api/v1/workspaces/:workspaceId/studio-draft` —
+  one active draft per user per workspace, upsert semantics, versioned
+  `jsonb` payload, RLS keyed on `current_app_user_id()` (read
+  [docs/supabase-identity-and-rls.md](../supabase-identity-and-rls.md)
+  first). Unique migration timestamp (parallel-agent collision gotcha).
+- **Done when:** a draft round-trips for the authed user and is invisible to
+  other users; works in `AUTH_MODE=local`.
+
+### PR 2b — Studio continuity: draft persistence + run rehydration *(depends on PR 2a; biggest UX win)*
 - **Files:** new `apps/web/src/lib/draftStore.ts`;
-  `components/studio/useStudioFlow.ts` (persist on `update()`/
+  `components/studio/useStudioFlow.ts` (debounced persist on `update()`/
   `startGeneration()`, rehydrate on mount, clear on export/abandon);
   `StudioShell.tsx` (skip the empty state when a draft or active run exists).
-- **Work:** decision 4. Refreshing mid-brief restores the draft and step;
-  refreshing mid-generation lands back in `generating` with the checklist
-  live; a succeeded-but-unreviewed run lands in `review`.
-- **Done when:** kill the tab at any wizard point, reopen `/studio`, and
-  you're where you left off — no `RunProgressPage` URL needed.
+- **Work:** decision 4. Refreshing mid-brief restores the draft and step —
+  on any device; refreshing mid-generation lands back in `generating` with
+  the checklist live; a succeeded-but-unreviewed run lands in `review`.
+- **Done when:** kill the tab at any wizard point, reopen `/studio` (even in
+  another browser), and you're where you left off — no `RunProgressPage` URL
+  needed.
 
-### PR 3 — Home launchpad *(depends on PR 1; PR 2 enables `resume_draft`)*
+### PR 3 — Home launchpad *(depends on PR 1; PR 2a/2b enable `resume_draft`)*
 - **Files:** new `apps/web/src/routes/HomePage… → routes/LaunchpadPage.tsx`
   replacing the `/dashboard` use of `DashboardPlaceholderPage`; new
   `lib/nextAction.ts`; new `components/home/HeroCard.tsx`,
@@ -238,13 +275,15 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
   minimal `routes/SettingsPage.tsx` (replaces `WorkspaceStubPage` for
   `/settings`); delete `TOPNAV`.
 - **Work:** decision 2. Sidebar → Create, Library, Settings (+ admin section
-  housing Storyboard/Evals/Admin per the admin flag). Remove `/uploads`,
-  `/templates`, `/brand` from routes/nav (redirect to `/library` /`/studio`
-  as appropriate); Settings page gets theme + workspace + account + sign-out
-  (folding in the account-menu items). Delete dead placeholder pages.
+  housing Admin/AdminEvals per the existing flag). `/uploads`, `/templates`,
+  `/brand` **keep their routes** but leave primary nav (linked from a quiet
+  Settings group + palette). Bare `/storyboard` redirects to the Library;
+  the project-scoped storyboard route is untouched. Settings page gets theme
+  + workspace + account + sign-out (folding in the account-menu items).
+  Delete dead placeholder pages and `TOPNAV`.
 - **Done when:** an authenticated user sees exactly 3 nav items (+ admin when
-  flagged); no duplicate Studio links; every removed destination either
-  redirects or is reachable from Library/Studio.
+  flagged); no duplicate Studio links; every demoted destination is still
+  routable and reachable from Settings or the palette.
 
 ### PR 5 — Library unification *(pairs with PR 4; can land either order behind redirects)*
 - **Files:** new `routes/LibraryPage.tsx` (tab shell); reuse
@@ -255,9 +294,11 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
 - **Work:** decision 3. Tab state in the URL; filters/pagination/empty states
   unchanged; the `/projects` placeholder is replaced by a real projects tab
   (cards: name, derived status, last activity — per dashboard-ui.md's
-  Projects view).
-- **Done when:** one sidebar item reaches all four collections; old URLs
-  redirect; nothing previously listable is lost.
+  Projects view, **with a Storyboard entry point per project card**). Add an
+  **Evals tab** wrapping the existing `EvalsPage` (`/evals` redirects to it).
+- **Done when:** one sidebar item reaches all collections plus Evals; old
+  URLs redirect; a project's storyboard is one click from its card; nothing
+  previously listable is lost.
 
 ### PR 6 — Command palette *(depends on PR 4's final nav set; consumes PR 3's `nextAction`)*
 - **Files:** new `components/palette/Palette.tsx`, `registry.ts`; per-feature
@@ -282,17 +323,18 @@ on existing primitives (a filtered list in a dialog) — no new dependency.
 ## Dependency graph & merge order
 
 ```
-PR 1 (API summary) ──► PR 3 (Home launchpad) ──┐
-PR 2 (continuity) ───► (enables resume_draft) ─┤
-                                               ├─► PR 6 (palette) ─► PR 7 (audit)
-PR 4 (nav diet) ──┬───► (final nav set) ───────┘
+PR 1 (API summary) ─────────► PR 3 (Home launchpad) ──┐
+PR 2a (API drafts) ─► PR 2b (continuity) ─► (resume) ─┤
+                                                      ├─► PR 6 (palette) ─► PR 7 (audit)
+PR 4 (nav diet) ──┬───► (final nav set) ──────────────┘
 PR 5 (library) ───┘   (4 ↔ 5 either order; both touch App.tsx routes)
 ```
 
-- **Start immediately, in parallel:** PR 1 (backend), PR 2 (wizard-internal),
-  PR 4 (chrome). PR 5 right behind PR 4 (or before it — redirects make the
-  order safe).
-- **Then:** PR 3 once PR 1 lands; PR 6 once the nav set is final; PR 7 last.
+- **Start immediately, in parallel:** PR 1 + PR 2a (backend, different
+  files), PR 4 (chrome). PR 5 right behind PR 4 (or before it — redirects
+  make the order safe).
+- **Then:** PR 2b once 2a lands; PR 3 once PR 1 lands; PR 6 once the nav set
+  is final; PR 7 last.
 - **Cross-plan:** finishing the wizard's Footage/Review/Export steps
   (studio-redesign-prs.md PRs 3/6/7) proceeds in parallel and shares no files
   with this plan except `useStudioFlow.ts` (see hotspots).
@@ -312,14 +354,20 @@ PR 5 (library) ───┘   (4 ↔ 5 either order; both touch App.tsx routes)
 
 ## Risks / open decisions
 
-- **Storyboard and Evals: user-facing or dev-only?** This plan assumes
-  dev/admin (they move behind the admin flag). If Storyboard is meant for
-  end users, it becomes a Library tab or a wizard affordance instead —
-  decide before PR 4.
-- **Draft persistence scope.** localStorage is per-device; a user switching
-  devices loses the draft. Acceptable for now; the `draftStore` interface is
-  the seam for a later server-backed upgrade (likely a `draft` field on
-  project or a workspace-scoped store).
+_Resolved during scoping (2026-06-10, with product):_ **Storyboard and Evals
+are user-facing** — Storyboard stays project-scoped (entered from project
+cards + the Review step), Evals becomes a Library tab; neither gets a rail
+slot. **Drafts are server-side from day one** (`studio_drafts`, PR 2a).
+**Templates/Brand Kit/Uploads keep their stub routes** but leave primary nav
+(Settings links + palette). **Hero precedence is urgency order** (gate > run >
+unreviewed cut > draft > new), with losers as secondary chips.
+
+- **Single-draft limit.** v1 allows one active draft per user per workspace;
+  starting a new video with a draft pending prompts replace-or-resume. If
+  multi-draft becomes a need, the table already supports it (drop the unique
+  constraint) but the Home hero and `/studio` rehydration need a picker.
+- **Draft write conflicts.** Last-write-wins across devices is accepted for
+  v1; revisit if simultaneous-edit complaints appear.
 - **Library: one page vs. four.** Tabs-on-one-route is chosen for nav
   quietness; if tab bodies grow heavy, code-split per tab rather than
   re-promoting routes to the sidebar.
@@ -335,11 +383,12 @@ PR 5 (library) ───┘   (4 ↔ 5 either order; both touch App.tsx routes)
 
 | Criterion | PR(s) |
 |---|---|
-| Login lands on a single, correct "do this next" action | PR 1, 3 |
-| Refresh/return resumes exactly where the user left off | PR 2 |
+| Login lands on a single, correct "do this next" action (urgency order) | PR 1, 3 |
+| Refresh/return resumes exactly where the user left off — on any device | PR 2a, 2b |
 | A run in flight is visible from Home and one click from its live status | PR 1, 3 |
 | Sidebar shows ≤ 3 primary destinations; no duplicate nav | PR 4 |
-| All collections reachable from one Library item; old URLs redirect | PR 5 |
+| All collections + Evals reachable from one Library item; old URLs redirect | PR 5 |
+| Storyboard one click from its project; Evals/stub pages findable, not loud | PR 4, 5, 6 |
 | Settings is a real page; theme/account config lives there | PR 4 |
 | Every config option ≤ 2 interactions from where it's relevant | PR 7 (audit; mostly true today via L2 disclosures) |
 | Every route/action/option findable by name via ⌘K | PR 6, 7 |
