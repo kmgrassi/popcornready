@@ -502,8 +502,8 @@ async function swapIndex(input: {
   rowId: string;
   fromIndex: number;
   toIndex: number;
-}): Promise<void> {
-  if (input.fromIndex === input.toIndex) return;
+}): Promise<boolean> {
+  if (input.fromIndex === input.toIndex) return true;
 
   const occupantResult = await input.db
     .from(input.table)
@@ -512,11 +512,11 @@ async function swapIndex(input: {
     .eq(input.parentColumn, input.parentId)
     .eq(input.indexColumn, input.toIndex)
     .maybeSingle();
-  if (isMissingRow(occupantResult.error) || !occupantResult.data) return;
+  if (isMissingRow(occupantResult.error) || !occupantResult.data) return false;
   throwOnError(occupantResult.error, `swapIndex ${input.table} lookup`);
 
   const occupantId = (occupantResult.data as { id: string }).id;
-  if (occupantId === input.rowId) return;
+  if (occupantId === input.rowId) return true;
 
   const tempIndex = Math.max(input.fromIndex, input.toIndex) + 1_000_000;
   for (const [rowId, index] of [
@@ -531,6 +531,7 @@ async function swapIndex(input: {
       .eq("id", rowId);
     throwOnError(error, `swapIndex ${input.table}`);
   }
+  return true;
 }
 
 async function setSelectedPanel(
@@ -780,7 +781,7 @@ export async function updateScene(input: {
   if (input.data.status !== undefined) updates.status = input.data.status;
 
   if (input.data.sceneIndex !== undefined) {
-    await swapIndex({
+    const swapped = await swapIndex({
       db,
       table: "storyboard_scenes",
       parentColumn: "storyboard_id",
@@ -791,7 +792,7 @@ export async function updateScene(input: {
       fromIndex: existing.scene_index,
       toIndex: input.data.sceneIndex,
     });
-    delete updates.scene_index;
+    if (swapped) delete updates.scene_index;
   }
 
   if (Object.keys(updates).length === 0) {
@@ -940,7 +941,7 @@ export async function updateBeat(input: {
   }
 
   if (input.data.beatIndex !== undefined) {
-    await swapIndex({
+    const swapped = await swapIndex({
       db,
       table: "storyboard_beats",
       parentColumn: "scene_id",
@@ -951,7 +952,7 @@ export async function updateBeat(input: {
       fromIndex: existing.beat_index,
       toIndex: input.data.beatIndex,
     });
-    delete updates.beat_index;
+    if (swapped) delete updates.beat_index;
   }
 
   if (Object.keys(updates).length === 0) {
@@ -1075,7 +1076,7 @@ export async function updatePanel(input: {
   if (input.data.approvedAt !== undefined) updates.approved_at = input.data.approvedAt;
 
   if (input.data.panelIndex !== undefined) {
-    await swapIndex({
+    const swapped = await swapIndex({
       db,
       table: "storyboard_panels",
       parentColumn: "beat_id",
@@ -1086,7 +1087,7 @@ export async function updatePanel(input: {
       fromIndex: existing.panel_index,
       toIndex: input.data.panelIndex,
     });
-    delete updates.panel_index;
+    if (swapped) delete updates.panel_index;
   }
   if (input.data.isSelected !== undefined) {
     await setSelectedPanel(
