@@ -65,8 +65,10 @@ export type DashboardGenerationRun = GenerationRun & {
   projectName: string;
 };
 
-export type DashboardGenerationRunsResponse =
-  DashboardListResponse<DashboardGenerationRun>;
+export interface DashboardGenerationRunsResponse {
+  runs: DashboardGenerationRun[];
+  pagination: DashboardListPagination;
+}
 
 export type DashboardAssetSource = V1Asset["source"];
 
@@ -86,7 +88,10 @@ export interface DashboardAssetItem {
   updatedAt: string;
 }
 
-export type DashboardAssetsResponse = DashboardListResponse<DashboardAssetItem>;
+export interface DashboardAssetsResponse {
+  assets: DashboardAssetItem[];
+  pagination: DashboardListPagination;
+}
 
 export interface DashboardOutputItem extends DashboardRecentOutput {
   jobId?: string;
@@ -94,7 +99,10 @@ export interface DashboardOutputItem extends DashboardRecentOutput {
   updatedAt?: string;
 }
 
-export type DashboardOutputsResponse = DashboardListResponse<DashboardOutputItem>;
+export interface DashboardOutputsResponse {
+  outputs: DashboardOutputItem[];
+  pagination: DashboardListPagination;
+}
 
 export interface DashboardPaginationParams {
   limit?: number;

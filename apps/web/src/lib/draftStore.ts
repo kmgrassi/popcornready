@@ -1,5 +1,12 @@
 import { apiRequest, v1Api } from "./api-client";
 import type { BriefDraft, StudioStep } from "../components/studio/useStudioFlow";
+import type {
+  CreateStudioDraftRequest,
+  StudioDraftListResponse,
+  StudioDraftPayload as WireStudioDraftPayload,
+  StudioDraftResponse,
+  UpdateStudioDraftRequest,
+} from "@popcorn/shared/v1/studio-drafts";
 
 export const STUDIO_DRAFT_PAYLOAD_VERSION = 1;
 
@@ -49,14 +56,6 @@ const DEFAULT_BRIEF_DRAFT: BriefDraft = {
   reviewGates: [],
 };
 
-interface DraftEnvelope {
-  draft: unknown;
-}
-
-interface DraftListEnvelope {
-  drafts: unknown[];
-}
-
 function workspacePath(workspaceId: string, suffix = ""): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/studio-drafts${suffix}`;
 }
@@ -90,6 +89,18 @@ function buildPayload(
     step,
     ...(ids.projectId ? { projectId: ids.projectId } : {}),
     ...(ids.runId ? { runId: ids.runId } : {}),
+  };
+}
+
+function buildWirePayload(
+  draft: BriefDraft,
+  step: StudioStep,
+  ids: { projectId?: string; runId?: string } = {},
+): WireStudioDraftPayload {
+  const payload = buildPayload(draft, step, ids);
+  return {
+    ...payload,
+    draft: payload.draft as unknown as Record<string, unknown>,
   };
 }
 
@@ -127,12 +138,15 @@ function recordFromUnknown(value: unknown): StudioDraftRecord | null {
   const payload = payloadFromUnknown(value.payload);
   const step = normalizeStep(value.step ?? payload?.step);
   const goal = payload?.draft.goal.trim();
+  const excerpt =
+    typeof value.excerpt === "string" && value.excerpt.trim()
+      ? value.excerpt
+      : typeof value.displayExcerpt === "string" && value.displayExcerpt.trim()
+        ? value.displayExcerpt
+        : goal || "Untitled draft";
   return {
     draftId,
-    excerpt:
-      typeof value.excerpt === "string" && value.excerpt.trim()
-        ? value.excerpt
-        : goal || "Untitled draft",
+    excerpt,
     step,
     updatedAt:
       typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
@@ -148,7 +162,7 @@ function recordFromUnknown(value: unknown): StudioDraftRecord | null {
   };
 }
 
-async function readDraftRecord(response: Promise<DraftEnvelope>): Promise<StudioDraftRecord> {
+async function readDraftRecord(response: Promise<StudioDraftResponse>): Promise<StudioDraftRecord> {
   const { draft } = await response;
   const record = recordFromUnknown(draft);
   if (!record) {
@@ -159,7 +173,7 @@ async function readDraftRecord(response: Promise<DraftEnvelope>): Promise<Studio
 
 export async function listDrafts(): Promise<StudioDraftSummary[]> {
   const workspaceId = await currentWorkspaceId();
-  const { drafts } = await apiRequest<DraftListEnvelope>(workspacePath(workspaceId), {
+  const { drafts } = await apiRequest<StudioDraftListResponse>(workspacePath(workspaceId), {
     method: "GET",
   });
   return drafts
@@ -173,10 +187,11 @@ export async function createDraft(
   step: StudioStep = "brief",
 ): Promise<StudioDraftRecord> {
   const workspaceId = await currentWorkspaceId();
+  const body: CreateStudioDraftRequest = { payload: buildWirePayload(draft, step) };
   return readDraftRecord(
-    apiRequest<DraftEnvelope>(workspacePath(workspaceId), {
+    apiRequest<StudioDraftResponse>(workspacePath(workspaceId), {
       method: "POST",
-      body: { payload: buildPayload(draft, step) },
+      body,
     }),
   );
 }
@@ -184,7 +199,7 @@ export async function createDraft(
 export async function loadDraft(draftId: string): Promise<StudioDraftRecord> {
   const workspaceId = await currentWorkspaceId();
   return readDraftRecord(
-    apiRequest<DraftEnvelope>(
+    apiRequest<StudioDraftResponse>(
       workspacePath(workspaceId, `/${encodeURIComponent(draftId)}`),
       { method: "GET" },
     ),
@@ -198,12 +213,15 @@ export async function saveDraft(
   ids: { projectId?: string; runId?: string } = {},
 ): Promise<StudioDraftRecord> {
   const workspaceId = await currentWorkspaceId();
+  const body: UpdateStudioDraftRequest = {
+    payload: buildWirePayload(draft, step, ids),
+  };
   return readDraftRecord(
-    apiRequest<DraftEnvelope>(
+    apiRequest<StudioDraftResponse>(
       workspacePath(workspaceId, `/${encodeURIComponent(draftId)}`),
       {
         method: "PUT",
-        body: { payload: buildPayload(draft, step, ids) },
+        body,
       },
     ),
   );
