@@ -15,6 +15,7 @@ import { BrandKitPage } from "./routes/BrandKitPage";
 import { AssetsPage, OutputsPage, RunsPage } from "./routes/DashboardCollectionsPage";
 import { EvalsPage } from "./routes/EvalsPage";
 import { HomePage } from "./routes/HomePage";
+import { LaunchpadPage } from "./routes/LaunchpadPage";
 import { LoginPage } from "./routes/LoginPage";
 import { SignupPage } from "./routes/SignupPage";
 import { DashboardPlaceholderPage } from "./routes/DashboardPlaceholderPage";
@@ -35,10 +36,7 @@ export function App() {
         </Route>
 
         <Route element={<AuthenticatedAppLayout />}>
-          <Route
-            path="/dashboard"
-            element={<DashboardPlaceholderPage kind="dashboard" />}
-          />
+          <Route path="/dashboard" element={<LaunchpadPage />} />
           <Route
             path="/projects"
             element={<DashboardPlaceholderPage kind="projects" />}

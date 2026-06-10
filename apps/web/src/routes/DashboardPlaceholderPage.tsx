@@ -3,11 +3,6 @@ import { ButtonLink } from "../components/ui/Button";
 import styles from "./DashboardPlaceholderPage.module.css";
 
 const PAGE_COPY = {
-  dashboard: {
-    eyebrow: "Dashboard",
-    title: "Overview",
-    body: "Summary cards, active runs, and recent outputs will land here once the workspace dashboard read API is available.",
-  },
   projects: {
     eyebrow: "Workspace",
     title: "Projects",
