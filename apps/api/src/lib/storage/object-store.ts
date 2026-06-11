@@ -1,6 +1,7 @@
 import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3ServiceException,
@@ -57,6 +58,21 @@ export async function createPresignedPutTarget(input: {
     headers: { "content-type": input.contentType },
     expiresAt: expiresAt(config.presignTtlSeconds),
   };
+}
+
+export async function createPresignedGetUrl(input: {
+  bucket: AssetStorageBucket;
+  key: string;
+  expiresInSeconds?: number;
+}): Promise<string> {
+  const config = readStorageConfig();
+  const command = new GetObjectCommand({
+    Bucket: physicalBucketName(input.bucket, config),
+    Key: input.key,
+  });
+  return getSignedUrl(getS3Client(), command, {
+    expiresIn: input.expiresInSeconds ?? config.presignTtlSeconds,
+  });
 }
 
 export async function createMultipartUploadTarget(input: {

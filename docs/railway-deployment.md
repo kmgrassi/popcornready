@@ -73,6 +73,39 @@ Notes:
   not implemented yet, so do not expose this as a multi-user production service
   without adding auth.
 
+## Asset storage variables
+
+Direct browser uploads use S3-compatible object storage when enabled:
+
+```bash
+STORAGE_BACKEND=s3
+AWS_REGION=us-east-1
+S3_PUBLIC_BUCKET=assets-public
+S3_PRIVATE_BUCKET=assets-private
+S3_PUBLIC_URL_BASE=https://cdn.example.com
+```
+
+For MinIO or another S3-compatible local endpoint, also set:
+
+```bash
+AWS_ENDPOINT_URL_S3=http://localhost:9000
+S3_FORCE_PATH_STYLE=true
+```
+
+The public and private buckets need CORS rules that allow browser `PUT` uploads
+from the web origin. Multipart uploads must expose the `ETag` response header
+because the web client sends those ETags back to complete the multipart upload.
+At minimum, include:
+
+```json
+{
+  "AllowedMethods": ["PUT"],
+  "AllowedOrigins": ["https://your-web-origin.example"],
+  "AllowedHeaders": ["*"],
+  "ExposeHeaders": ["ETag"]
+}
+```
+
 ## Healthcheck
 
 The Railway config uses:

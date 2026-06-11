@@ -13,6 +13,7 @@ import {
 import { parseBrief } from "@/lib/api/v1/schemas";
 import { createGenerationJob, runGenerationJob } from "@/lib/v1/generation";
 import { createGenerationRunExecution } from "@/lib/v1/generation/run-execution";
+import { resolveAssetUrlForGeneration } from "@/lib/storage/asset-urls";
 import { Actor } from "@/lib/v1/actor";
 import { getStore, V1Store } from "@/lib/v1/store";
 import { SCHEMA, GenerationRequest, V1Asset } from "@popcorn/shared/v1/types";
@@ -40,12 +41,6 @@ function actorForAuth(auth: AuthContext): Actor {
   };
 }
 
-function assetUrl(asset: ApiAsset): string {
-  if (asset.remoteUrl) return asset.remoteUrl;
-  if (asset.storageKey) return `/${asset.storageKey.replace(/^media\//, "")}`;
-  return `/assets/${asset.id}/${asset.filename}`;
-}
-
 function assetSource(asset: ApiAsset): V1Asset["source"] {
   switch (asset.source.type) {
     case "generated":
@@ -65,10 +60,10 @@ function generatedAssetJobId(asset: ApiAsset): string | undefined {
   return provenance?.generatedAssetJobId;
 }
 
-function toGenerationAsset(
+async function toGenerationAsset(
   asset: ApiAsset,
   generatedJobIdByAssetId: Map<string, string> = new Map()
-): V1Asset {
+): Promise<V1Asset> {
   const jobId = generatedJobIdByAssetId.get(asset.id) ?? generatedAssetJobId(asset);
   return {
     id: asset.id,
@@ -78,7 +73,7 @@ function toGenerationAsset(
     kind: asset.kind,
     status: asset.status,
     filename: asset.filename,
-    url: assetUrl(asset),
+    url: await resolveAssetUrlForGeneration(asset),
     durationSec: asset.durationSec ?? (asset.kind === "image" ? 4 : 8),
     description: asset.context?.summary,
     userContext: asset.userContext,
@@ -138,7 +133,7 @@ async function mirrorProjectInputs(args: {
   } while (cursor);
 
   for (const asset of await allApiAssets(auth.workspaceId, projectId)) {
-    await store.saveAsset(toGenerationAsset(asset, generatedJobIdByAssetId));
+    await store.saveAsset(await toGenerationAsset(asset, generatedJobIdByAssetId));
   }
 }
 
