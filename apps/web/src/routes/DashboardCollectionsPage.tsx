@@ -13,6 +13,7 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { Toolbar, ToolbarField } from "../components/ui/Toolbar";
 import { Button, ButtonLink } from "../components/ui/Button";
 import { EmptyState, ErrorState } from "../components/ui/StateCard";
+import { MediaViewer, type MediaViewerItem } from "../components/media/MediaViewer";
 import styles from "./DashboardCollections.module.css";
 
 const PAGE_SIZE = 24;
@@ -77,6 +78,32 @@ function statusChipClass(status: string) {
 
 function StatusChip({ status }: { status: GenerationRunStatus | WorkspaceAsset["status"] }) {
   return <span className={`${styles.chip} ${statusChipClass(status)}`}>{titleCase(status)}</span>;
+}
+
+function assetViewerItem(asset: WorkspaceAsset): MediaViewerItem {
+  const id = asset.assetId ?? asset.id;
+  return {
+    id,
+    kind: asset.kind,
+    title: asset.title ?? asset.filename ?? id,
+    filename: asset.filename,
+    projectName: asset.projectName,
+    durationSec: asset.durationSec,
+    url: asset.url,
+    thumbnailUrl: asset.thumbnailUrl,
+  };
+}
+
+function outputViewerItem(output: WorkspaceOutput): MediaViewerItem {
+  return {
+    id: output.artifactId,
+    kind: "video",
+    title: output.projectName,
+    projectName: output.projectName,
+    durationSec: output.durationSec,
+    url: output.playbackUrl ?? output.url,
+    thumbnailUrl: output.thumbnailUrl,
+  };
 }
 
 function DashboardFrame({ title, description, children }: { title: string; description: string; children: ReactNode }) {
@@ -322,6 +349,7 @@ export function AssetsPage() {
   const [source, setSource] = useState<AssetSourceFilter>("all");
   const [state, setState] = useState<LoadState<WorkspaceAsset>>(initialState<WorkspaceAsset>);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const toggleVisibility = useCallback(async (asset: WorkspaceAsset) => {
@@ -377,6 +405,11 @@ export function AssetsPage() {
     return () => controller.abort();
   }, [load]);
 
+  const selectedIndex = selectedAssetId
+    ? state.items.findIndex((asset) => (asset.assetId ?? asset.id) === selectedAssetId)
+    : -1;
+  const selectedAsset = selectedIndex >= 0 ? state.items[selectedIndex] : null;
+
   return (
     <DashboardFrame title="Assets" description="Generated and uploaded media across all projects in this workspace.">
       <Toolbar>
@@ -415,14 +448,26 @@ export function AssetsPage() {
               const isPrivate = asset.visibility === "private";
               return (
                 <div className={styles.card} key={id}>
-                  <Link className={styles.cardLink} to={projectCollectionPath(asset.projectId, { assetId: id })}>
+                  <button
+                    className={styles.cardButton}
+                    type="button"
+                    onClick={() => setSelectedAssetId(id)}
+                    aria-label={`View ${asset.title ?? asset.filename ?? id}`}
+                  >
                     <AssetPreview asset={asset} />
                     <div className={styles.cardBody}>
                       <div><span className={styles.rowTitle}>{asset.title ?? asset.filename ?? asset.id}</span><span className={styles.rowSub}>{asset.projectName}</span></div>
                       <div className={styles.cardMeta}><span>{titleCase(asset.kind)}</span><span>{titleCase(asset.source === "upload" ? "uploaded" : asset.source)}</span><StatusChip status={asset.status} /></div>
                     </div>
-                  </Link>
+                  </button>
                   <div className={styles.cardActions}>
+                    <ButtonLink
+                      variant="ghost"
+                      size="sm"
+                      to={projectCollectionPath(asset.projectId, { assetId: id })}
+                    >
+                      Project
+                    </ButtonLink>
                     <span className={styles.visibilityLabel} data-private={isPrivate}>
                       {isPrivate ? "Private" : "Public"}
                     </span>
@@ -442,6 +487,36 @@ export function AssetsPage() {
           <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
         </>
       ) : null}
+      <MediaViewer
+        item={selectedAsset ? assetViewerItem(selectedAsset) : null}
+        hasPrevious={selectedIndex > 0}
+        hasNext={selectedIndex >= 0 && selectedIndex < state.items.length - 1}
+        onClose={() => setSelectedAssetId(null)}
+        onPrevious={() => {
+          if (selectedIndex > 0) setSelectedAssetId(state.items[selectedIndex - 1].assetId ?? state.items[selectedIndex - 1].id);
+        }}
+        onNext={() => {
+          if (selectedIndex >= 0 && selectedIndex < state.items.length - 1) {
+            setSelectedAssetId(state.items[selectedIndex + 1].assetId ?? state.items[selectedIndex + 1].id);
+          }
+        }}
+        onRefresh={async (item) => {
+          const next = await v1Api.refreshAssetMedia(item.id);
+          setState((current) => ({
+            ...current,
+            items: current.items.map((asset) =>
+              (asset.assetId ?? asset.id) === item.id
+                ? {
+                    ...asset,
+                    url: next.url ?? undefined,
+                    thumbnailUrl: next.thumbnailUrl ?? undefined,
+                  }
+                : asset
+            ),
+          }));
+          return next;
+        }}
+      />
     </DashboardFrame>
   );
 }
@@ -455,6 +530,7 @@ function AssetPreview({ asset }: { asset: WorkspaceAsset }) {
 
 export function OutputsPage() {
   const [state, setState] = useState<LoadState<WorkspaceOutput>>(initialState<WorkspaceOutput>);
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
@@ -480,6 +556,11 @@ export function OutputsPage() {
     return () => controller.abort();
   }, [load]);
 
+  const selectedIndex = selectedOutputId
+    ? state.items.findIndex((output) => output.artifactId === selectedOutputId)
+    : -1;
+  const selectedOutput = selectedIndex >= 0 ? state.items[selectedIndex] : null;
+
   return (
     <DashboardFrame title="Outputs" description="Finished exported videos from every project in the active workspace.">
       {state.loading ? <DashboardSkeleton variant="grid" /> : null}
@@ -504,21 +585,51 @@ export function OutputsPage() {
             {state.items.map((output) => {
               const playbackUrl = output.playbackUrl ?? output.url;
               return (
-                <Link className={styles.card} to={projectCollectionPath(output.projectId, { timelineId: output.timelineId })} key={output.artifactId}>
+                <article className={styles.card} key={output.artifactId}>
+                  <button
+                    className={styles.cardButton}
+                    type="button"
+                    onClick={() => setSelectedOutputId(output.artifactId)}
+                    aria-label={`View ${output.projectName} output`}
+                  >
                   <div className={styles.outputMedia}>
-                    {playbackUrl ? <video className={styles.media} src={playbackUrl} poster={output.thumbnailUrl} controls preload="metadata" /> : output.thumbnailUrl ? <img className={styles.media} src={output.thumbnailUrl} alt="" loading="lazy" /> : <div className={`${styles.media} ${styles.mediaEmpty}`}><span>Output</span></div>}
+                    {playbackUrl ? <video className={styles.media} src={playbackUrl} poster={output.thumbnailUrl} muted playsInline preload="metadata" /> : output.thumbnailUrl ? <img className={styles.media} src={output.thumbnailUrl} alt="" loading="lazy" /> : <div className={`${styles.media} ${styles.mediaEmpty}`}><span>Output</span></div>}
                   </div>
                   <div className={styles.cardBody}>
                     <div><span className={styles.rowTitle}>{output.projectName}</span><span className={styles.rowSub}>Exported {formatDate(output.createdAt)}</span></div>
                     <div className={styles.cardMeta}>{output.format ? <span>{output.format.toUpperCase()}</span> : null}{formatDuration(output.durationSec) ? <span>{formatDuration(output.durationSec)}</span> : null}{output.timelineId ? <span>Timeline</span> : <span>Project</span>}</div>
                   </div>
-                </Link>
+                  </button>
+                  <div className={styles.cardActions}>
+                    <ButtonLink
+                      variant="ghost"
+                      size="sm"
+                      to={projectCollectionPath(output.projectId, { timelineId: output.timelineId })}
+                    >
+                      Project
+                    </ButtonLink>
+                  </div>
+                </article>
               );
             })}
           </div>
           <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
         </>
       ) : null}
+      <MediaViewer
+        item={selectedOutput ? outputViewerItem(selectedOutput) : null}
+        hasPrevious={selectedIndex > 0}
+        hasNext={selectedIndex >= 0 && selectedIndex < state.items.length - 1}
+        onClose={() => setSelectedOutputId(null)}
+        onPrevious={() => {
+          if (selectedIndex > 0) setSelectedOutputId(state.items[selectedIndex - 1].artifactId);
+        }}
+        onNext={() => {
+          if (selectedIndex >= 0 && selectedIndex < state.items.length - 1) {
+            setSelectedOutputId(state.items[selectedIndex + 1].artifactId);
+          }
+        }}
+      />
     </DashboardFrame>
   );
 }

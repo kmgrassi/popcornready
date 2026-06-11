@@ -237,6 +237,12 @@ export interface WorkspaceOutputsResponse {
   pagination: ListPagination;
 }
 
+export interface AssetMediaResponse {
+  url: string | null;
+  thumbnailUrl?: string | null;
+  expiresAt: string;
+}
+
 export interface GenerationRunArtifactResponse {
   artifact: {
     artifactId: string;
@@ -522,6 +528,11 @@ export const v1Api = {
         signal,
         searchParams: params,
       }
+    ),
+  refreshAssetMedia: (assetId: string, signal?: AbortSignal) =>
+    apiRequest<AssetMediaResponse>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/media`,
+      { signal }
     ),
   setAssetVisibility: (
     projectId: string,
