@@ -164,6 +164,11 @@
   cursor: pointer;
 }
 
+.cardButton:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
 .cardButton:focus-visible,
 .cardLink:focus-visible {
   outline: none;

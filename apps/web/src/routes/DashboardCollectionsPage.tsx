@@ -349,6 +349,7 @@ export function AssetsPage() {
   const [source, setSource] = useState<AssetSourceFilter>("all");
   const [state, setState] = useState<LoadState<WorkspaceAsset>>(initialState<WorkspaceAsset>);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [openingIds, setOpeningIds] = useState<Set<string>>(() => new Set());
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
@@ -398,6 +399,44 @@ export function AssetsPage() {
       setState((current) => ({ ...current, loading: false, loadingMore: false, error: error instanceof Error ? error : new Error(String(error)) }));
     }
   }, [kind, source, state.workspaceId]);
+
+  const applyAssetMedia = useCallback((assetId: string, media: { url: string | null; thumbnailUrl?: string | null }) => {
+    setState((current) => ({
+      ...current,
+      items: current.items.map((asset) =>
+        (asset.assetId ?? asset.id) === assetId
+          ? {
+              ...asset,
+              url: media.url ?? undefined,
+              thumbnailUrl: media.thumbnailUrl ?? undefined,
+            }
+          : asset
+      ),
+    }));
+  }, []);
+
+  const openAsset = useCallback(async (asset: WorkspaceAsset) => {
+    const id = asset.assetId ?? asset.id;
+    if (asset.url || asset.thumbnailUrl) {
+      setSelectedAssetId(id);
+      return;
+    }
+
+    setOpeningIds((current) => new Set(current).add(id));
+    try {
+      const media = await v1Api.refreshAssetMedia(id);
+      applyAssetMedia(id, media);
+      setSelectedAssetId(id);
+    } catch {
+      setSelectedAssetId(id);
+    } finally {
+      setOpeningIds((current) => {
+        const updated = new Set(current);
+        updated.delete(id);
+        return updated;
+      });
+    }
+  }, [applyAssetMedia]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -451,7 +490,8 @@ export function AssetsPage() {
                   <button
                     className={styles.cardButton}
                     type="button"
-                    onClick={() => setSelectedAssetId(id)}
+                    disabled={openingIds.has(id)}
+                    onClick={() => void openAsset(asset)}
                     aria-label={`View ${asset.title ?? asset.filename ?? id}`}
                   >
                     <AssetPreview asset={asset} />
@@ -502,18 +542,7 @@ export function AssetsPage() {
         }}
         onRefresh={async (item) => {
           const next = await v1Api.refreshAssetMedia(item.id);
-          setState((current) => ({
-            ...current,
-            items: current.items.map((asset) =>
-              (asset.assetId ?? asset.id) === item.id
-                ? {
-                    ...asset,
-                    url: next.url ?? undefined,
-                    thumbnailUrl: next.thumbnailUrl ?? undefined,
-                  }
-                : asset
-            ),
-          }));
+          applyAssetMedia(item.id, next);
           return next;
         }}
       />

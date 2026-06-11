@@ -13,7 +13,12 @@ import {
   parseSetAssetVisibility,
   parseUpdateAssetContext,
 } from "@/lib/api/v1/schemas";
-import { getAsset, listAssets, setAssetVisibility } from "@/lib/api/v1/store";
+import {
+  getAsset,
+  getAssetMediaUrls,
+  listAssets,
+  setAssetVisibility,
+} from "@/lib/api/v1/store";
 
 export const assetsRouter = Router();
 
@@ -24,6 +29,19 @@ function requiredParam(params: Record<string, string | undefined>, name: string)
   }
   return value;
 }
+
+assetsRouter.get(
+  "/assets/:assetId/media",
+  route(async ({ auth }, params) => {
+    const assetId = requiredParam(params, "assetId");
+    const media = await getAssetMediaUrls(auth.workspaceId, assetId);
+    return {
+      status: 200,
+      body: media,
+      headers: { "Cache-Control": "no-store" },
+    };
+  })
+);
 
 assetsRouter.get(
   "/projects/:projectId/assets",
