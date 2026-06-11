@@ -6,9 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getServiceSupabase } from "../supabase-client";
 import { databaseError, isMissingRow } from "../../supabase/db-errors";
 import {
+  GENERATION_STAGE_LABELS,
+  GENERATION_STAGE_ORDER,
   GenerationRun,
   GenerationStage,
   GenerationStageItem,
+  GenerationStageType,
 } from "@popcorn/shared/v1/types";
 
 // Persistence for generation runs, stages, and stage items.
@@ -134,12 +137,7 @@ function fail(op: string, error: { message?: string } | null): never {
 interface RunRow {
   id: string;
   project_id: string;
-  brief_version_id: string | null;
   status: GenerationRun["status"];
-  review_gates: GenerationRun["reviewGates"] | null;
-  review_gate: GenerationRun["reviewGate"] | null;
-  review_feedback: string | null;
-  current_stage_type: GenerationRun["currentStageType"] | null;
   progress_percent: number | null;
   message: string | null;
   error: GenerationRun["error"] | null;
@@ -147,9 +145,86 @@ interface RunRow {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+  gates: unknown;
+}
+
+const RUN_STATE_VERSION = "generationRunState.v1";
+const RUN_STATE_WRITE_ATTEMPTS = 5;
+
+interface StoredRunState {
+  v: typeof RUN_STATE_VERSION;
+  briefVersionId?: string;
+  reviewGates?: GenerationRun["reviewGates"];
+  reviewGate?: GenerationRun["reviewGate"] | null;
+  reviewFeedback?: string | null;
+  currentStageType?: GenerationRun["currentStageType"];
+  stages: GenerationStage[];
+  stageItems: GenerationStageItem[];
+  stageArtifacts: GenerationStageArtifact[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseRunState(value: unknown): StoredRunState {
+  if (isRecord(value) && value.v === RUN_STATE_VERSION) {
+    return {
+      v: RUN_STATE_VERSION,
+      briefVersionId:
+        typeof value.briefVersionId === "string" ? value.briefVersionId : undefined,
+      reviewGates: Array.isArray(value.reviewGates)
+        ? (value.reviewGates as GenerationRun["reviewGates"])
+        : undefined,
+      reviewGate: isRecord(value.reviewGate)
+        ? (value.reviewGate as unknown as GenerationRun["reviewGate"])
+        : value.reviewGate === null
+          ? null
+          : undefined,
+      reviewFeedback:
+        typeof value.reviewFeedback === "string"
+          ? value.reviewFeedback
+          : value.reviewFeedback === null
+            ? null
+            : undefined,
+      currentStageType:
+        typeof value.currentStageType === "string"
+          ? (value.currentStageType as GenerationRun["currentStageType"])
+          : undefined,
+      stages: Array.isArray(value.stages) ? (value.stages as GenerationStage[]) : [],
+      stageItems: Array.isArray(value.stageItems)
+        ? (value.stageItems as GenerationStageItem[])
+        : [],
+      stageArtifacts: Array.isArray(value.stageArtifacts)
+        ? (value.stageArtifacts as GenerationStageArtifact[])
+        : [],
+    };
+  }
+  return {
+    v: RUN_STATE_VERSION,
+    reviewGates: Array.isArray(value) ? (value as GenerationRun["reviewGates"]) : undefined,
+    stages: [],
+    stageItems: [],
+    stageArtifacts: [],
+  };
+}
+
+function runStateFromRun(run: GenerationRun): StoredRunState {
+  return {
+    v: RUN_STATE_VERSION,
+    briefVersionId: run.briefVersionId,
+    reviewGates: run.reviewGates,
+    reviewGate: run.reviewGate,
+    reviewFeedback: run.reviewFeedback,
+    currentStageType: run.currentStageType,
+    stages: [],
+    stageItems: [],
+    stageArtifacts: [],
+  };
 }
 
 function rowToRun(r: RunRow): GenerationRun {
+  const state = parseRunState(r.gates);
   const run: GenerationRun = {
     runId: r.id,
     projectId: r.project_id,
@@ -157,11 +232,11 @@ function rowToRun(r: RunRow): GenerationRun {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
-  if (r.brief_version_id != null) run.briefVersionId = r.brief_version_id;
-  if (r.review_gates != null) run.reviewGates = r.review_gates;
-  if (r.review_gate != null) run.reviewGate = r.review_gate;
-  if (r.review_feedback != null) run.reviewFeedback = r.review_feedback;
-  if (r.current_stage_type != null) run.currentStageType = r.current_stage_type;
+  if (state.briefVersionId != null) run.briefVersionId = state.briefVersionId;
+  if (state.reviewGates != null) run.reviewGates = state.reviewGates;
+  if (state.reviewGate !== undefined) run.reviewGate = state.reviewGate;
+  if (state.reviewFeedback !== undefined) run.reviewFeedback = state.reviewFeedback;
+  if (state.currentStageType != null) run.currentStageType = state.currentStageType;
   if (r.progress_percent != null) run.progressPercent = r.progress_percent;
   if (r.message != null) run.message = r.message;
   if (r.started_at != null) run.startedAt = r.started_at;
@@ -174,12 +249,7 @@ function runToRow(run: GenerationRun): RunRow {
   return {
     id: run.runId,
     project_id: run.projectId,
-    brief_version_id: run.briefVersionId ?? null,
     status: run.status,
-    review_gates: run.reviewGates ?? null,
-    review_gate: run.reviewGate ?? null,
-    review_feedback: run.reviewFeedback ?? null,
-    current_stage_type: run.currentStageType ?? null,
     progress_percent: run.progressPercent ?? null,
     message: run.message ?? null,
     error: run.error ?? null,
@@ -187,7 +257,51 @@ function runToRow(run: GenerationRun): RunRow {
     updated_at: run.updatedAt,
     started_at: run.startedAt ?? null,
     completed_at: run.completedAt ?? null,
+    gates: runStateFromRun(run),
   };
+}
+
+function runIdFromStageId(stageId: string): string {
+  return stageId.split(":")[0] || stageId;
+}
+
+function stageIdFromItemId(itemId: string): string {
+  return itemId.split(":item:")[0] || itemId;
+}
+
+function stageIdFromArtifactId(artifactId: string): string {
+  return artifactId.split(":artifact:")[0] || artifactId;
+}
+
+function syntheticStages(row: RunRow): GenerationStage[] {
+  const run = rowToRun(row);
+  const reviewGates = new Set(run.reviewGates ?? []);
+  const currentOrder =
+    run.currentStageType != null ? GENERATION_STAGE_ORDER[run.currentStageType] : 0;
+  return (Object.keys(GENERATION_STAGE_ORDER) as GenerationStageType[]).map((type) => {
+    const order = GENERATION_STAGE_ORDER[type];
+    const status: GenerationRun["status"] =
+      run.status === "succeeded" || run.status === "failed" || run.status === "canceled"
+        ? run.status
+        : order < currentOrder
+          ? "succeeded"
+          : order === currentOrder
+            ? run.status
+            : "queued";
+    return {
+      stageId: `${run.runId}:${type}`,
+      runId: run.runId,
+      type,
+      label: GENERATION_STAGE_LABELS[type],
+      order,
+      status,
+      isReviewGate: reviewGates.has(type as never),
+      jobIds: [],
+      artifactIds: [],
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    };
+  });
 }
 
 // --- stages ----------------------------------------------------------------
@@ -361,6 +475,67 @@ function stageArtifactToRow(a: GenerationStageArtifact): StageArtifactRow {
 export function createSupabaseGenerationRunsStore(
   db: SupabaseClient = getServiceSupabase()
 ): GenerationRunsStore {
+  async function getRunRow(runId: string): Promise<RunRow | null> {
+    const { data, error } = await db
+      .from("generation_runs")
+      .select("*")
+      .eq("id", runId)
+      .single();
+    if (error) {
+      if (isMissing(error)) return null;
+      fail("get run", error);
+    }
+    return (data as RunRow | null) ?? null;
+  }
+
+  async function requireRunState(runId: string): Promise<{ row: RunRow; state: StoredRunState }> {
+    const row = await getRunRow(runId);
+    if (!row) throw new Error(`generation run not found: ${runId}`);
+    return { row, state: parseRunState(row.gates) };
+  }
+
+  async function writeRunRow(
+    runId: string,
+    expectedUpdatedAt: string,
+    patch: Partial<RunRow>,
+    op: string
+  ): Promise<RunRow | null> {
+    const { data, error } = await db
+      .from("generation_runs")
+      .update(patch)
+      .eq("id", runId)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("*")
+      .maybeSingle();
+    if (error) fail(op, error);
+    return (data as RunRow | null) ?? null;
+  }
+
+  async function mutateRunRow<T>(
+    runId: string,
+    op: string,
+    mutate: (row: RunRow, state: StoredRunState, now: string) => { patch: Partial<RunRow>; result: T }
+  ): Promise<T> {
+    for (let attempt = 0; attempt < RUN_STATE_WRITE_ATTEMPTS; attempt += 1) {
+      const { row, state } = await requireRunState(runId);
+      const now = new Date().toISOString();
+      const { patch, result } = mutate(row, state, now);
+      const updated = await writeRunRow(
+        runId,
+        row.updated_at,
+        { ...patch, updated_at: now },
+        op
+      );
+      if (updated) return result;
+    }
+    throw new Error(`generation run update conflict after retries: ${runId}`);
+  }
+
+  function stagesForRow(row: RunRow): GenerationStage[] {
+    const state = parseRunState(row.gates);
+    return state.stages.length ? state.stages : syntheticStages(row);
+  }
+
   return {
     async createRun(input) {
       const now = new Date().toISOString();
@@ -382,35 +557,31 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async getRun(runId) {
-      const { data, error } = await db
-        .from("generation_runs")
-        .select("*")
-        .eq("id", runId)
-        .single();
-      if (error) {
-        if (isMissing(error)) return null;
-        fail("get run", error);
-      }
-      return data ? rowToRun(data as RunRow) : null;
+      const row = await getRunRow(runId);
+      return row ? rowToRun(row) : null;
     },
 
     async updateRun(runId, patch) {
-      const current = await this.getRun(runId);
-      if (!current) throw new Error(`generation run not found: ${runId}`);
-      const next: GenerationRun = {
-        ...current,
-        ...patch,
-        runId: current.runId,
-        projectId: current.projectId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      const { error } = await db
-        .from("generation_runs")
-        .update(runToRow(next))
-        .eq("id", runId);
-      if (error) fail("update run", error);
-      return next;
+      return mutateRunRow(runId, "update run", (currentRow, currentState, now) => {
+        const current = rowToRun(currentRow);
+        const next: GenerationRun = {
+          ...current,
+          ...patch,
+          runId: current.runId,
+          projectId: current.projectId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...currentState,
+          briefVersionId: next.briefVersionId,
+          reviewGates: next.reviewGates,
+          reviewGate: next.reviewGate,
+          reviewFeedback: next.reviewFeedback,
+          currentStageType: next.currentStageType,
+        };
+        return { patch: { ...runToRow(next), gates: nextState }, result: next };
+      });
     },
 
     async listRunsForProject(projectId) {
@@ -424,153 +595,137 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async saveStage(input) {
-      const now = new Date().toISOString();
-      const { id: _omit, ...row } = stageToRow({
-        ...input,
-        stageId: "",
-        createdAt: now,
-        updatedAt: now,
+      return mutateRunRow(input.runId, "save stage", (_row, state, now) => {
+        const stage: GenerationStage = {
+          ...input,
+          stageId: `${input.runId}:${input.type}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stages: [
+            ...state.stages.filter((candidate) => candidate.stageId !== stage.stageId),
+            stage,
+          ].sort((a, b) => a.order - b.order),
+        };
+        return { patch: { gates: nextState }, result: stage };
       });
-      void _omit;
-      const { data, error } = await db
-        .from("generation_stages")
-        .insert(row)
-        .select("*")
-        .single();
-      if (error) fail("save stage", error);
-      return rowToStage(data as StageRow);
     },
 
     async getStage(stageId) {
-      const { data, error } = await db
-        .from("generation_stages")
-        .select("*")
-        .eq("id", stageId)
-        .single();
-      if (error) {
-        if (isMissing(error)) return null;
-        fail("get stage", error);
-      }
-      return data ? rowToStage(data as StageRow) : null;
+      const row = await getRunRow(runIdFromStageId(stageId));
+      if (!row) return null;
+      return stagesForRow(row).find((stage) => stage.stageId === stageId) ?? null;
     },
 
     async updateStage(stageId, patch) {
-      const current = await this.getStage(stageId);
-      if (!current) throw new Error(`generation stage not found: ${stageId}`);
-      const next: GenerationStage = {
-        ...current,
-        ...patch,
-        stageId: current.stageId,
-        runId: current.runId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      const { error } = await db
-        .from("generation_stages")
-        .update(stageToRow(next))
-        .eq("id", stageId);
-      if (error) fail("update stage", error);
-      return next;
+      const runId = runIdFromStageId(stageId);
+      return mutateRunRow(runId, "update stage", (row, state, now) => {
+        const current = stagesForRow(row).find((stage) => stage.stageId === stageId);
+        if (!current) throw new Error(`generation stage not found: ${stageId}`);
+        const next: GenerationStage = {
+          ...current,
+          ...patch,
+          stageId: current.stageId,
+          runId: current.runId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const baseStages = state.stages.length ? state.stages : syntheticStages(row);
+        const nextState: StoredRunState = {
+          ...state,
+          stages: baseStages
+            .map((stage) => (stage.stageId === stageId ? next : stage))
+            .sort((a, b) => a.order - b.order),
+        };
+        return { patch: { gates: nextState }, result: next };
+      });
     },
 
     async listStagesForRun(runId) {
-      const { data, error } = await db
-        .from("generation_stages")
-        .select("*")
-        .eq("run_id", runId)
-        .order("order", { ascending: true });
-      if (error) fail("list stages", error);
-      return ((data as StageRow[]) ?? []).map(rowToStage);
+      const row = await getRunRow(runId);
+      return row ? stagesForRow(row) : [];
     },
 
     async saveStageItem(input) {
-      const now = new Date().toISOString();
-      const { id: _omit, ...row } = stageItemToRow({
-        ...input,
-        itemId: "",
-        createdAt: now,
-        updatedAt: now,
+      const runId = runIdFromStageId(input.stageId);
+      return mutateRunRow(runId, "save stage item", (_row, state, now) => {
+        const item: GenerationStageItem = {
+          ...input,
+          itemId: `${input.stageId}:item:${randomUUID()}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageItems: [...state.stageItems, item],
+        };
+        return { patch: { gates: nextState }, result: item };
       });
-      void _omit;
-      const { data, error } = await db
-        .from("generation_stage_items")
-        .insert(row)
-        .select("*")
-        .single();
-      if (error) fail("save stage item", error);
-      return rowToStageItem(data as StageItemRow);
     },
 
     async getStageItem(itemId) {
-      const { data, error } = await db
-        .from("generation_stage_items")
-        .select("*")
-        .eq("id", itemId)
-        .single();
-      if (error) {
-        if (isMissing(error)) return null;
-        fail("get stage item", error);
-      }
-      return data ? rowToStageItem(data as StageItemRow) : null;
+      const stageId = stageIdFromItemId(itemId);
+      const row = await getRunRow(runIdFromStageId(stageId));
+      if (!row) return null;
+      return parseRunState(row.gates).stageItems.find((item) => item.itemId === itemId) ?? null;
     },
 
     async updateStageItem(itemId, patch) {
-      const current = await this.getStageItem(itemId);
-      if (!current) throw new Error(`generation stage item not found: ${itemId}`);
-      const next: GenerationStageItem = {
-        ...current,
-        ...patch,
-        itemId: current.itemId,
-        stageId: current.stageId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      const { error } = await db
-        .from("generation_stage_items")
-        .update(stageItemToRow(next))
-        .eq("id", itemId);
-      if (error) fail("update stage item", error);
-      return next;
+      const stageId = stageIdFromItemId(itemId);
+      const runId = runIdFromStageId(stageId);
+      return mutateRunRow(runId, "update stage item", (_row, state, now) => {
+        const current = state.stageItems.find((item) => item.itemId === itemId);
+        if (!current) throw new Error(`generation stage item not found: ${itemId}`);
+        const next: GenerationStageItem = {
+          ...current,
+          ...patch,
+          itemId: current.itemId,
+          stageId: current.stageId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageItems: state.stageItems.map((item) =>
+            item.itemId === itemId ? next : item
+          ),
+        };
+        return { patch: { gates: nextState }, result: next };
+      });
     },
 
     async listStageItemsForStage(stageId) {
-      const { data, error } = await db
-        .from("generation_stage_items")
-        .select("*")
-        .eq("stage_id", stageId)
-        .order("created_at", { ascending: true });
-      if (error) fail("list stage items", error);
-      return ((data as StageItemRow[]) ?? []).map(rowToStageItem);
+      const row = await getRunRow(runIdFromStageId(stageId));
+      if (!row) return [];
+      return parseRunState(row.gates)
+        .stageItems.filter((item) => item.stageId === stageId)
+        .sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
     },
 
     async saveStageArtifact(input) {
-      const now = new Date().toISOString();
-      const { id: _omit, ...row } = stageArtifactToRow({
-        ...input,
-        artifactId: "",
-        createdAt: now,
+      const runId = input.runId || runIdFromStageId(input.stageId);
+      return mutateRunRow(runId, "save stage artifact", (_row, state, now) => {
+        const artifact: GenerationStageArtifact = {
+          ...input,
+          artifactId: `${input.stageId}:artifact:${randomUUID()}`,
+          createdAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageArtifacts: [...state.stageArtifacts, artifact],
+        };
+        return { patch: { gates: nextState }, result: artifact };
       });
-      void _omit;
-      const { data, error } = await db
-        .from("generation_stage_artifacts")
-        .insert(row)
-        .select("*")
-        .single();
-      if (error) fail("save stage artifact", error);
-      return rowToStageArtifact(data as StageArtifactRow);
     },
 
     async getStageArtifact(artifactId) {
-      const { data, error } = await db
-        .from("generation_stage_artifacts")
-        .select("*")
-        .eq("id", artifactId)
-        .single();
-      if (error) {
-        if (isMissing(error)) return null;
-        fail("get stage artifact", error);
-      }
-      return data ? rowToStageArtifact(data as StageArtifactRow) : null;
+      const stageId = stageIdFromArtifactId(artifactId);
+      const row = await getRunRow(runIdFromStageId(stageId));
+      if (!row) return null;
+      return parseRunState(row.gates)
+        .stageArtifacts.find((artifact) => artifact.artifactId === artifactId) ?? null;
     },
   };
 }
