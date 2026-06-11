@@ -23,8 +23,9 @@ For this app, expect Railway usage from:
 - Remotion export jobs, which temporarily use CPU and memory.
 - Network egress for API responses and any server-mediated media paths.
 
-Generated/uploaded asset bytes are moving to S3 + CloudFront. Do not rely on a
-Railway volume for asset delivery.
+Generated/uploaded asset bytes are planned to move to S3 + CloudFront after the
+storage backend lands. Until then, do not rely on a Railway volume as durable
+production asset storage.
 
 ## Deploy from the Railway dashboard
 
@@ -79,12 +80,15 @@ Notes:
 - Hosted deploys should use `AUTH_MODE=supabase`. `AUTH_MODE=local` is for
   local development and private demos only.
 
-## Asset storage variables
+## Provisioned asset storage
 
-Asset sharing and delivery uses the S3 + CloudFront resources provisioned for
-`docs/scopes/asset-sharing-delivery-prs.md` PR0.
+Asset sharing and delivery will use the S3 + CloudFront resources provisioned
+for `docs/scopes/asset-sharing-delivery-prs.md` PR0. These resources exist now,
+but the current runtime does not read the S3 storage variables yet. Keep
+`STORAGE_BACKEND` on the currently supported backend until the PR1/PR2 storage
+code lands and has been validated in the target environment.
 
-Set these non-secret values in Railway:
+Stage these non-secret Railway values when enabling the S3 backend:
 
 ```bash
 STORAGE_BACKEND=s3
@@ -95,7 +99,8 @@ S3_PUBLIC_URL_BASE=https://d22zp4rym9mw9c.cloudfront.net
 CF_SIGN_KEY_PAIR_ID=K2GHXNWYN1I8EL
 ```
 
-Set these secret values in Railway from AWS Secrets Manager:
+Stage these secret Railway values from AWS Secrets Manager when enabling the S3
+backend:
 
 ```bash
 AWS_ACCESS_KEY_ID=<popcornready/assets-api-iam-access-key.AWS_ACCESS_KEY_ID>
@@ -157,9 +162,10 @@ filesystem when `DB_BACKEND=local` or `STORAGE_BACKEND=local`:
 - `public/generated/`
 - `public/exports/`
 
-Railway deployment filesystems are ephemeral unless a volume is attached. Hosted
-deploys should use Supabase for project state and S3/CloudFront for assets; do
-not enable local filesystem persistence for production asset sharing.
+Railway deployment filesystems are ephemeral unless a volume is attached. The
+current runtime can still write media to non-S3 paths; that is not durable
+production asset storage. Hosted deploys should move project state to Supabase
+and enable S3/CloudFront only after the storage backend PRs land.
 
 ## Public API automation
 
