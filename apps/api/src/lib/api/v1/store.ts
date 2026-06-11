@@ -67,6 +67,7 @@ import {
 } from "../../v1/generation-runs/store";
 import { getRequestSupabase } from "../../supabase/clients";
 import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
+import { resolveAssetUrl } from "../../storage/asset-urls";
 import {
   AgentAssetSource,
   AgentAssetContext,
@@ -78,6 +79,10 @@ import {
   UserAssetContext,
   VideoBrief,
 } from "./schemas";
+import {
+  reconcileAssetStorage,
+  type VisibilityObjectStore,
+} from "../../storage/visibility-move";
 
 export interface V1Workspace {
   id: string;
@@ -93,9 +98,12 @@ export interface V1Project {
   workspaceId: string;
   name: string;
   status: "active" | "deleted";
+  visibility?: "public" | "private";
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
   hasStoryboard?: boolean;
+  posterAssetId: string | null;
+  posterUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +128,7 @@ export interface V1Asset {
   visibility?: "public" | "private";
   remoteUrl?: string;
   storageKey?: string;
+  storageBucket?: string;
   durationSec?: number;
   context?: AssetContext;
   userContext?: UserAssetContext;
@@ -376,13 +385,33 @@ const isNoRows = isMissingRow;
 const throwOnError = (error: Parameters<typeof throwDatabaseError>[1], context: string) =>
   throwDatabaseError(`store.${context}`, error);
 
-async function defaultVisibilityForWorkspace(
+export async function defaultVisibilityForWorkspace(
   db: SupabaseClient,
   workspaceId: string
 ): Promise<"public" | "private"> {
   const { data, error } = await db.rpc("owner_tier", { ws_id: workspaceId });
   throwOnError(error, "defaultVisibilityForWorkspace");
   return data === "paid" ? "private" : "public";
+}
+
+export async function effectiveAssetStorageVisibility(input: {
+  workspaceId: string;
+  projectId: string;
+  assetVisibility: "public" | "private";
+}): Promise<"public" | "private"> {
+  if (input.assetVisibility === "private") return "private";
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("visibility")
+    .eq("id", input.projectId)
+    .eq("workspace_id", input.workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${input.projectId}`);
+  throwOnError(error, "effectiveAssetStorageVisibility project");
+  const row = data as { visibility?: "public" | "private" } | null;
+  if (!row) throw notFound(`Project not found: ${input.projectId}`);
+  return row.visibility === "private" ? "private" : "public";
 }
 
 // --- workspaces ------------------------------------------------------------
@@ -423,6 +452,8 @@ function mapProject(
     brief?: VideoBrief | null;
     currentBriefVersionId?: string | null;
     hasStoryboard?: boolean;
+    posterAssetId?: string | null;
+    posterUrl?: string | null;
   } = {}
 ): V1Project {
   return {
@@ -431,9 +462,12 @@ function mapProject(
     workspaceId: row.workspace_id,
     name: row.name,
     status: row.status,
+    visibility: row.visibility,
     brief: projection.brief ?? null,
     currentBriefVersionId: projection.currentBriefVersionId ?? null,
     hasStoryboard: projection.hasStoryboard ?? false,
+    posterAssetId: projection.posterAssetId ?? null,
+    posterUrl: projection.posterUrl ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -643,15 +677,124 @@ async function selectedDataAsset(
   return (await dataAssetById(db, activeAssetId)) ?? latestDataAsset(db, projectId, kind);
 }
 
+// --- poster ----------------------------------------------------------------
+// The project's marketing one-sheet, shown as the thumbnail in dashboard
+// grids. The current poster is the project-scoped 'poster' selection slot
+// (slot_owner_lineage_id null). Until one is selected or generated, fall back
+// to the newest ready poster-kind asset, then the newest ready image of any
+// kind, so project grids stay visual from the first keyframe onward.
+//
+// Public projections (unauthenticated discover) must pass publicOnly so a
+// private selected poster or private fallback image never leaks a signed URL;
+// a private selection falls through to public-only candidates instead.
+const POSTER_SLOT_ROLE = "poster";
+
+interface PosterAssetRow {
+  id: string;
+  media: AssetMedia;
+  status: "ready" | "pending";
+  remote_url: string | null;
+  storage_key: string | null;
+  storage_bucket: string | null;
+  visibility: "public" | "private" | null;
+}
+
+const POSTER_ASSET_COLUMNS =
+  "id, media, status, remote_url, storage_key, storage_bucket, visibility";
+
+interface PosterVisibilityOpts {
+  publicOnly?: boolean;
+}
+
+async function readyImageAssetById(
+  db: SupabaseClient,
+  projectId: string,
+  assetId: string,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  let query = db
+    .from("assets")
+    .select(POSTER_ASSET_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("id", assetId)
+    .eq("media", "image")
+    .eq("status", "ready");
+  if (opts.publicOnly) query = query.eq("visibility", "public");
+  const { data, error } = await query.maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, "readyImageAssetById");
+  return (data as PosterAssetRow | null) ?? null;
+}
+
+async function latestReadyImageAsset(
+  db: SupabaseClient,
+  projectId: string,
+  kind?: GraphAssetKind,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  let query = db
+    .from("assets")
+    .select(POSTER_ASSET_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("media", "image")
+    .eq("status", "ready");
+  if (kind) query = query.eq("kind", kind);
+  if (opts.publicOnly) query = query.eq("visibility", "public");
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, `latestReadyImageAsset ${kind ?? "image"}`);
+  return (data as PosterAssetRow | null) ?? null;
+}
+
+async function projectPosterAsset(
+  db: SupabaseClient,
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  const selected = await db
+    .from("current_selections")
+    .select("active_asset_id")
+    .eq("project_id", projectId)
+    .is("slot_owner_lineage_id", null)
+    .eq("slot_role", POSTER_SLOT_ROLE)
+    .maybeSingle();
+  if (!isNoRows(selected.error)) {
+    throwOnError(selected.error, "projectPosterAsset selection");
+  }
+  const activeAssetId = (selected.data as CurrentSelectionRow | null)?.active_asset_id;
+  if (activeAssetId) {
+    const asset = await readyImageAssetById(db, projectId, activeAssetId, opts);
+    if (asset) return asset;
+  }
+  return (
+    (await latestReadyImageAsset(db, projectId, "poster", opts)) ??
+    (await latestReadyImageAsset(db, projectId, undefined, opts))
+  );
+}
+
+// Browser-usable URL for a poster asset. Uses the same storage resolver as the
+// asset payload mapper so public/private delivery stays consistent.
+async function posterUrlFor(asset: PosterAssetRow | null): Promise<string | null> {
+  if (!asset) return null;
+  return (await resolveAssetUrl(asset)) ?? null;
+}
+
 async function projectProjection(
   db: SupabaseClient,
-  projectId: string
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
 ): Promise<{
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
   hasStoryboard: boolean;
+  posterAssetId: string | null;
+  posterUrl: string | null;
 }> {
-  const [briefAsset, storyboard] = await Promise.all([
+  const [briefAsset, storyboard, posterAsset] = await Promise.all([
     selectedDataAsset(db, projectId, "brief", "brief"),
     db
       .from("storyboards")
@@ -659,12 +802,18 @@ async function projectProjection(
       .eq("project_id", projectId)
       .limit(1)
       .maybeSingle(),
+    projectPosterAsset(db, projectId, opts),
   ]);
+  const poster = {
+    posterAssetId: posterAsset?.id ?? null,
+    posterUrl: await posterUrlFor(posterAsset),
+  };
   if (isNoRows(storyboard.error)) {
     return {
       brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
       currentBriefVersionId: briefAsset?.id ?? null,
       hasStoryboard: false,
+      ...poster,
     };
   }
   throwOnError(storyboard.error, "projectProjection storyboard");
@@ -672,20 +821,22 @@ async function projectProjection(
     brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
     currentBriefVersionId: briefAsset?.id ?? null,
     hasStoryboard: Boolean(storyboard.data),
+    ...poster,
   };
 }
 
 async function mapProjectWithProjection(
   db: SupabaseClient,
-  row: ProjectRow
+  row: ProjectRow,
+  opts: PosterVisibilityOpts = {}
 ): Promise<V1Project> {
-  return mapProject(row, await projectProjection(db, row.id));
+  return mapProject(row, await projectProjection(db, row.id, opts));
 }
 
 async function setActiveAssetSelection(
   db: SupabaseClient,
   projectId: string,
-  slotRole: "brief",
+  slotRole: "brief" | typeof POSTER_SLOT_ROLE,
   activeAssetId: string,
   setByActionId?: string
 ): Promise<void> {
@@ -949,7 +1100,8 @@ type GraphAssetKind =
   | "critique"
   | "plan"
   | "composite"
-  | "render";
+  | "render"
+  | "poster";
 
 type AssetMedia = "data" | "image" | "video" | "audio";
 
@@ -969,6 +1121,7 @@ interface AssetRow {
   inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
+  storage_bucket: string | null;
   source: AgentAssetSource;
   duration_sec: number | null;
   description: string | null;
@@ -1030,6 +1183,7 @@ function assetToRow(asset: V1Asset): AssetRow {
         : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
+    storage_bucket: asset.storageBucket ?? null,
     source: asset.source,
     duration_sec: asset.durationSec ?? null,
     description: asset.userContext?.description ?? asset.context?.summary ?? null,
@@ -1088,7 +1242,7 @@ async function withGraphMetadataForInsert(
   };
 }
 
-function mapAsset(row: AssetRow): V1Asset {
+function mapAssetRow(row: AssetRow): V1Asset {
   const envelope = row.context ?? {};
   const asset: V1Asset = {
     id: row.id,
@@ -1104,6 +1258,7 @@ function mapAsset(row: AssetRow): V1Asset {
   };
   if (row.remote_url != null) asset.remoteUrl = row.remote_url;
   if (row.storage_key != null) asset.storageKey = row.storage_key;
+  if (row.storage_bucket != null) asset.storageBucket = row.storage_bucket;
   if (row.duration_sec != null) asset.durationSec = row.duration_sec;
   if (envelope.context !== undefined) asset.context = envelope.context;
   if (envelope.userContext !== undefined) asset.userContext = envelope.userContext;
@@ -1124,6 +1279,37 @@ function mapAsset(row: AssetRow): V1Asset {
   }
   if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
+}
+
+async function mapAsset(row: AssetRow): Promise<V1Asset> {
+  const asset = mapAssetRow(row);
+  const resolvedUrl = await resolveAssetUrl(row);
+  if (resolvedUrl) asset.remoteUrl = resolvedUrl;
+  return asset;
+}
+
+async function mapAssets(rows: AssetRow[]): Promise<V1Asset[]> {
+  return Promise.all(rows.map(mapAsset));
+}
+
+async function getAssetRow(
+  db: SupabaseClient,
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  context: string
+): Promise<AssetRow> {
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, context);
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return data as AssetRow;
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,6 +1514,47 @@ export async function getProject(
   throwOnError(error, "getProject");
   if (!data) throw notFound(`Project not found: ${projectId}`);
   return mapProjectWithProjection(db, data as ProjectRow);
+}
+
+// Point the project-scoped 'poster' selection slot at an image asset. Any
+// ready image in the project qualifies (a keyframe can be the poster until a
+// dedicated poster-kind asset is generated); history stays in selections.
+export async function setProjectPoster(
+  workspaceId: string,
+  projectId: string,
+  assetId: string
+): Promise<V1Project> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "setProjectPoster project");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  const projectRow = data as ProjectRow;
+
+  const asset = await readyImageAssetById(db, projectId, assetId);
+  if (!asset) {
+    throw new ApiError(
+      "validation_failed",
+      `Asset ${assetId} is not a ready image asset in project ${projectId}.`
+    );
+  }
+
+  const action = await createAction({
+    projectId,
+    tool: "set_poster",
+    status: "applied",
+    params: { assetId },
+    inputAssetIds: [assetId],
+    rationale: "Set the project poster (dashboard thumbnail).",
+  });
+  await setActiveAssetSelection(db, projectId, POSTER_SLOT_ROLE, assetId, action.id);
+  return mapProjectWithProjection(db, projectRow);
 }
 
 interface StoryboardRow {
@@ -1982,7 +2209,9 @@ export async function listPublicProjects(
     .neq("status", "deleted");
   throwOnError(error, "listPublicProjects");
   const all = await Promise.all(
-    (data as ProjectRow[]).map((row) => mapProjectWithProjection(db, row))
+    (data as ProjectRow[]).map((row) =>
+      mapProjectWithProjection(db, row, { publicOnly: true })
+    )
   );
   return paginate(all, limit, cursor);
 }
@@ -2222,17 +2451,7 @@ export async function getAsset(
   assetId: string
 ): Promise<V1Asset> {
   const db = getServiceSupabase();
-  const { data, error } = await db
-    .from("assets")
-    .select("*")
-    .eq("id", assetId)
-    .eq("project_id", projectId)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
-  throwOnError(error, "getAsset");
-  if (!data) throw notFound(`Asset not found: ${assetId}`);
-  return mapAsset(data as AssetRow);
+  return mapAsset(await getAssetRow(db, workspaceId, projectId, assetId, "getAsset"));
 }
 
 export async function updateAsset(
@@ -2243,11 +2462,13 @@ export async function updateAsset(
 ): Promise<V1Asset> {
   // Read-modify-write: load the current row (with tenancy filter), apply the
   // mutation in memory, then persist the full row back.
-  const current = await getAsset(workspaceId, projectId, assetId);
+  const db = getServiceSupabase();
+  const current = mapAssetRow(
+    await getAssetRow(db, workspaceId, projectId, assetId, "updateAsset read")
+  );
   updater(current);
   current.updatedAt = new Date().toISOString();
 
-  const db = getServiceSupabase();
   const row = assetToRow(current);
   const { data, error } = await db
     .from("assets")
@@ -2256,6 +2477,7 @@ export async function updateAsset(
       filename: row.filename,
       remote_url: row.remote_url,
       storage_key: row.storage_key,
+      storage_bucket: row.storage_bucket,
       duration_sec: row.duration_sec,
       description: row.description,
       context: row.context,
@@ -2273,29 +2495,207 @@ export async function updateAsset(
   return mapAsset(data as AssetRow);
 }
 
-// Flip an asset's public/private visibility. Updates only the visibility column
-// (tenancy-scoped) so it never clobbers other fields. Tier gating is deferred —
-// the DB visibility-tier triggers were dropped (migration 20260609000000), so any
-// member of the workspace can set either value.
 export async function setAssetVisibility(
   workspaceId: string,
   projectId: string,
   assetId: string,
-  visibility: "public" | "private"
+  visibility: "public" | "private",
+  options: { actorId?: string; store?: VisibilityObjectStore } = {}
 ): Promise<V1Asset> {
   const db = getServiceSupabase();
-  const { data, error } = await db
+
+  const { data: projectData, error: projectError } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(projectError)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(projectError, "setAssetVisibility project");
+  if (!projectData) throw notFound(`Project not found: ${projectId}`);
+  const project = projectData as ProjectRow;
+
+  const { data: currentData, error: currentError } = await db
     .from("assets")
-    .update({ visibility, updated_at: new Date().toISOString() })
+    .select("*")
     .eq("id", assetId)
     .eq("project_id", projectId)
     .eq("workspace_id", workspaceId)
-    .select("*")
     .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
-  throwOnError(error, "setAssetVisibility");
-  if (!data) throw notFound(`Asset not found: ${assetId}`);
-  return mapAsset(data as AssetRow);
+  if (isNoRows(currentError)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(currentError, "setAssetVisibility current");
+  if (!currentData) throw notFound(`Asset not found: ${assetId}`);
+  const current = currentData as AssetRow;
+
+  const action = await createAction({
+    projectId,
+    tool: "set_asset_visibility",
+    status: "running",
+    params: {
+      actorId: options.actorId,
+      assetId,
+      previousVisibility: current.visibility ?? "public",
+      visibility,
+      projectVisibility: project.visibility ?? "public",
+    },
+    inputAssetIds: [assetId],
+    rationale: `Set asset visibility to ${visibility}.`,
+  });
+
+  let updated: AssetRow | null = null;
+  try {
+    await reconcileAssetStorage({
+      asset: {
+        id: assetId,
+        storageKey: current.storage_key,
+        storageBucket: current.storage_bucket,
+        visibility,
+      },
+      projectVisibility: project.visibility ?? "public",
+      previousEffectiveVisibility:
+        (current.visibility ?? "public") === "public" &&
+        (project.visibility ?? "public") === "public"
+          ? "public"
+          : "private",
+      store: options.store,
+      persistStorageBucket: async (storageBucket) => {
+        const { data, error } = await db
+          .from("assets")
+          .update({
+            visibility,
+            storage_bucket: storageBucket,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", assetId)
+          .eq("project_id", projectId)
+          .eq("workspace_id", workspaceId)
+          .select("*")
+          .maybeSingle();
+        if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+        throwOnError(error, "setAssetVisibility update");
+        if (!data) throw notFound(`Asset not found: ${assetId}`);
+        updated = data as AssetRow;
+      },
+    });
+    await updateAction(action.id, {
+      status: "applied",
+      outputAssetIds: [assetId],
+    });
+  } catch (error) {
+    await updateAction(action.id, {
+      status: "failed",
+      error: {
+        message: error instanceof Error ? error.message : "Visibility update failed.",
+      },
+    });
+    throw error;
+  }
+
+  if (!updated) throw new ApiError("internal_error", "Asset visibility update failed.");
+  return mapAsset(updated);
+}
+
+export async function setProjectVisibility(
+  workspaceId: string,
+  projectId: string,
+  visibility: "public" | "private",
+  options: { actorId?: string; store?: VisibilityObjectStore } = {}
+): Promise<V1Project> {
+  const db = getServiceSupabase();
+
+  const { data: projectData, error: projectError } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(projectError)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(projectError, "setProjectVisibility project");
+  if (!projectData) throw notFound(`Project not found: ${projectId}`);
+  const project = projectData as ProjectRow;
+
+  const { data: assetData, error: assetError } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("media", "data");
+  throwOnError(assetError, "setProjectVisibility assets");
+  const assets = (assetData ?? []) as AssetRow[];
+
+  const action = await createAction({
+    projectId,
+    tool: "set_project_visibility",
+    status: "running",
+    params: {
+      actorId: options.actorId,
+      previousVisibility: project.visibility ?? "public",
+      visibility,
+      assetCount: assets.length,
+    },
+    inputAssetIds: assets.map((asset) => asset.id),
+    rationale: `Set project visibility to ${visibility} and reconcile asset storage.`,
+  });
+
+  try {
+    for (const asset of assets) {
+      await reconcileAssetStorage({
+        asset: {
+          id: asset.id,
+          storageKey: asset.storage_key,
+          storageBucket: asset.storage_bucket,
+          visibility: asset.visibility ?? "public",
+        },
+        projectVisibility: visibility,
+        previousEffectiveVisibility:
+          (asset.visibility ?? "public") === "public" &&
+          (project.visibility ?? "public") === "public"
+            ? "public"
+            : "private",
+        store: options.store,
+        persistStorageBucket: async (storageBucket) => {
+          const { error } = await db
+            .from("assets")
+            .update({
+              storage_bucket: storageBucket,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", asset.id)
+            .eq("project_id", projectId)
+            .eq("workspace_id", workspaceId);
+          throwOnError(error, "setProjectVisibility asset bucket");
+        },
+      });
+    }
+
+    const { data, error } = await db
+      .from("projects")
+      .update({ visibility, updated_at: new Date().toISOString() })
+      .eq("id", projectId)
+      .eq("workspace_id", workspaceId)
+      .neq("status", "deleted")
+      .select("*")
+      .maybeSingle();
+    if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+    throwOnError(error, "setProjectVisibility update project");
+    if (!data) throw notFound(`Project not found: ${projectId}`);
+
+    await updateAction(action.id, {
+      status: "applied",
+      outputAssetIds: assets.map((asset) => asset.id),
+    });
+    return mapProjectWithProjection(db, data as ProjectRow);
+  } catch (error) {
+    await updateAction(action.id, {
+      status: "failed",
+      error: {
+        message: error instanceof Error ? error.message : "Project visibility update failed.",
+      },
+    });
+    throw error;
+  }
 }
 
 export async function updateAssetAnalysis(
@@ -2330,7 +2730,7 @@ export async function listAssets(
     .eq("workspace_id", workspaceId)
     .neq("media", "data");
   throwOnError(error, "listAssets");
-  const all = (data as AssetRow[]).map(mapAsset);
+  const all = await mapAssets(data as AssetRow[]);
   return paginate(all, limit, cursor);
 }
 
@@ -2656,7 +3056,8 @@ export async function listPublicAssets(
 
   const { data, error } = await query;
   throwOnError(error, "listPublicAssets");
-  return paginate((data as AssetWithProjectRow[]).map(mapAsset), limit, cursor);
+  const assets = await mapAssets(data as AssetWithProjectRow[]);
+  return paginate(assets, limit, cursor);
 }
 
 export type DiscoverSearchItem =
@@ -2689,12 +3090,13 @@ export async function searchPublicContent(
       const item = mapProject(project);
       return { type: "project", item, id: `project:${item.id}`, createdAt: item.createdAt };
     });
-  const assetItems: DiscoverSearchItem[] = (assetsResult.data as AssetRow[]).map(
-    (asset) => {
-      const item = mapAsset(asset);
-      return { type: "asset", item, id: `asset:${item.id}`, createdAt: item.createdAt };
-    }
-  );
+  const publicAssets = await mapAssets(assetsResult.data as AssetRow[]);
+  const assetItems: DiscoverSearchItem[] = publicAssets.map((item) => ({
+    type: "asset",
+    item,
+    id: `asset:${item.id}`,
+    createdAt: item.createdAt,
+  }));
 
   return paginate([...projectItems, ...assetItems], limit, cursor);
 }
@@ -2722,7 +3124,8 @@ export async function listCharacterAnchorAssets(
     .eq("workspace_id", workspaceId)
     .neq("media", "data");
   throwOnError(error, "listCharacterAnchorAssets");
-  const anchors = (data as AssetRow[]).map(mapAsset).filter(isCharacterAnchorAsset);
+  const mapped = await mapAssets(data as AssetRow[]);
+  const anchors = mapped.filter(isCharacterAnchorAsset);
   return paginate(anchors, limit, cursor);
 }
 

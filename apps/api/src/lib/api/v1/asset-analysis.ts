@@ -17,6 +17,10 @@ import {
   V1AssetAnalysis,
   withLocalDir,
 } from "./store";
+import {
+  downloadAssetObjectToTemp,
+  useSupabaseStorage,
+} from "../../supabase/storage";
 
 const execFileAsync = promisify(execFile);
 const ANALYSIS_VERSION = "asset-analysis.v1";
@@ -105,8 +109,11 @@ async function runFfmpeg(args: string[]): Promise<void> {
   }
 }
 
-function assetLocalPath(asset: V1Asset): string | null {
+async function assetLocalPath(asset: V1Asset): Promise<string | null> {
   if (!asset.storageKey) return null;
+  if (useSupabaseStorage()) {
+    return downloadAssetObjectToTemp(asset.storageKey);
+  }
   return path.join(localDir(), asset.storageKey);
 }
 
@@ -117,7 +124,7 @@ async function extractVideoFrames(args: {
   defaultVideoSamples: number;
   maxVideoSamples: number;
 }): Promise<FrameSample[]> {
-  const srcPath = assetLocalPath(args.asset);
+  const srcPath = await assetLocalPath(args.asset);
   if (!srcPath) {
     throw new ApiError(
       "asset_invalid",

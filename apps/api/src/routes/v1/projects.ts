@@ -5,6 +5,7 @@ import {
   parseAnalyzeBatch,
   parseCreateProject,
   parsePagination,
+  parseSetProjectVisibility,
 } from "@/lib/api/v1/schemas";
 import {
   analyzeAssetBatch,
@@ -14,6 +15,8 @@ import {
   createProject,
   getProject,
   listProjects,
+  setProjectPoster,
+  setProjectVisibility,
 } from "@/lib/api/v1/store";
 import { getStoryboard, putStoryboard } from "@/lib/api/v1/storyboard";
 
@@ -57,6 +60,40 @@ projectsRouter.get(
       throw new ApiError("validation_failed", "projectId is required.");
     }
     const project = await getProject(auth.workspaceId, params.projectId);
+    return { status: 200, body: { project } };
+  })
+);
+
+projectsRouter.patch(
+  "/projects/:projectId",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const { visibility } = parseSetProjectVisibility(body);
+    const project = await setProjectVisibility(
+      auth.workspaceId,
+      params.projectId,
+      visibility,
+      { actorId: auth.actor.id }
+    );
+    return { status: 200, body: { project } };
+  })
+);
+
+// Set the project's poster (the movie-poster thumbnail shown in dashboard
+// grids): points the project-scoped 'poster' selection slot at an image asset.
+projectsRouter.post(
+  "/projects/:projectId/poster",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const assetId = (body as { assetId?: unknown } | null)?.assetId;
+    if (typeof assetId !== "string" || assetId.length === 0) {
+      throw new ApiError("validation_failed", "assetId is required.");
+    }
+    const project = await setProjectPoster(auth.workspaceId, params.projectId, assetId);
     return { status: 200, body: { project } };
   })
 );

@@ -1160,6 +1160,8 @@ export interface SetAssetVisibilityInput {
   visibility: "public" | "private";
 }
 
+export type SetProjectVisibilityInput = SetAssetVisibilityInput;
+
 export function parseSetAssetVisibility(input: unknown): SetAssetVisibilityInput {
   if (!isPlainObject(input)) {
     throw validationError("The request body is invalid.", [
@@ -1172,6 +1174,10 @@ export function parseSetAssetVisibility(input: unknown): SetAssetVisibilityInput
     ]);
   }
   return { visibility: input.visibility };
+}
+
+export function parseSetProjectVisibility(input: unknown): SetProjectVisibilityInput {
+  return parseSetAssetVisibility(input);
 }
 
 export function parseUpdateAssetContext(input: unknown): UpdateAssetContextInput {
