@@ -1,9 +1,9 @@
 # Railway deployment
 
-This app deploys to Railway as a single Next.js web service. Railway's Railpack
-builder can detect the Node app, run `npm run build`, and start it with
-`npm run start`. The checked-in `railway.toml` pins those commands and configures
-the existing health route.
+The Express API deploys to Railway from the monorepo root. The Vite web app
+deploys separately to Netlify and calls the Railway API through `VITE_API_URL`.
+The checked-in `railway.toml` pins the API build/start commands and configures
+the health route.
 
 ## Pricing notes
 
@@ -17,12 +17,15 @@ is $5/month and the project uses less than $5 of resources, the bill remains the
 plan minimum. Check Railway's pricing page before launch because plan limits and
 resource prices can change.
 
-For this app, expect usage from:
+For this app, expect Railway usage from:
 
-- The Next.js web service.
+- The Express API service.
 - Remotion export jobs, which temporarily use CPU and memory.
-- Network egress for previews and MP4 downloads.
-- Volume storage if you persist uploaded/generated media on Railway.
+- Network egress for API responses and any server-mediated media paths.
+
+Generated/uploaded asset bytes are planned to move to S3 + CloudFront after the
+storage backend lands. Until then, do not rely on a Railway volume as durable
+production asset storage.
 
 ## Deploy from the Railway dashboard
 
@@ -57,7 +60,12 @@ railway up --ci
 Set these in the service **Variables** tab:
 
 ```bash
-AUTH_MODE=local
+AUTH_MODE=supabase
+DB_BACKEND=supabase
+WEB_ORIGIN=https://popcornready.ai,https://www.popcornready.ai
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
 ANTHROPIC_API_KEY=...
 OPENAI_API_KEY=...
 GEMINI_API_KEY=...
@@ -69,9 +77,69 @@ Notes:
 
 - Railway injects `PORT`; do not hard-code a port.
 - Keep provider API keys server-only. Do not rename them with `NEXT_PUBLIC_`.
-- `AUTH_MODE=local` is acceptable for a private demo. Hosted key-based auth is
-  not implemented yet, so do not expose this as a multi-user production service
-  without adding auth.
+- Hosted deploys should use `AUTH_MODE=supabase`. `AUTH_MODE=local` is for
+  local development and private demos only.
+
+## Provisioned asset storage
+
+Asset sharing and delivery will use the S3 + CloudFront resources provisioned
+for `docs/scopes/asset-sharing-delivery-prs.md` PR0. These resources exist now,
+but the current runtime does not read the S3 storage variables yet. Keep
+`STORAGE_BACKEND` on the currently supported backend until the PR1/PR2 storage
+code lands and has been validated in the target environment.
+
+Stage these non-secret Railway values when enabling the S3 backend:
+
+```bash
+STORAGE_BACKEND=s3
+AWS_REGION=us-east-1
+S3_PUBLIC_BUCKET=popcornready-assets-public
+S3_PRIVATE_BUCKET=popcornready-assets-private
+S3_PUBLIC_URL_BASE=https://d22zp4rym9mw9c.cloudfront.net
+CF_SIGN_KEY_PAIR_ID=K2GHXNWYN1I8EL
+```
+
+Stage these secret Railway values from AWS Secrets Manager when enabling the S3
+backend:
+
+```bash
+AWS_ACCESS_KEY_ID=<popcornready/assets-api-iam-access-key.AWS_ACCESS_KEY_ID>
+AWS_SECRET_ACCESS_KEY=<popcornready/assets-api-iam-access-key.AWS_SECRET_ACCESS_KEY>
+CF_SIGN_PRIVATE_KEY=<popcornready/cloudfront-signing.CF_SIGN_PRIVATE_KEY>
+```
+
+Provisioned AWS resources:
+
+| Resource | Value |
+|---|---|
+| Public bucket | `popcornready-assets-public` |
+| Private bucket | `popcornready-assets-private` |
+| Public CloudFront distribution | `E2W8U7YBN5I8LX` |
+| Public CloudFront domain | `d22zp4rym9mw9c.cloudfront.net` |
+| Public bucket OAC | `E2T9PBFSXQK26X` |
+| Future signed-CDN public key | `K2GHXNWYN1I8EL` |
+| Future signed-CDN key group | `c102ffbe-c797-476d-bebe-da5086b8ba60` |
+| API IAM user | `popcornready-assets-api` |
+| IAM access key secret | `popcornready/assets-api-iam-access-key` |
+| CloudFront private key secret | `popcornready/cloudfront-signing` |
+
+Both buckets are private with public access blocked, bucket-owner-enforced
+object ownership, AES-256 default encryption, and versioning enabled. The public
+bucket is readable only by the CloudFront distribution through OAC. The private
+bucket has no distribution; private reads use S3 presigned GET first.
+
+Bucket CORS is configured for:
+
+```text
+https://popcornready.ai
+https://www.popcornready.ai
+http://localhost:5173
+http://localhost:3000
+http://localhost:4000
+```
+
+Allowed browser methods are `GET`, `HEAD`, `PUT`, and `POST`; exposed headers
+are `ETag`, `x-amz-request-id`, and `x-amz-id-2`.
 
 ## Healthcheck
 
@@ -86,21 +154,18 @@ active once it returns HTTP 200.
 
 ## File storage limitation
 
-The MVP currently stores project state and media on the local filesystem:
+Local development can still store project state and media on the local
+filesystem when `DB_BACKEND=local` or `STORAGE_BACKEND=local`:
 
 - `data/project.json`
 - `public/uploads/`
 - `public/generated/`
 - `public/exports/`
 
-Railway deployment filesystems are ephemeral unless a volume is attached. This
-means uploaded clips, generated assets, exported MP4s, and the single-project
-JSON store can be lost on redeploy or service migration.
-
-For a short demo, ephemeral storage may be acceptable. For a hosted service,
-move project state to a database and media to object storage. A temporary Railway
-volume can reduce data loss, but the app is not yet parameterized to move all of
-these directories under `RAILWAY_VOLUME_MOUNT_PATH`.
+Railway deployment filesystems are ephemeral unless a volume is attached. The
+current runtime can still write media to non-S3 paths; that is not durable
+production asset storage. Hosted deploys should move project state to Supabase
+and enable S3/CloudFront only after the storage backend PRs land.
 
 ## Public API automation
 
