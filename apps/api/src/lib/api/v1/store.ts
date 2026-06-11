@@ -120,6 +120,7 @@ export interface V1Asset {
   visibility?: "public" | "private";
   remoteUrl?: string;
   storageKey?: string;
+  storageBucket?: string;
   durationSec?: number;
   context?: AssetContext;
   userContext?: UserAssetContext;
@@ -376,13 +377,33 @@ const isNoRows = isMissingRow;
 const throwOnError = (error: Parameters<typeof throwDatabaseError>[1], context: string) =>
   throwDatabaseError(`store.${context}`, error);
 
-async function defaultVisibilityForWorkspace(
+export async function defaultVisibilityForWorkspace(
   db: SupabaseClient,
   workspaceId: string
 ): Promise<"public" | "private"> {
   const { data, error } = await db.rpc("owner_tier", { ws_id: workspaceId });
   throwOnError(error, "defaultVisibilityForWorkspace");
   return data === "paid" ? "private" : "public";
+}
+
+export async function effectiveAssetStorageVisibility(input: {
+  workspaceId: string;
+  projectId: string;
+  assetVisibility: "public" | "private";
+}): Promise<"public" | "private"> {
+  if (input.assetVisibility === "private") return "private";
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("visibility")
+    .eq("id", input.projectId)
+    .eq("workspace_id", input.workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${input.projectId}`);
+  throwOnError(error, "effectiveAssetStorageVisibility project");
+  const row = data as { visibility?: "public" | "private" } | null;
+  if (!row) throw notFound(`Project not found: ${input.projectId}`);
+  return row.visibility === "private" ? "private" : "public";
 }
 
 // --- workspaces ------------------------------------------------------------
@@ -969,6 +990,7 @@ interface AssetRow {
   inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
+  storage_bucket: string | null;
   source: AgentAssetSource;
   duration_sec: number | null;
   description: string | null;
@@ -1030,6 +1052,7 @@ function assetToRow(asset: V1Asset): AssetRow {
         : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
+    storage_bucket: asset.storageBucket ?? null,
     source: asset.source,
     duration_sec: asset.durationSec ?? null,
     description: asset.userContext?.description ?? asset.context?.summary ?? null,
@@ -1104,6 +1127,7 @@ function mapAsset(row: AssetRow): V1Asset {
   };
   if (row.remote_url != null) asset.remoteUrl = row.remote_url;
   if (row.storage_key != null) asset.storageKey = row.storage_key;
+  if (row.storage_bucket != null) asset.storageBucket = row.storage_bucket;
   if (row.duration_sec != null) asset.durationSec = row.duration_sec;
   if (envelope.context !== undefined) asset.context = envelope.context;
   if (envelope.userContext !== undefined) asset.userContext = envelope.userContext;
@@ -2256,6 +2280,7 @@ export async function updateAsset(
       filename: row.filename,
       remote_url: row.remote_url,
       storage_key: row.storage_key,
+      storage_bucket: row.storage_bucket,
       duration_sec: row.duration_sec,
       description: row.description,
       context: row.context,

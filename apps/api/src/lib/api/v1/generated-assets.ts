@@ -6,8 +6,8 @@
 // actual audio-duration capture. Idempotency is handled by the shared
 // handleMutation wrapper, so this module stays framework-free and testable.
 
-import { promises as fs } from "fs";
 import path from "path";
+import { writeAssetObject } from "@/lib/storage/asset-write";
 import { parseConsistencyMode } from "@/lib/generative/character-context";
 import { measureAudioDurationSec } from "@/lib/generative/audio-duration";
 import { withDerivedAssetKnowledge } from "./assets";
@@ -42,11 +42,11 @@ import {
   addAsset,
   assertRunBudgetAllows,
   createAction,
+  effectiveAssetStorageVisibility,
   getAssetFingerprintPins,
   getAsset,
   getProject,
   localDir,
-  mediaGeneratedDir,
   updateAction,
   updateAsset,
   V1Action,
@@ -481,18 +481,8 @@ async function runGeneration(
     throw new Error(`${parsed.provider} provider does not support ${parsed.kind}.`);
   }
 
-  // The byte filename is a storage key (its own namespace), NOT the DB asset id —
-  // Postgres assigns the asset id. Use a random storage name so the bytes can be
-  // written before the row exists; self-referential fields (source.generatedAssetId,
-  // characterBinding.assetId, semanticAnalysis.id) are patched with the real id
-  // after the row is inserted below.
   const storageName = randomUUID();
   const filename = `${storageName}.${result.extension}`;
-  const dir = mediaGeneratedDir(auth.workspaceId, projectId);
-  await fs.mkdir(dir, { recursive: true });
-  const destPath = path.join(dir, filename);
-  await fs.writeFile(destPath, result.bytes);
-  const storageKey = path.relative(localDir(), destPath);
 
   const actualDurationSec =
     result.kind === "audio"
@@ -567,9 +557,8 @@ async function runGeneration(
     projectId,
     kind: result.kind as AssetKind,
     filename,
-    status: "ready",
+    status: "pending",
     source: { type: "generated", generatedAssetId: "" },
-    storageKey,
     durationSec,
     context,
     semanticAnalysis: buildSemanticAnalysis({
@@ -593,14 +582,50 @@ async function runGeneration(
     createdByActionId: action.id,
   });
 
+  const visibility = await effectiveAssetStorageVisibility({
+    workspaceId: auth.workspaceId,
+    projectId,
+    assetVisibility: created.visibility ?? "public",
+  });
+  const stored = await writeAssetObject({
+    workspaceId: auth.workspaceId,
+    projectId,
+    assetId: created.id,
+    filename,
+    bytes: result.bytes,
+    visibility,
+  });
+
   // Stamp the DB-generated id onto the asset's self-referential fields (these
   // could not be known before the row existed).
   const updated = await updateAsset(auth.workspaceId, projectId, created.id, (a) => {
+    a.status = "ready";
     a.source = { type: "generated", generatedAssetId: created.id };
+    a.storageKey = stored.storageKey;
+    a.storageBucket = stored.storageBucket;
     if (a.semanticAnalysis) a.semanticAnalysis.assetId = created.id;
     if (a.provenance?.characterBinding) {
       a.provenance.characterBinding.assetId = created.id;
     }
+    const derived = withDerivedAssetKnowledge(a);
+    a.assetKnowledge = derived.assetKnowledge;
+    a.clipUnderstanding = derived.clipUnderstanding;
+    a.semanticAnalysis = derived.semanticAnalysis;
+    if (a.semanticAnalysis) a.semanticAnalysis.assetId = created.id;
+  });
+  await createAction({
+    projectId,
+    runId: parsed.runId,
+    tool: "store_asset_bytes",
+    status: "applied",
+    params: {
+      sourceType: "generated",
+      provider: result.provider,
+      storageKey: stored.storageKey,
+      storageBucket: stored.storageBucket,
+      contentType: stored.contentType,
+    },
+    outputAssetIds: [updated.id],
   });
   await updateAction(action.id, {
     status: "applied",
