@@ -2761,16 +2761,58 @@ export interface AssetMediaUrls {
   expiresAt: string;
 }
 
+export interface AssetMediaUrlRow {
+  media: AssetMedia;
+  kind: GraphAssetKind;
+  status: "ready" | "pending";
+  remote_url: string | null;
+  storage_key: string | null;
+  storage_bucket?: string | null;
+  visibility?: "public" | "private" | null;
+}
+
 interface WorkspaceAssetJoinRow extends AssetRow {
   projects?: { name: string; status: "active" | "deleted" };
 }
 
-async function signedUrlForStorageKey(storageKey: string): Promise<string | null> {
-  try {
-    return await createSignedAssetUrl(storageKey);
-  } catch {
+const MEDIA_URL_EXPIRES_IN_SEC = 60 * 60;
+
+function mediaUrlExpiresAt(now: () => Date = () => new Date()): string {
+  return new Date(now().getTime() + MEDIA_URL_EXPIRES_IN_SEC * 1000).toISOString();
+}
+
+function localStaticUrlForStorageKey(storageKey: string): string | null {
+  const normalized = storageKey.replace(/^\/+/, "");
+  if (
+    !normalized.startsWith("media/uploads/") &&
+    !normalized.startsWith("media/generated/")
+  ) {
     return null;
   }
+  return `/${normalized.replace(/^media\//, "")}`;
+}
+
+export async function assetMediaUrlsForRow(
+  row: AssetMediaUrlRow,
+  opts: { now?: () => Date } = {}
+): Promise<AssetMediaUrls> {
+  let url: string | null = null;
+  if (row.status === "ready" && row.media !== "data") {
+    url = row.storage_key ? localStaticUrlForStorageKey(row.storage_key) : null;
+    if (!url) {
+      try {
+        url = (await resolveAssetUrl(row, { privateTtlSec: MEDIA_URL_EXPIRES_IN_SEC })) ?? null;
+      } catch {
+        url = row.remote_url;
+      }
+    }
+  }
+
+  return {
+    url,
+    thumbnailUrl: assetMediaToKind(row.media, row.kind) === "image" ? url : null,
+    expiresAt: mediaUrlExpiresAt(opts.now),
+  };
 }
 
 export async function getAssetMediaUrls(
@@ -2790,17 +2832,7 @@ export async function getAssetMediaUrls(
   if (!data) throw notFound(`Asset not found: ${assetId}`);
 
   const row = data as AssetRow;
-  const url = row.storage_key
-    ? (await signedUrlForStorageKey(row.storage_key)) ?? row.remote_url
-    : row.remote_url;
-  const kind = assetMediaToKind(row.media, row.kind);
-  const thumbnailUrl = kind === "image" ? url : null;
-
-  return {
-    url,
-    thumbnailUrl,
-    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-  };
+  return assetMediaUrlsForRow(row);
 }
 
 export async function listWorkspaceAssets(
