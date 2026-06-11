@@ -1,69 +1,194 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { localDir } from "@/lib/api/v1/store";
-import { storageConfig } from "./config";
+import {
+  CopyObjectCommand,
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  NoSuchBucket,
+  NotFound,
+  PutObjectCommand,
+  type BucketLocationConstraint,
+  type S3Client,
+} from "@aws-sdk/client-s3";
+import { canSignCloudFront, signCloudFrontUrl } from "./cloudfront";
+import {
+  readStorageConfig,
+  resolveBucket,
+  type AssetVisibility,
+  type StorageConfig,
+} from "./config";
+import { createLocalObjectStore } from "./local-store";
+import { buildPresignedS3Url } from "./s3-presign";
+import { getS3Client } from "./s3-client";
+
+export type ObjectBody = Buffer | Uint8Array | string;
 
 export interface PutObjectInput {
-  bucket: string;
   key: string;
+  body: ObjectBody;
+  visibility: AssetVisibility;
+  contentType?: string;
+}
+
+export interface CopyObjectInput {
+  sourceKey: string;
+  sourceVisibility: AssetVisibility;
+  destinationKey: string;
+  destinationVisibility: AssetVisibility;
+  contentType?: string;
+}
+
+export interface StoredObject {
   body: Buffer;
-  contentType: string;
+  contentType?: string;
 }
 
 export interface ObjectStore {
-  putObject(input: PutObjectInput): Promise<void>;
+  putObject(input: PutObjectInput): Promise<{ bucket: string; key: string }>;
+  getObject(key: string, visibility: AssetVisibility): Promise<StoredObject>;
+  copyObject(input: CopyObjectInput): Promise<{ bucket: string; key: string }>;
+  deleteObject(key: string, visibility: AssetVisibility): Promise<void>;
+  objectUrl(key: string, visibility: AssetVisibility): string;
+  signedObjectUrl(key: string, visibility: AssetVisibility, expiresInSec?: number): Promise<string>;
+  ensureBucket(visibility: AssetVisibility): Promise<void>;
 }
 
-class LocalObjectStore implements ObjectStore {
-  async putObject(input: PutObjectInput): Promise<void> {
-    void input.bucket;
-    await writeLocalCache(input.key, input.body);
-  }
+export interface S3ObjectStoreDeps {
+  client?: S3Client;
+  signCloudFrontUrl?: typeof signCloudFrontUrl;
+  buildPresignedS3Url?: typeof buildPresignedS3Url;
 }
 
-async function writeLocalCache(key: string, body: Buffer): Promise<void> {
-  const destPath = path.join(localDir(), key);
-  await fs.mkdir(path.dirname(destPath), { recursive: true });
-  await fs.writeFile(destPath, body);
+export function createObjectStore(config: StorageConfig = readStorageConfig()): ObjectStore {
+  if (config.backend === "local") return createLocalObjectStore(config);
+  return createS3ObjectStore(config);
 }
 
-type S3Sender = Pick<S3Client, "send">;
+export function createS3ObjectStore(
+  config: StorageConfig = readStorageConfig(),
+  deps: S3ObjectStoreDeps = {}
+): ObjectStore {
+  const client = deps.client ?? getS3Client(config);
+  const cloudFrontSigner = deps.signCloudFrontUrl ?? signCloudFrontUrl;
+  const s3Presigner = deps.buildPresignedS3Url ?? buildPresignedS3Url;
 
-let s3Client: S3Sender | null = null;
+  return {
+    async putObject(input) {
+      const bucket = resolveBucket(config, input.visibility);
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+        })
+      );
+      return { bucket, key: input.key };
+    },
 
-function getS3Client(): S3Sender {
-  if (s3Client) return s3Client;
-  const endpoint = process.env.AWS_ENDPOINT_URL_S3;
-  s3Client = new S3Client({
-    region: process.env.AWS_REGION || "us-east-1",
-    endpoint,
-    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
-  });
-  return s3Client;
+    async getObject(key, visibility) {
+      const bucket = resolveBucket(config, visibility);
+      const response = await client.send(
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        })
+      );
+      const body = response.Body
+        ? Buffer.from(await response.Body.transformToByteArray())
+        : Buffer.alloc(0);
+      return {
+        body,
+        contentType: response.ContentType,
+      };
+    },
+
+    async copyObject(input) {
+      const sourceBucket = resolveBucket(config, input.sourceVisibility);
+      const destinationBucket = resolveBucket(config, input.destinationVisibility);
+      await client.send(
+        new CopyObjectCommand({
+          Bucket: destinationBucket,
+          Key: input.destinationKey,
+          CopySource: `${sourceBucket}/${encodeS3CopySourceKey(input.sourceKey)}`,
+          ContentType: input.contentType,
+          MetadataDirective: input.contentType ? "REPLACE" : undefined,
+        })
+      );
+      return { bucket: destinationBucket, key: input.destinationKey };
+    },
+
+    async deleteObject(key, visibility) {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: resolveBucket(config, visibility),
+          Key: key,
+        })
+      );
+    },
+
+    objectUrl(key) {
+      return joinUrl(config.publicUrlBase, key);
+    },
+
+    async signedObjectUrl(key, visibility, expiresInSec = 300) {
+      const unsignedUrl = this.objectUrl(key, visibility);
+      if (canSignCloudFront(config)) {
+        try {
+          return cloudFrontSigner(unsignedUrl, expiresInSec, config);
+        } catch {
+          // Fall through to S3 presign. The storage layer must keep reads working
+          // when CloudFront signing is absent or misconfigured in local/staging.
+        }
+      }
+
+      try {
+        return await s3Presigner(
+          {
+            bucket: resolveBucket(config, visibility),
+            key,
+            expiresInSec,
+          },
+          client
+        );
+      } catch {
+        return unsignedUrl;
+      }
+    },
+
+    async ensureBucket(visibility) {
+      const bucket = resolveBucket(config, visibility);
+      try {
+        await client.send(new HeadBucketCommand({ Bucket: bucket }));
+        return;
+      } catch (error) {
+        if (!isMissingBucket(error)) throw error;
+      }
+
+      await client.send(
+        new CreateBucketCommand({
+          Bucket: bucket,
+          CreateBucketConfiguration:
+            config.region === "us-east-1"
+              ? undefined
+              : { LocationConstraint: config.region as BucketLocationConstraint },
+        })
+      );
+    },
+  };
 }
 
-export function setS3ClientForTest(client: S3Sender | null): void {
-  s3Client = client;
+function joinUrl(base: string, key: string): string {
+  return `${base.replace(/\/+$/, "")}/${key.replace(/^\/+/, "")}`;
 }
 
-class S3ObjectStore implements ObjectStore {
-  async putObject(input: PutObjectInput): Promise<void> {
-    await getS3Client().send(
-      new PutObjectCommand({
-        Bucket: input.bucket,
-        Key: input.key,
-        Body: input.body,
-        ContentType: input.contentType,
-      })
-    );
-    await writeLocalCache(input.key, input.body);
-  }
+function encodeS3CopySourceKey(key: string): string {
+  return key
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
 }
 
-const localStore = new LocalObjectStore();
-const s3Store = new S3ObjectStore();
-
-export function objectStore(): ObjectStore {
-  return storageConfig().backend === "s3" ? s3Store : localStore;
+function isMissingBucket(error: unknown): boolean {
+  return error instanceof NoSuchBucket || error instanceof NotFound;
 }

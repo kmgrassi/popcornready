@@ -1,6 +1,12 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { bucketForVisibility, type StorageVisibility } from "./config";
-import { objectStore } from "./object-store";
+import { localDir } from "@/lib/api/v1/store";
+import {
+  readStorageConfig,
+  type AssetVisibility,
+  type StorageConfig,
+} from "./config";
+import { createObjectStore, type ObjectStore } from "./object-store";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".aac": "audio/aac",
@@ -46,17 +52,27 @@ export async function writeAssetObject(input: {
   assetId: string;
   filename: string;
   bytes: Buffer;
-  visibility: StorageVisibility;
+  visibility: AssetVisibility;
   contentType?: string;
+  store?: ObjectStore;
+  config?: StorageConfig;
 }): Promise<{ storageKey: string; storageBucket: string; contentType: string }> {
+  const config = input.config ?? readStorageConfig();
+  const store = input.store ?? createObjectStore(config);
   const storageKey = assetStorageKey(input);
-  const storageBucket = bucketForVisibility(input.visibility);
   const contentType = contentTypeForFilename(input.filename, input.contentType);
-  await objectStore().putObject({
-    bucket: storageBucket,
+  const stored = await store.putObject({
     key: storageKey,
     body: input.bytes,
+    visibility: input.visibility,
     contentType,
   });
-  return { storageKey, storageBucket, contentType };
+  await writeCompatibilityCache(storageKey, input.bytes);
+  return { storageKey, storageBucket: stored.bucket, contentType };
+}
+
+async function writeCompatibilityCache(key: string, bytes: Buffer): Promise<void> {
+  const target = path.join(localDir(), key);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, bytes);
 }
