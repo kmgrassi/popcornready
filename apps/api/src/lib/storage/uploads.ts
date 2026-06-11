@@ -14,8 +14,7 @@ import type {
 } from "@/lib/api/v1/schemas";
 import {
   readStorageConfig,
-  storageBucketForVisibility,
-  type AssetStorageBucket,
+  visibilityForBucket,
 } from "./config";
 import {
   completeMultipartUpload,
@@ -27,7 +26,7 @@ import {
 export interface DirectAssetUploadResponse {
   assetId: string;
   key: string;
-  bucket: AssetStorageBucket;
+  bucket: string;
   method: "put" | "multipart";
   contentType: string;
   expiresAt: string;
@@ -75,7 +74,6 @@ export async function createDirectAssetUpload(
   }
 
   const reservation = await reserveDirectUploadAsset(auth.workspaceId, projectId, input);
-  const bucket = storageBucketForVisibility(reservation.effectiveVisibility);
   const key = assetStorageKey({
     workspaceId: auth.workspaceId,
     projectId,
@@ -85,7 +83,7 @@ export async function createDirectAssetUpload(
 
   if (
     reservation.asset.storageKey !== key ||
-    reservation.asset.storageBucket !== bucket
+    !reservation.asset.storageBucket
   ) {
     throw new ApiError(
       "internal_error",
@@ -95,7 +93,7 @@ export async function createDirectAssetUpload(
 
   if (input.sizeBytes >= config.multipartThresholdBytes) {
     const multipart = await createMultipartUploadTarget({
-      bucket,
+      visibility: reservation.effectiveVisibility,
       key,
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
@@ -103,7 +101,7 @@ export async function createDirectAssetUpload(
     return {
       assetId: reservation.asset.id,
       key,
-      bucket,
+      bucket: reservation.asset.storageBucket,
       method: "multipart",
       contentType: input.contentType,
       expiresAt: multipart.expiresAt,
@@ -112,14 +110,14 @@ export async function createDirectAssetUpload(
   }
 
   const put = await createPresignedPutTarget({
-    bucket,
+    visibility: reservation.effectiveVisibility,
     key,
     contentType: input.contentType,
   });
   return {
     assetId: reservation.asset.id,
     key,
-    bucket,
+    bucket: reservation.asset.storageBucket,
     method: "put",
     contentType: input.contentType,
     expiresAt: put.expiresAt,
@@ -170,7 +168,7 @@ export async function completeDirectAssetUpload(
       throw new ApiError("asset_invalid", "Upload reservation is missing storage.");
     }
     await completeMultipartUpload({
-      bucket: current.storageBucket,
+      visibility: visibilityForBucket(config, current.storageBucket),
       key: current.storageKey,
       uploadId: input.uploadId,
       parts: completedParts(input.parts),
@@ -189,7 +187,7 @@ export async function completeDirectAssetUpload(
     throw new ApiError("asset_invalid", "Upload reservation is missing storage.");
   }
   const exists = await objectExists({
-    bucket: asset.storageBucket,
+    visibility: visibilityForBucket(config, asset.storageBucket),
     key: asset.storageKey,
   });
   if (!exists) {

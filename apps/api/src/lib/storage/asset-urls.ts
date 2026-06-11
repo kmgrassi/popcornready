@@ -1,18 +1,9 @@
 import type { V1Asset } from "@/lib/api/v1/store";
-import { readStorageConfig, type AssetStorageBucket } from "./config";
-import { createPresignedGetUrl } from "./object-store";
+import { readStorageConfig, visibilityForBucket } from "./config";
+import { createObjectStore } from "./object-store";
 
 function localStorageUrl(storageKey: string): string {
   return `/${storageKey.replace(/^media\//, "")}`;
-}
-
-function publicObjectUrl(storageKey: string): string | null {
-  const config = readStorageConfig();
-  if (!config.publicUrlBase) return null;
-  return `${config.publicUrlBase}/${storageKey
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/")}`;
 }
 
 export async function resolveAssetUrlForGeneration(
@@ -26,13 +17,9 @@ export async function resolveAssetUrlForGeneration(
     return localStorageUrl(asset.storageKey);
   }
 
-  if (asset.storageBucket === "assets-public") {
-    const publicUrl = publicObjectUrl(asset.storageKey);
-    if (publicUrl) return publicUrl;
-  }
+  const visibility = visibilityForBucket(config, asset.storageBucket);
+  const store = createObjectStore(config);
+  if (visibility === "public") return store.objectUrl(asset.storageKey, visibility);
 
-  return createPresignedGetUrl({
-    bucket: asset.storageBucket as AssetStorageBucket,
-    key: asset.storageKey,
-  });
+  return store.signedObjectUrl(asset.storageKey, visibility);
 }

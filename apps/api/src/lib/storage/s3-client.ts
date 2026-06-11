@@ -1,23 +1,28 @@
 import { S3Client } from "@aws-sdk/client-s3";
-import { readStorageConfig } from "./config";
+import { readStorageConfig, type StorageConfig } from "./config";
 
 let cachedClient: S3Client | null = null;
-let cachedKey = "";
+let cachedSignature = "";
 
-export function getS3Client(env: NodeJS.ProcessEnv = process.env): S3Client {
-  const config = readStorageConfig(env);
-  const key = [
+export function getS3Client(config: StorageConfig = readStorageConfig()): S3Client {
+  const signature = [
     config.region,
-    config.endpointUrl ?? "",
+    config.s3EndpointUrl ?? "",
     config.forcePathStyle ? "path" : "virtual",
   ].join("|");
-  if (cachedClient && cachedKey === key) return cachedClient;
+
+  if (cachedClient && cachedSignature === signature) return cachedClient;
 
   cachedClient = new S3Client({
     region: config.region,
-    endpoint: config.endpointUrl,
+    endpoint: config.s3EndpointUrl,
     forcePathStyle: config.forcePathStyle,
   });
-  cachedKey = key;
+  cachedSignature = signature;
   return cachedClient;
+}
+
+export function resetS3ClientForTests(): void {
+  cachedClient = null;
+  cachedSignature = "";
 }

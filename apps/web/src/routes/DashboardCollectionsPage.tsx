@@ -265,6 +265,19 @@ export function ProjectsPage() {
           <div className={`${styles.grid} ${styles.gridProjects}`}>
             {state.items.map((project) => (
               <article className={styles.projectCard} key={project.id}>
+                <Link
+                  className={styles.cardLink}
+                  to={`/projects/${encodeURIComponent(project.id)}/storyboard`}
+                  aria-label={`Open ${project.name}`}
+                >
+                  {project.posterUrl ? (
+                    <img className={styles.poster} src={project.posterUrl} alt="" loading="lazy" />
+                  ) : (
+                    <div className={`${styles.poster} ${styles.posterEmpty}`} aria-hidden="true">
+                      <span>{project.name.trim().charAt(0).toUpperCase() || "?"}</span>
+                    </div>
+                  )}
+                </Link>
                 <div className={styles.projectCardBody}>
                   <div>
                     <span className={styles.rowTitle}>{project.name}</span>

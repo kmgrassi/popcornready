@@ -203,6 +203,24 @@
   object-fit: cover;
 }
 
+/* Movie-poster thumbnail: theatrical one-sheet proportions. */
+.poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--media-bg);
+  object-fit: cover;
+}
+
+.posterEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 3rem;
+  font-weight: 800;
+}
+
 .outputMedia {
   display: block;
   width: 100%;

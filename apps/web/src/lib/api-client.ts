@@ -463,6 +463,11 @@ export const v1Api = {
     apiRequest<ProjectResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}`
     ),
+  setProjectPoster: (projectId: string, assetId: string) =>
+    apiRequest<ProjectResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/poster`,
+      { method: "POST", body: { assetId } }
+    ),
   getProjectStoryboard: (projectId: string, signal?: AbortSignal) =>
     apiRequest<ProjectStoryboardResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard`,

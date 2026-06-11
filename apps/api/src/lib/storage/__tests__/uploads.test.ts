@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { assetStorageKey } from "../uploads";
-import { readStorageConfig, storageBucketForVisibility } from "../config";
+import { readStorageConfig, resolveBucket } from "../config";
 import { resolveAssetUrlForGeneration } from "../asset-urls";
 
 test("assetStorageKey scopes browser uploads by workspace, project, and asset", () => {
@@ -17,9 +17,10 @@ test("assetStorageKey scopes browser uploads by workspace, project, and asset", 
   );
 });
 
-test("storageBucketForVisibility maps effective visibility to delivery buckets", () => {
-  assert.equal(storageBucketForVisibility("public"), "assets-public");
-  assert.equal(storageBucketForVisibility("private"), "assets-private");
+test("resolveBucket maps effective visibility to delivery buckets", () => {
+  const config = readStorageConfig({});
+  assert.equal(resolveBucket(config, "public"), "assets-public");
+  assert.equal(resolveBucket(config, "private"), "assets-private");
 });
 
 test("readStorageConfig defaults direct uploads to the dark local backend", () => {
@@ -51,8 +52,12 @@ test("resolveAssetUrlForGeneration preserves local storage-key URLs", async () =
 test("resolveAssetUrlForGeneration uses the public base for public S3 assets", async () => {
   const previousBackend = process.env.STORAGE_BACKEND;
   const previousBase = process.env.S3_PUBLIC_URL_BASE;
+  const previousAccessKey = process.env.AWS_ACCESS_KEY_ID;
+  const previousSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
   process.env.STORAGE_BACKEND = "s3";
   process.env.S3_PUBLIC_URL_BASE = "https://cdn.example.com/";
+  process.env.AWS_ACCESS_KEY_ID = "test";
+  process.env.AWS_SECRET_ACCESS_KEY = "test";
   try {
     assert.equal(
       await resolveAssetUrlForGeneration({
@@ -61,12 +66,16 @@ test("resolveAssetUrlForGeneration uses the public base for public S3 assets", a
         storageKey: "ws_1/proj_1/asset_1/launch clip.mp4",
         storageBucket: "assets-public",
       }),
-      "https://cdn.example.com/ws_1/proj_1/asset_1/launch%20clip.mp4"
+      "https://cdn.example.com/ws_1/proj_1/asset_1/launch clip.mp4"
     );
   } finally {
     if (previousBackend === undefined) delete process.env.STORAGE_BACKEND;
     else process.env.STORAGE_BACKEND = previousBackend;
     if (previousBase === undefined) delete process.env.S3_PUBLIC_URL_BASE;
     else process.env.S3_PUBLIC_URL_BASE = previousBase;
+    if (previousAccessKey === undefined) delete process.env.AWS_ACCESS_KEY_ID;
+    else process.env.AWS_ACCESS_KEY_ID = previousAccessKey;
+    if (previousSecretKey === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+    else process.env.AWS_SECRET_ACCESS_KEY = previousSecretKey;
   }
 });
