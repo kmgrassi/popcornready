@@ -28,7 +28,10 @@ test("local store puts, gets, copies, deletes, and returns local media URLs", as
     bucket: "assets-public",
     key: "ws/proj/asset/source.txt",
   });
-  assert.equal(store.objectUrl(put.key, "public"), "/media/ws/proj/asset/source.txt");
+  assert.equal(
+    store.objectUrl(put.key, "public"),
+    "/media/assets-public/ws/proj/asset/source.txt"
+  );
 
   const stored = await store.getObject(put.key, "public");
   assert.equal(stored.body.toString("utf8"), "hello storage");
@@ -61,6 +64,6 @@ test("local signed URLs intentionally fall back to the unsigned local media path
 
   assert.equal(
     await store.signedObjectUrl("ws/proj/asset/private.mp4", "private"),
-    "/media/ws/proj/asset/private.mp4"
+    "/media/assets-private/ws/proj/asset/private.mp4"
   );
 });

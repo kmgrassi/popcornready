@@ -51,8 +51,9 @@ export function createLocalObjectStore(config: StorageConfig): ObjectStore {
       await fs.rm(metadataPath(objectPath(config, bucket, key)), { force: true });
     },
 
-    objectUrl(key: string) {
-      return `/media/${key.replace(/^\/+/, "")}`;
+    objectUrl(key: string, visibility: AssetVisibility) {
+      const bucket = resolveBucket(config, visibility);
+      return `/media/${bucket}/${key.replace(/^\/+/, "")}`;
     },
 
     async signedObjectUrl(key: string, visibility: AssetVisibility) {
