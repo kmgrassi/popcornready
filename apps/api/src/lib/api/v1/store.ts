@@ -2342,6 +2342,11 @@ export async function setAssetVisibility(
         visibility,
       },
       projectVisibility: project.visibility ?? "public",
+      previousEffectiveVisibility:
+        (current.visibility ?? "public") === "public" &&
+        (project.visibility ?? "public") === "public"
+          ? "public"
+          : "private",
       store: options.store,
       persistStorageBucket: async (storageBucket) => {
         const { data, error } = await db
@@ -2433,6 +2438,11 @@ export async function setProjectVisibility(
           visibility: asset.visibility ?? "public",
         },
         projectVisibility: visibility,
+        previousEffectiveVisibility:
+          (asset.visibility ?? "public") === "public" &&
+          (project.visibility ?? "public") === "public"
+            ? "public"
+            : "private",
         store: options.store,
         persistStorageBucket: async (storageBucket) => {
           const { error } = await db

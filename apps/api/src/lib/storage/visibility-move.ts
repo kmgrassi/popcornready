@@ -27,6 +27,7 @@ export interface VisibilityObjectStore {
 export interface ReconcileAssetStorageInput {
   asset: ReconcileStorageAsset;
   projectVisibility: AssetVisibility;
+  previousEffectiveVisibility?: AssetVisibility;
   buckets?: VisibilityBucketConfig;
   store?: VisibilityObjectStore;
   persistStorageBucket: (storageBucket: string | null) => Promise<void>;
@@ -62,7 +63,6 @@ export async function reconcileAssetStorage(
   const buckets = input.buckets ?? storageBucketsFromEnv();
   const store = input.store ?? visibilityObjectStoreFromEnv();
   const storageKey = input.asset.storageKey ?? null;
-  const sourceBucket = input.asset.storageBucket ?? null;
   const effectiveVisibility = effectiveAssetVisibility({
     assetVisibility: input.asset.visibility,
     projectVisibility: input.projectVisibility,
@@ -70,8 +70,30 @@ export async function reconcileAssetStorage(
   const targetBucket = storageKey
     ? storageBucketForVisibility(effectiveVisibility, buckets)
     : null;
+  const sourceBucket =
+    input.asset.storageBucket ??
+    (storageKey && input.previousEffectiveVisibility
+      ? storageBucketForVisibility(input.previousEffectiveVisibility, buckets)
+      : null);
 
-  if (!storageKey || !sourceBucket || !targetBucket || sourceBucket === targetBucket) {
+  if (!storageKey) {
+    await input.persistStorageBucket(null);
+    return {
+      effectiveVisibility,
+      sourceBucket,
+      targetBucket,
+      moved: false,
+      invalidated: false,
+    };
+  }
+
+  if (!sourceBucket || !targetBucket) {
+    throw new Error(
+      `Cannot reconcile asset ${input.asset.id}: storage bucket is missing and no previous effective visibility was provided.`
+    );
+  }
+
+  if (sourceBucket === targetBucket) {
     await input.persistStorageBucket(targetBucket ?? sourceBucket);
     return {
       effectiveVisibility,

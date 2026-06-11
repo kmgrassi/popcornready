@@ -103,6 +103,56 @@ test("reconcile leaves copied target object when source delete fails", async () 
   ]);
 });
 
+test("reconcile infers missing source bucket from previous effective visibility", async () => {
+  const { store, calls } = recordingStore();
+
+  const result = await reconcileAssetStorage({
+    asset: {
+      id: "asset_1",
+      visibility: "private",
+      storageKey: "ws/proj/asset/file.mp4",
+      storageBucket: null,
+    },
+    projectVisibility: "public",
+    previousEffectiveVisibility: "public",
+    buckets,
+    store,
+    persistStorageBucket: async (bucket) => {
+      calls.push(`persist:${bucket}`);
+    },
+  });
+
+  assert.deepEqual(calls, [
+    "copy:assets-public->assets-private:ws/proj/asset/file.mp4",
+    "persist:assets-private",
+    "invalidate:ws/proj/asset/file.mp4",
+    "delete:assets-public:ws/proj/asset/file.mp4",
+  ]);
+  assert.equal(result.sourceBucket, "assets-public");
+  assert.equal(result.targetBucket, "assets-private");
+  assert.equal(result.moved, true);
+});
+
+test("reconcile fails missing source bucket when it cannot infer source", async () => {
+  await assert.rejects(
+    reconcileAssetStorage({
+      asset: {
+        id: "asset_1",
+        visibility: "private",
+        storageKey: "ws/proj/asset/file.mp4",
+        storageBucket: null,
+      },
+      projectVisibility: "public",
+      buckets,
+      store: recordingStore().store,
+      persistStorageBucket: async () => {
+        throw new Error("should not persist");
+      },
+    }),
+    /storage bucket is missing/
+  );
+});
+
 test("project republish restores only assets whose own flag is public", async () => {
   const publicAsset = await reconcileAssetStorage({
     asset: {
