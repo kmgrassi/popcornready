@@ -11,5 +11,19 @@ services:
     volumes:
       - minio-data:/data
 
+  minio-create-buckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+        sleep 1;
+      done;
+      mc mb --ignore-existing local/assets-public;
+      mc mb --ignore-existing local/assets-private;
+      mc anonymous set download local/assets-public;
+      "
+
 volumes:
   minio-data:
