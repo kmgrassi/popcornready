@@ -66,6 +66,7 @@ import {
   type GenerationRunsStore,
 } from "../../v1/generation-runs/store";
 import { getRequestSupabase } from "../../supabase/clients";
+import { createSignedAssetUrl } from "../../supabase/storage";
 import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
 import {
   AgentAssetSource,
@@ -96,6 +97,8 @@ export interface V1Project {
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
   hasStoryboard?: boolean;
+  posterAssetId: string | null;
+  posterUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -423,6 +426,8 @@ function mapProject(
     brief?: VideoBrief | null;
     currentBriefVersionId?: string | null;
     hasStoryboard?: boolean;
+    posterAssetId?: string | null;
+    posterUrl?: string | null;
   } = {}
 ): V1Project {
   return {
@@ -434,6 +439,8 @@ function mapProject(
     brief: projection.brief ?? null,
     currentBriefVersionId: projection.currentBriefVersionId ?? null,
     hasStoryboard: projection.hasStoryboard ?? false,
+    posterAssetId: projection.posterAssetId ?? null,
+    posterUrl: projection.posterUrl ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -643,15 +650,128 @@ async function selectedDataAsset(
   return (await dataAssetById(db, activeAssetId)) ?? latestDataAsset(db, projectId, kind);
 }
 
+// --- poster ----------------------------------------------------------------
+// The project's marketing one-sheet, shown as the thumbnail in dashboard
+// grids. The current poster is the project-scoped 'poster' selection slot
+// (slot_owner_lineage_id null). Until one is selected or generated, fall back
+// to the newest ready poster-kind asset, then the newest ready image of any
+// kind, so project grids stay visual from the first keyframe onward.
+//
+// Public projections (unauthenticated discover) must pass publicOnly so a
+// private selected poster or private fallback image never leaks a signed URL;
+// a private selection falls through to public-only candidates instead.
+const POSTER_SLOT_ROLE = "poster";
+
+interface PosterAssetRow {
+  id: string;
+  media: AssetMedia;
+  status: "ready" | "pending";
+  remote_url: string | null;
+  storage_key: string | null;
+}
+
+const POSTER_ASSET_COLUMNS = "id, media, status, remote_url, storage_key";
+
+interface PosterVisibilityOpts {
+  publicOnly?: boolean;
+}
+
+async function readyImageAssetById(
+  db: SupabaseClient,
+  projectId: string,
+  assetId: string,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  let query = db
+    .from("assets")
+    .select(POSTER_ASSET_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("id", assetId)
+    .eq("media", "image")
+    .eq("status", "ready");
+  if (opts.publicOnly) query = query.eq("visibility", "public");
+  const { data, error } = await query.maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, "readyImageAssetById");
+  return (data as PosterAssetRow | null) ?? null;
+}
+
+async function latestReadyImageAsset(
+  db: SupabaseClient,
+  projectId: string,
+  kind?: GraphAssetKind,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  let query = db
+    .from("assets")
+    .select(POSTER_ASSET_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("media", "image")
+    .eq("status", "ready");
+  if (kind) query = query.eq("kind", kind);
+  if (opts.publicOnly) query = query.eq("visibility", "public");
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, `latestReadyImageAsset ${kind ?? "image"}`);
+  return (data as PosterAssetRow | null) ?? null;
+}
+
+async function projectPosterAsset(
+  db: SupabaseClient,
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
+): Promise<PosterAssetRow | null> {
+  const selected = await db
+    .from("current_selections")
+    .select("active_asset_id")
+    .eq("project_id", projectId)
+    .is("slot_owner_lineage_id", null)
+    .eq("slot_role", POSTER_SLOT_ROLE)
+    .maybeSingle();
+  if (!isNoRows(selected.error)) {
+    throwOnError(selected.error, "projectPosterAsset selection");
+  }
+  const activeAssetId = (selected.data as CurrentSelectionRow | null)?.active_asset_id;
+  if (activeAssetId) {
+    const asset = await readyImageAssetById(db, projectId, activeAssetId, opts);
+    if (asset) return asset;
+  }
+  return (
+    (await latestReadyImageAsset(db, projectId, "poster", opts)) ??
+    (await latestReadyImageAsset(db, projectId, undefined, opts))
+  );
+}
+
+// Browser-usable URL for a poster asset: short-lived signed URL for bytes in
+// the private assets bucket, otherwise the asset's remote URL.
+async function posterUrlFor(asset: PosterAssetRow | null): Promise<string | null> {
+  if (!asset) return null;
+  if (asset.storage_key) {
+    try {
+      return await createSignedAssetUrl(asset.storage_key);
+    } catch {
+      // Signing can fail for stale/local-backend storage keys; fall through.
+    }
+  }
+  return asset.remote_url;
+}
+
 async function projectProjection(
   db: SupabaseClient,
-  projectId: string
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
 ): Promise<{
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
   hasStoryboard: boolean;
+  posterAssetId: string | null;
+  posterUrl: string | null;
 }> {
-  const [briefAsset, storyboard] = await Promise.all([
+  const [briefAsset, storyboard, posterAsset] = await Promise.all([
     selectedDataAsset(db, projectId, "brief", "brief"),
     db
       .from("storyboards")
@@ -659,12 +779,18 @@ async function projectProjection(
       .eq("project_id", projectId)
       .limit(1)
       .maybeSingle(),
+    projectPosterAsset(db, projectId, opts),
   ]);
+  const poster = {
+    posterAssetId: posterAsset?.id ?? null,
+    posterUrl: await posterUrlFor(posterAsset),
+  };
   if (isNoRows(storyboard.error)) {
     return {
       brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
       currentBriefVersionId: briefAsset?.id ?? null,
       hasStoryboard: false,
+      ...poster,
     };
   }
   throwOnError(storyboard.error, "projectProjection storyboard");
@@ -672,20 +798,22 @@ async function projectProjection(
     brief: briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null,
     currentBriefVersionId: briefAsset?.id ?? null,
     hasStoryboard: Boolean(storyboard.data),
+    ...poster,
   };
 }
 
 async function mapProjectWithProjection(
   db: SupabaseClient,
-  row: ProjectRow
+  row: ProjectRow,
+  opts: PosterVisibilityOpts = {}
 ): Promise<V1Project> {
-  return mapProject(row, await projectProjection(db, row.id));
+  return mapProject(row, await projectProjection(db, row.id, opts));
 }
 
 async function setActiveAssetSelection(
   db: SupabaseClient,
   projectId: string,
-  slotRole: "brief",
+  slotRole: "brief" | typeof POSTER_SLOT_ROLE,
   activeAssetId: string,
   setByActionId?: string
 ): Promise<void> {
@@ -949,7 +1077,8 @@ type GraphAssetKind =
   | "critique"
   | "plan"
   | "composite"
-  | "render";
+  | "render"
+  | "poster";
 
 type AssetMedia = "data" | "image" | "video" | "audio";
 
@@ -1328,6 +1457,47 @@ export async function getProject(
   throwOnError(error, "getProject");
   if (!data) throw notFound(`Project not found: ${projectId}`);
   return mapProjectWithProjection(db, data as ProjectRow);
+}
+
+// Point the project-scoped 'poster' selection slot at an image asset. Any
+// ready image in the project qualifies (a keyframe can be the poster until a
+// dedicated poster-kind asset is generated); history stays in selections.
+export async function setProjectPoster(
+  workspaceId: string,
+  projectId: string,
+  assetId: string
+): Promise<V1Project> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "setProjectPoster project");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  const projectRow = data as ProjectRow;
+
+  const asset = await readyImageAssetById(db, projectId, assetId);
+  if (!asset) {
+    throw new ApiError(
+      "validation_failed",
+      `Asset ${assetId} is not a ready image asset in project ${projectId}.`
+    );
+  }
+
+  const action = await createAction({
+    projectId,
+    tool: "set_poster",
+    status: "applied",
+    params: { assetId },
+    inputAssetIds: [assetId],
+    rationale: "Set the project poster (dashboard thumbnail).",
+  });
+  await setActiveAssetSelection(db, projectId, POSTER_SLOT_ROLE, assetId, action.id);
+  return mapProjectWithProjection(db, projectRow);
 }
 
 interface StoryboardRow {
@@ -1982,7 +2152,9 @@ export async function listPublicProjects(
     .neq("status", "deleted");
   throwOnError(error, "listPublicProjects");
   const all = await Promise.all(
-    (data as ProjectRow[]).map((row) => mapProjectWithProjection(db, row))
+    (data as ProjectRow[]).map((row) =>
+      mapProjectWithProjection(db, row, { publicOnly: true })
+    )
   );
   return paginate(all, limit, cursor);
 }

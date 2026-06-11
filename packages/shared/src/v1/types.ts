@@ -36,6 +36,10 @@ export interface V1Project {
   name: string;
   status: ProjectStatus;
   hasStoryboard?: boolean;
+  // Movie-poster thumbnail: the project-scoped 'poster' selection (falling
+  // back to the project's newest ready image). Signed, short-lived URL.
+  posterAssetId?: string | null;
+  posterUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }
