@@ -3085,7 +3085,7 @@ async function selectedMediaAsset(
 ): Promise<AssetRow | null> {
   let selectionQuery = db
     .from("current_selections")
-    .select("active_asset_id")
+    .select("active_asset_id, seq")
     .eq("project_id", projectId)
     .eq("slot_role", slotRole);
 
@@ -3113,6 +3113,28 @@ async function selectedMediaAsset(
     .maybeSingle();
   if (isNoRows(error)) return null;
   throwOnError(error, `selectedMediaAsset asset ${slotRole}`);
+  return (data as AssetRow | null) ?? null;
+}
+
+async function latestReadyMediaAsset(
+  db: SupabaseClient,
+  projectId: string,
+  kind: GraphAssetKind,
+  media: AssetMedia
+): Promise<AssetRow | null> {
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("kind", kind)
+    .eq("media", media)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, `latestReadyMediaAsset ${kind}`);
   return (data as AssetRow | null) ?? null;
 }
 
@@ -3164,7 +3186,7 @@ export async function getProjectWatchMedia(
 
   const posterAsset =
     (await selectedMediaAsset(db, projectId, "poster", "image")) ??
-    (await selectedMediaAsset(db, projectId, "keyframe", "image"));
+    (await latestReadyMediaAsset(db, projectId, "keyframe", "image"));
   const poster = posterAsset ? await projectedAssetUrl(posterAsset) : { url: null };
 
   return {

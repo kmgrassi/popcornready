@@ -21,7 +21,7 @@ export function RecentOutputsStrip({
           <Link
             className={styles.output}
             key={output.artifactId}
-            to={`/projects/${encodeURIComponent(output.projectId)}/watch`}
+            to={`/outputs?${new URLSearchParams({ projectId: output.projectId }).toString()}`}
           >
             {output.thumbnailUrl ? (
               <img
