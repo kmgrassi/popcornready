@@ -656,6 +656,10 @@ async function selectedDataAsset(
 // (slot_owner_lineage_id null). Until one is selected or generated, fall back
 // to the newest ready poster-kind asset, then the newest ready image of any
 // kind, so project grids stay visual from the first keyframe onward.
+//
+// Public projections (unauthenticated discover) must pass publicOnly so a
+// private selected poster or private fallback image never leaks a signed URL;
+// a private selection falls through to public-only candidates instead.
 const POSTER_SLOT_ROLE = "poster";
 
 interface PosterAssetRow {
@@ -668,19 +672,25 @@ interface PosterAssetRow {
 
 const POSTER_ASSET_COLUMNS = "id, media, status, remote_url, storage_key";
 
+interface PosterVisibilityOpts {
+  publicOnly?: boolean;
+}
+
 async function readyImageAssetById(
   db: SupabaseClient,
   projectId: string,
-  assetId: string
+  assetId: string,
+  opts: PosterVisibilityOpts = {}
 ): Promise<PosterAssetRow | null> {
-  const { data, error } = await db
+  let query = db
     .from("assets")
     .select(POSTER_ASSET_COLUMNS)
     .eq("project_id", projectId)
     .eq("id", assetId)
     .eq("media", "image")
-    .eq("status", "ready")
-    .maybeSingle();
+    .eq("status", "ready");
+  if (opts.publicOnly) query = query.eq("visibility", "public");
+  const { data, error } = await query.maybeSingle();
   if (isNoRows(error)) return null;
   throwOnError(error, "readyImageAssetById");
   return (data as PosterAssetRow | null) ?? null;
@@ -689,7 +699,8 @@ async function readyImageAssetById(
 async function latestReadyImageAsset(
   db: SupabaseClient,
   projectId: string,
-  kind?: GraphAssetKind
+  kind?: GraphAssetKind,
+  opts: PosterVisibilityOpts = {}
 ): Promise<PosterAssetRow | null> {
   let query = db
     .from("assets")
@@ -698,6 +709,7 @@ async function latestReadyImageAsset(
     .eq("media", "image")
     .eq("status", "ready");
   if (kind) query = query.eq("kind", kind);
+  if (opts.publicOnly) query = query.eq("visibility", "public");
   const { data, error } = await query
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
@@ -710,7 +722,8 @@ async function latestReadyImageAsset(
 
 async function projectPosterAsset(
   db: SupabaseClient,
-  projectId: string
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
 ): Promise<PosterAssetRow | null> {
   const selected = await db
     .from("current_selections")
@@ -724,12 +737,12 @@ async function projectPosterAsset(
   }
   const activeAssetId = (selected.data as CurrentSelectionRow | null)?.active_asset_id;
   if (activeAssetId) {
-    const asset = await readyImageAssetById(db, projectId, activeAssetId);
+    const asset = await readyImageAssetById(db, projectId, activeAssetId, opts);
     if (asset) return asset;
   }
   return (
-    (await latestReadyImageAsset(db, projectId, "poster")) ??
-    (await latestReadyImageAsset(db, projectId))
+    (await latestReadyImageAsset(db, projectId, "poster", opts)) ??
+    (await latestReadyImageAsset(db, projectId, undefined, opts))
   );
 }
 
@@ -749,7 +762,8 @@ async function posterUrlFor(asset: PosterAssetRow | null): Promise<string | null
 
 async function projectProjection(
   db: SupabaseClient,
-  projectId: string
+  projectId: string,
+  opts: PosterVisibilityOpts = {}
 ): Promise<{
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
@@ -765,7 +779,7 @@ async function projectProjection(
       .eq("project_id", projectId)
       .limit(1)
       .maybeSingle(),
-    projectPosterAsset(db, projectId),
+    projectPosterAsset(db, projectId, opts),
   ]);
   const poster = {
     posterAssetId: posterAsset?.id ?? null,
@@ -790,9 +804,10 @@ async function projectProjection(
 
 async function mapProjectWithProjection(
   db: SupabaseClient,
-  row: ProjectRow
+  row: ProjectRow,
+  opts: PosterVisibilityOpts = {}
 ): Promise<V1Project> {
-  return mapProject(row, await projectProjection(db, row.id));
+  return mapProject(row, await projectProjection(db, row.id, opts));
 }
 
 async function setActiveAssetSelection(
@@ -2137,7 +2152,9 @@ export async function listPublicProjects(
     .neq("status", "deleted");
   throwOnError(error, "listPublicProjects");
   const all = await Promise.all(
-    (data as ProjectRow[]).map((row) => mapProjectWithProjection(db, row))
+    (data as ProjectRow[]).map((row) =>
+      mapProjectWithProjection(db, row, { publicOnly: true })
+    )
   );
   return paginate(all, limit, cursor);
 }
