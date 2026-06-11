@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Beat, EditPlan, Scene } from "@popcorn/shared/types";
 import type { Asset } from "@popcorn/shared/assets/types";
+import { MediaViewer, type MediaViewerItem } from "../media/MediaViewer";
 
 // Read-only storyboard surface (docs/scopes/storyboard-scenes.md Part C / PR5).
 // Renders an EditPlan as Scenes → a grid of beat tiles. Each tile shows the
@@ -36,16 +37,37 @@ function formatDuration(durationSec: number): string {
   return Number.isInteger(rounded) ? `${rounded}s` : `${rounded.toFixed(1)}s`;
 }
 
+function assetViewerItem(asset: Asset): MediaViewerItem {
+  return {
+    id: asset.id,
+    kind: asset.kind,
+    title: asset.media.filename || asset.description || asset.id,
+    filename: asset.media.filename,
+    durationSec: asset.media.durationSec,
+    url: asset.media.url,
+    thumbnailUrl: asset.kind === "image" ? asset.media.url : undefined,
+  };
+}
+
 export function StoryboardView({
   plan,
   assets,
   loading = false,
   error = null,
 }: StoryboardViewProps) {
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const tilesByBeat = useMemo(
     () => indexStoryboardTilesByBeat(assets),
     [assets]
   );
+  const storyboardTiles = useMemo(
+    () => Array.from(tilesByBeat.values()),
+    [tilesByBeat]
+  );
+  const selectedIndex = selectedAssetId
+    ? storyboardTiles.findIndex((asset) => asset.id === selectedAssetId)
+    : -1;
+  const selectedAsset = selectedIndex >= 0 ? storyboardTiles[selectedIndex] : null;
 
   const scenes = plan?.scenes ?? [];
   const beatCount = useMemo(
@@ -86,10 +108,25 @@ export function StoryboardView({
               scene={scene}
               index={index}
               tilesByBeat={tilesByBeat}
+              onViewAsset={setSelectedAssetId}
             />
           ))}
         </div>
       )}
+      <MediaViewer
+        item={selectedAsset ? assetViewerItem(selectedAsset) : null}
+        hasPrevious={selectedIndex > 0}
+        hasNext={selectedIndex >= 0 && selectedIndex < storyboardTiles.length - 1}
+        onClose={() => setSelectedAssetId(null)}
+        onPrevious={() => {
+          if (selectedIndex > 0) setSelectedAssetId(storyboardTiles[selectedIndex - 1].id);
+        }}
+        onNext={() => {
+          if (selectedIndex >= 0 && selectedIndex < storyboardTiles.length - 1) {
+            setSelectedAssetId(storyboardTiles[selectedIndex + 1].id);
+          }
+        }}
+      />
     </main>
   );
 }
@@ -98,10 +135,12 @@ function SceneSection({
   scene,
   index,
   tilesByBeat,
+  onViewAsset,
 }: {
   scene: Scene;
   index: number;
   tilesByBeat: Map<string, Asset>;
+  onViewAsset: (assetId: string) => void;
 }) {
   const beats = scene.beats ?? [];
   return (
@@ -130,6 +169,7 @@ function SceneSection({
               key={beat.id || `beat-${index}-${beatIndex}`}
               beat={beat}
               tile={beat.id ? tilesByBeat.get(beat.id) : undefined}
+              onViewAsset={onViewAsset}
             />
           ))}
         </div>
@@ -138,7 +178,15 @@ function SceneSection({
   );
 }
 
-function BeatTile({ beat, tile }: { beat: Beat; tile?: Asset }) {
+function BeatTile({
+  beat,
+  tile,
+  onViewAsset,
+}: {
+  beat: Beat;
+  tile?: Asset;
+  onViewAsset: (assetId: string) => void;
+}) {
   return (
     <article className="storyboard-beat-tile">
       <div className="storyboard-beat-sketch">
@@ -148,6 +196,15 @@ function BeatTile({ beat, tile }: { beat: Beat; tile?: Asset }) {
             src={tile.media.url}
             alt={`Storyboard sketch for "${beat.name}"`}
             loading="lazy"
+            role="button"
+            tabIndex={0}
+            onClick={() => onViewAsset(tile.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onViewAsset(tile.id);
+              }
+            }}
           />
         ) : (
           <div className="storyboard-beat-placeholder muted">

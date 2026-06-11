@@ -2755,8 +2755,52 @@ export interface WorkspaceAssetSummary {
   updatedAt: string;
 }
 
+export interface AssetMediaUrls {
+  url: string | null;
+  thumbnailUrl?: string | null;
+  expiresAt: string;
+}
+
 interface WorkspaceAssetJoinRow extends AssetRow {
   projects?: { name: string; status: "active" | "deleted" };
+}
+
+async function signedUrlForStorageKey(storageKey: string): Promise<string | null> {
+  try {
+    return await createSignedAssetUrl(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+export async function getAssetMediaUrls(
+  workspaceId: string,
+  assetId: string
+): Promise<AssetMediaUrls> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("id", assetId)
+    .eq("workspace_id", workspaceId)
+    .neq("media", "data")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, "getAssetMediaUrls");
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+
+  const row = data as AssetRow;
+  const url = row.storage_key
+    ? (await signedUrlForStorageKey(row.storage_key)) ?? row.remote_url
+    : row.remote_url;
+  const kind = assetMediaToKind(row.media, row.kind);
+  const thumbnailUrl = kind === "image" ? url : null;
+
+  return {
+    url,
+    thumbnailUrl,
+    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+  };
 }
 
 export async function listWorkspaceAssets(

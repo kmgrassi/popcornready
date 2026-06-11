@@ -1,11 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import type { AssetKind } from "@popcorn/shared/v1/types";
+import { MediaViewer, type MediaViewerItem } from "../components/media/MediaViewer";
 
 type UploadItem = {
   id: string;
   name: string;
   size: number;
   type: string;
+  kind: AssetKind;
+  url: string;
 };
 
 function formatBytes(bytes: number) {
@@ -20,13 +24,48 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function mediaKindForType(type: string): AssetKind {
+  if (type.startsWith("audio/")) return "audio";
+  if (type.startsWith("video/")) return "video";
+  return "image";
+}
+
+function uploadViewerItem(upload: UploadItem): MediaViewerItem {
+  return {
+    id: upload.id,
+    kind: upload.kind,
+    title: upload.name,
+    filename: upload.name,
+    url: upload.url,
+  };
+}
+
 export function UploadsPage() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
+  const uploadsRef = useRef<UploadItem[]>([]);
 
   const totalSize = useMemo(
     () => uploads.reduce((sum, upload) => sum + upload.size, 0),
     [uploads],
   );
+
+  useEffect(() => {
+    uploadsRef.current = uploads;
+  }, [uploads]);
+
+  useEffect(() => {
+    return () => {
+      for (const upload of uploadsRef.current) {
+        URL.revokeObjectURL(upload.url);
+      }
+    };
+  }, []);
+
+  const selectedIndex = selectedUploadId
+    ? uploads.findIndex((upload) => upload.id === selectedUploadId)
+    : -1;
+  const selectedUpload = selectedIndex >= 0 ? uploads[selectedIndex] : null;
 
   return (
     <main className="studio-secondary">
@@ -65,6 +104,8 @@ export function UploadsPage() {
                   name: file.name,
                   size: file.size,
                   type: file.type || "Unknown",
+                  kind: mediaKindForType(file.type),
+                  url: URL.createObjectURL(file),
                 })),
                 ...current,
               ]);
@@ -110,11 +151,20 @@ export function UploadsPage() {
               <span>{formatBytes(upload.size)}</span>
               <button
                 className="secondary compact"
-                onClick={() =>
+                onClick={() => setSelectedUploadId(upload.id)}
+                type="button"
+              >
+                View
+              </button>
+              <button
+                className="secondary compact"
+                onClick={() => {
+                  URL.revokeObjectURL(upload.url);
                   setUploads((current) =>
                     current.filter((item) => item.id !== upload.id),
-                  )
-                }
+                  );
+                  if (selectedUploadId === upload.id) setSelectedUploadId(null);
+                }}
                 type="button"
               >
                 Remove
@@ -123,6 +173,20 @@ export function UploadsPage() {
           ))
         )}
       </section>
+      <MediaViewer
+        item={selectedUpload ? uploadViewerItem(selectedUpload) : null}
+        hasPrevious={selectedIndex > 0}
+        hasNext={selectedIndex >= 0 && selectedIndex < uploads.length - 1}
+        onClose={() => setSelectedUploadId(null)}
+        onPrevious={() => {
+          if (selectedIndex > 0) setSelectedUploadId(uploads[selectedIndex - 1].id);
+        }}
+        onNext={() => {
+          if (selectedIndex >= 0 && selectedIndex < uploads.length - 1) {
+            setSelectedUploadId(uploads[selectedIndex + 1].id);
+          }
+        }}
+      />
     </main>
   );
 }
