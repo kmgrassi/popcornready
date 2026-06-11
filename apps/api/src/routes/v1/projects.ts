@@ -14,6 +14,7 @@ import {
 import {
   createProject,
   getProject,
+  getProjectWatchMedia,
   listProjects,
   setProjectPoster,
   setProjectVisibility,
@@ -105,6 +106,25 @@ projectsRouter.get(
       throw new ApiError("validation_failed", "projectId is required.");
     }
     return getStoryboard({ auth, projectId: params.projectId });
+  })
+);
+
+projectsRouter.get(
+  "/projects/:projectId/watch",
+  route(async ({ auth }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const media = await getProjectWatchMedia(auth.workspaceId, params.projectId);
+    return {
+      status: 200,
+      body: {
+        media,
+        fallback: {
+          storyboardUrl: `/projects/${encodeURIComponent(params.projectId)}/storyboard`,
+        },
+      },
+    };
   })
 );
 
