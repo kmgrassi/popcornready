@@ -18,15 +18,21 @@ export interface ObjectStore {
 class LocalObjectStore implements ObjectStore {
   async putObject(input: PutObjectInput): Promise<void> {
     void input.bucket;
-    const destPath = path.join(localDir(), input.key);
-    await fs.mkdir(path.dirname(destPath), { recursive: true });
-    await fs.writeFile(destPath, input.body);
+    await writeLocalCache(input.key, input.body);
   }
 }
 
-let s3Client: S3Client | null = null;
+async function writeLocalCache(key: string, body: Buffer): Promise<void> {
+  const destPath = path.join(localDir(), key);
+  await fs.mkdir(path.dirname(destPath), { recursive: true });
+  await fs.writeFile(destPath, body);
+}
 
-function getS3Client(): S3Client {
+type S3Sender = Pick<S3Client, "send">;
+
+let s3Client: S3Sender | null = null;
+
+function getS3Client(): S3Sender {
   if (s3Client) return s3Client;
   const endpoint = process.env.AWS_ENDPOINT_URL_S3;
   s3Client = new S3Client({
@@ -35,6 +41,10 @@ function getS3Client(): S3Client {
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   });
   return s3Client;
+}
+
+export function setS3ClientForTest(client: S3Sender | null): void {
+  s3Client = client;
 }
 
 class S3ObjectStore implements ObjectStore {
@@ -47,6 +57,7 @@ class S3ObjectStore implements ObjectStore {
         ContentType: input.contentType,
       })
     );
+    await writeLocalCache(input.key, input.body);
   }
 }
 
