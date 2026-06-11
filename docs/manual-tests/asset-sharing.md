@@ -29,9 +29,9 @@ AWS_SECRET_ACCESS_KEY=minioadmin \
 pnpm --filter @popcorn/api dev
 ```
 
-If the public and private buckets do not already exist, create them in the
-MinIO console before running the test. The default console is usually
-`http://localhost:9001`.
+The compose file also creates `assets-public` and `assets-private`. The MinIO
+console is available at `http://localhost:9001` when you need to inspect object
+placement by hand.
 
 ## Automated Smoke
 
