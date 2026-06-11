@@ -6,6 +6,10 @@ export type AssetVisibility = "public" | "private";
 export interface StorageConfig {
   backend: StorageBackend;
   localMediaDir: string;
+  // URL origin for local-backend media (the API serves the local object store
+  // statically). Defaults to the API's own localhost origin so the split SPA
+  // (different origin) gets absolute, fetchable URLs out of the box.
+  localUrlBase: string;
   region: string;
   publicBucket: string;
   privateBucket: string;
@@ -36,6 +40,9 @@ export function readStorageConfig(
     localMediaDir:
       trim(env.STORAGE_LOCAL_DIR) ||
       path.join(trim(env.POPCORN_READY_LOCAL_DIR) || path.join(process.cwd(), ".local"), "media"),
+    localUrlBase:
+      trim(env.STORAGE_LOCAL_URL_BASE).replace(/\/+$/, "") ||
+      `http://localhost:${trim(env.PORT) || "4000"}`,
     region: trim(env.AWS_REGION) || "us-east-1",
     publicBucket: trim(env.S3_PUBLIC_BUCKET) || "assets-public",
     privateBucket: trim(env.S3_PRIVATE_BUCKET) || "assets-private",

@@ -2749,6 +2749,8 @@ export interface WorkspaceAssetSummary {
   source: string;
   filename?: string;
   description?: string;
+  url?: string;
+  thumbnailUrl?: string;
   durationSec?: number;
   visibility: "public" | "private";
   createdAt: string;
@@ -2781,30 +2783,16 @@ function mediaUrlExpiresAt(now: () => Date = () => new Date()): string {
   return new Date(now().getTime() + MEDIA_URL_EXPIRES_IN_SEC * 1000).toISOString();
 }
 
-function localStaticUrlForStorageKey(storageKey: string): string | null {
-  const normalized = storageKey.replace(/^\/+/, "");
-  if (
-    !normalized.startsWith("media/uploads/") &&
-    !normalized.startsWith("media/generated/")
-  ) {
-    return null;
-  }
-  return `/${normalized.replace(/^media\//, "")}`;
-}
-
 export async function assetMediaUrlsForRow(
   row: AssetMediaUrlRow,
   opts: { now?: () => Date } = {}
 ): Promise<AssetMediaUrls> {
   let url: string | null = null;
   if (row.status === "ready" && row.media !== "data") {
-    url = row.storage_key ? localStaticUrlForStorageKey(row.storage_key) : null;
-    if (!url) {
-      try {
-        url = (await resolveAssetUrl(row, { privateTtlSec: MEDIA_URL_EXPIRES_IN_SEC })) ?? null;
-      } catch {
-        url = row.remote_url;
-      }
+    try {
+      url = (await resolveAssetUrl(row, { privateTtlSec: MEDIA_URL_EXPIRES_IN_SEC })) ?? null;
+    } catch {
+      url = row.remote_url;
     }
   }
 
@@ -2877,7 +2865,24 @@ export async function listWorkspaceAssets(
       updatedAt: iso(row.updated_at),
     };
   });
-  return paginate(all, limit, cursor);
+  const paged = paginate(all, limit, cursor);
+  // Resolve display URLs for the returned page only — private-asset URLs are
+  // presigned per call, so hydrating the full workspace list would be wasted
+  // signing work.
+  const rowById = new Map(filtered.map((row) => [row.id, row]));
+  const items = await Promise.all(
+    paged.items.map(async (item) => {
+      const row = rowById.get(item.id);
+      if (!row) return item;
+      const media = await assetMediaUrlsForRow(row);
+      return {
+        ...item,
+        url: media.url ?? undefined,
+        thumbnailUrl: media.thumbnailUrl ?? undefined,
+      };
+    })
+  );
+  return { items, nextCursor: paged.nextCursor };
 }
 
 // ---------------------------------------------------------------------------

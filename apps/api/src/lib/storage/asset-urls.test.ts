@@ -4,6 +4,7 @@ import { resolveAssetUrl } from "./asset-urls";
 
 const ENV_KEYS = [
   "STORAGE_BACKEND",
+  "STORAGE_LOCAL_URL_BASE",
   "AWS_REGION",
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
@@ -108,8 +109,9 @@ test("resolveAssetUrl keeps private-bucket assets signed even if the flag is pub
   assert.equal(parsed.searchParams.get("X-Amz-Expires"), "300");
 });
 
-test("resolveAssetUrl returns public paths for local backend storage keys", async () => {
+test("resolveAssetUrl returns absolute local URLs for local backend storage keys", async () => {
   process.env.STORAGE_BACKEND = "local";
+  process.env.STORAGE_LOCAL_URL_BASE = "http://localhost:4200";
 
   const url = await resolveAssetUrl({
     remote_url: null,
@@ -118,5 +120,5 @@ test("resolveAssetUrl returns public paths for local backend storage keys", asyn
     visibility: "private",
   });
 
-  assert.equal(url, "/uploads/ws/proj/asset.mp4");
+  assert.equal(url, "http://localhost:4200/uploads/ws/proj/asset.mp4");
 });
