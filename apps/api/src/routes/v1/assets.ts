@@ -7,13 +7,19 @@ import {
   updateAssetContext,
 } from "@/lib/api/v1/assets";
 import {
+  parseCompleteAssetUpload,
   parseAssetInventory,
+  parseDirectAssetUpload,
   parsePagination,
   parseRegisterAsset,
   parseSetAssetVisibility,
   parseUpdateAssetContext,
 } from "@/lib/api/v1/schemas";
 import { getAsset, listAssets, setAssetVisibility } from "@/lib/api/v1/store";
+import {
+  completeDirectAssetUpload,
+  createDirectAssetUpload,
+} from "@/lib/storage/uploads";
 
 export const assetsRouter = Router();
 
@@ -54,12 +60,33 @@ assetsRouter.post(
 );
 
 assetsRouter.post(
+  "/projects/:projectId/assets/upload-url",
+  mutation(async ({ auth, body }, params) => {
+    const projectId = requiredParam(params, "projectId");
+    const input = parseDirectAssetUpload(body);
+    const upload = await createDirectAssetUpload(auth, projectId, input);
+    return { status: 201, body: { upload } };
+  })
+);
+
+assetsRouter.post(
   "/projects/:projectId/assets/inventory",
   mutation(async ({ auth, body }, params) => {
     const projectId = requiredParam(params, "projectId");
     const input = parseAssetInventory(body);
     const report = await inventoryAssets(auth, projectId, input);
     return { status: 200, body: { report } };
+  })
+);
+
+assetsRouter.post(
+  "/projects/:projectId/assets/:assetId/complete",
+  mutation(async ({ auth, body }, params) => {
+    const projectId = requiredParam(params, "projectId");
+    const assetId = requiredParam(params, "assetId");
+    const input = parseCompleteAssetUpload(body);
+    const asset = await completeDirectAssetUpload(auth, projectId, assetId, input);
+    return { status: 200, body: { asset } };
   })
 );
 

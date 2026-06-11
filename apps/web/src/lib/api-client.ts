@@ -259,32 +259,51 @@ export interface CreateProjectResponse extends ProjectResponse {
   briefVersion?: BriefVersion;
 }
 
-export interface RegisterProjectUploadInput {
-  source: {
-    type: "multipart_upload";
-    dataBase64: string;
-    mimeType?: string;
-  };
-  kind: AssetKind;
+export interface AssetUploadUserContext {
+  description?: string;
+  intendedUse?: Array<
+    | "primary_footage"
+    | "b_roll"
+    | "style_reference"
+    | "music"
+    | "voiceover"
+    | "dialogue"
+    | "sound_effect"
+  >;
+}
+
+export interface CreateAssetUploadInput {
   filename: string;
+  contentType: string;
+  sizeBytes: number;
+  kind: AssetKind;
   durationSec?: number;
-  userContext?: {
-    description?: string;
-    intendedUse?: Array<
-      | "primary_footage"
-      | "b_roll"
-      | "style_reference"
-      | "music"
-      | "voiceover"
-      | "dialogue"
-      | "sound_effect"
-    >;
+  userContext?: AssetUploadUserContext;
+}
+
+export interface CreateAssetUploadResponse {
+  upload: {
+    assetId: string;
+    key: string;
+    bucket: "assets-public" | "assets-private";
+    method: "put" | "multipart";
+    contentType: string;
+    expiresAt: string;
+    put?: {
+      url: string;
+      headers: Record<string, string>;
+    };
+    multipart?: {
+      uploadId: string;
+      partSizeBytes: number;
+      parts: { partNumber: number; url: string }[];
+    };
   };
 }
 
-export interface RegisterProjectUploadResponse {
-  asset: V1Asset;
-  job: GenerationJob;
+export interface CompleteAssetUploadInput {
+  uploadId?: string;
+  parts?: { partNumber: number; etag: string }[];
 }
 
 export interface RejectGenerationRunInput {
@@ -420,9 +439,21 @@ export const v1Api = {
       method: "POST",
       body: input,
     }),
-  registerProjectUpload: (projectId: string, input: RegisterProjectUploadInput) =>
-    apiRequest<RegisterProjectUploadResponse>(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/uploads`,
+  createAssetUploadUrl: (projectId: string, input: CreateAssetUploadInput) =>
+    apiRequest<CreateAssetUploadResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/assets/upload-url`,
+      {
+        method: "POST",
+        body: input,
+      }
+    ),
+  completeAssetUpload: (
+    projectId: string,
+    assetId: string,
+    input: CompleteAssetUploadInput = {}
+  ) =>
+    apiRequest<{ asset: V1Asset }>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/complete`,
       {
         method: "POST",
         body: input,

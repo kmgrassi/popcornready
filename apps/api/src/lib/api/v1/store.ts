@@ -120,6 +120,7 @@ export interface V1Asset {
   visibility?: "public" | "private";
   remoteUrl?: string;
   storageKey?: string;
+  storageBucket?: "assets-public" | "assets-private";
   durationSec?: number;
   context?: AssetContext;
   userContext?: UserAssetContext;
@@ -969,6 +970,7 @@ interface AssetRow {
   inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
+  storage_bucket: "assets-public" | "assets-private" | null;
   source: AgentAssetSource;
   duration_sec: number | null;
   description: string | null;
@@ -1030,6 +1032,7 @@ function assetToRow(asset: V1Asset): AssetRow {
         : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
+    storage_bucket: asset.storageBucket ?? null,
     source: asset.source,
     duration_sec: asset.durationSec ?? null,
     description: asset.userContext?.description ?? asset.context?.summary ?? null,
@@ -1104,6 +1107,7 @@ function mapAsset(row: AssetRow): V1Asset {
   };
   if (row.remote_url != null) asset.remoteUrl = row.remote_url;
   if (row.storage_key != null) asset.storageKey = row.storage_key;
+  if (row.storage_bucket != null) asset.storageBucket = row.storage_bucket;
   if (row.duration_sec != null) asset.durationSec = row.duration_sec;
   if (envelope.context !== undefined) asset.context = envelope.context;
   if (envelope.userContext !== undefined) asset.userContext = envelope.userContext;
@@ -2256,6 +2260,7 @@ export async function updateAsset(
       filename: row.filename,
       remote_url: row.remote_url,
       storage_key: row.storage_key,
+      storage_bucket: row.storage_bucket,
       duration_sec: row.duration_sec,
       description: row.description,
       context: row.context,
@@ -2294,6 +2299,126 @@ export async function setAssetVisibility(
     .maybeSingle();
   if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
   throwOnError(error, "setAssetVisibility");
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return mapAsset(data as AssetRow);
+}
+
+async function projectVisibility(
+  db: SupabaseClient,
+  workspaceId: string,
+  projectId: string
+): Promise<"public" | "private"> {
+  const { data, error } = await db
+    .from("projects")
+    .select("visibility")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(error, "projectVisibility");
+  if (!data) throw notFound(`Project not found: ${projectId}`);
+  return (data as { visibility: "public" | "private" }).visibility;
+}
+
+function effectiveAssetVisibility(
+  projectVisibilityValue: "public" | "private",
+  assetVisibility: "public" | "private"
+): "public" | "private" {
+  return projectVisibilityValue === "public" && assetVisibility === "public"
+    ? "public"
+    : "private";
+}
+
+export async function reserveDirectUploadAsset(
+  workspaceId: string,
+  projectId: string,
+  input: {
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+    kind: AssetKind;
+    visibility?: "public" | "private";
+    durationSec?: number;
+    context?: AssetContext;
+    userContext?: UserAssetContext;
+    agentContext?: AgentAssetContext | AgentClipContext;
+  }
+): Promise<{
+  asset: V1Asset;
+  effectiveVisibility: "public" | "private";
+}> {
+  const db = getServiceSupabase();
+  const [projectVis, defaultVisibility] = await Promise.all([
+    projectVisibility(db, workspaceId, projectId),
+    defaultVisibilityForWorkspace(db, workspaceId),
+  ]);
+  const visibility = input.visibility ?? defaultVisibility;
+  const effectiveVisibility = effectiveAssetVisibility(projectVis, visibility);
+  const storageBucket =
+    effectiveVisibility === "public" ? "assets-public" : "assets-private";
+  const now = new Date().toISOString();
+  const assetId = randomUUID();
+  const storageKey = [
+    workspaceId,
+    projectId,
+    assetId,
+    path.basename(input.filename).replace(/[^\w.\-()[\] ]+/g, "_").trim() ||
+      "asset.bin",
+  ].join("/");
+  const asset: V1Asset = {
+    id: assetId,
+    schemaVersion: SCHEMA_VERSIONS.asset,
+    workspaceId,
+    projectId,
+    kind: input.kind,
+    filename: input.filename,
+    status: "pending",
+    source: {
+      type: "multipart_upload",
+      mimeType: input.contentType,
+    },
+    visibility,
+    storageKey,
+    storageBucket,
+    durationSec: input.durationSec,
+    context: input.context,
+    userContext: input.userContext,
+    agentContext: input.agentContext,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const row = assetToRow(asset);
+  const { data, error } = await db
+    .from("assets")
+    .insert(row)
+    .select("*")
+    .single();
+  throwOnError(error, "reserveDirectUploadAsset");
+  return {
+    asset: mapAsset(data as AssetRow),
+    effectiveVisibility,
+  };
+}
+
+export async function completeDirectUploadAsset(
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  input: { status: "ready" }
+): Promise<V1Asset> {
+  const db = getServiceSupabase();
+  const { data, error } = await db
+    .from("assets")
+    .update({ status: input.status, updated_at: new Date().toISOString() })
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, "completeDirectUploadAsset");
   if (!data) throw notFound(`Asset not found: ${assetId}`);
   return mapAsset(data as AssetRow);
 }

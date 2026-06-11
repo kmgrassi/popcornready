@@ -6,6 +6,7 @@
 import type {
   AssetKind,
   GateableGenerationStageType,
+  V1Asset,
   VideoBriefInput,
 } from "@popcorn/shared/v1/types";
 import type { CompositionMode } from "@popcorn/shared/v1/types";
@@ -77,13 +78,66 @@ function assetKindForFile(file: File): AssetKind | null {
   return null;
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
+async function uploadDirectAsset(
+  projectId: string,
+  selected: BriefDraft["selectedFootage"][number],
+): Promise<V1Asset> {
+  const kind = assetKindForFile(selected.file);
+  if (!kind) {
+    throw new Error(`Could not determine asset kind for ${selected.name}.`);
   }
-  return btoa(binary);
+
+  const { upload } = await v1Api.createAssetUploadUrl(projectId, {
+    filename: selected.name,
+    contentType: selected.file.type || "application/octet-stream",
+    sizeBytes: selected.file.size,
+    kind,
+    durationSec: selected.durationSec,
+    userContext: {
+      description: `Selected in Studio Source Footage: ${selected.name}`,
+      intendedUse:
+        kind === "audio" ? ["music", "voiceover", "dialogue"] : ["primary_footage"],
+    },
+  });
+
+  if (upload.method === "multipart") {
+    if (!upload.multipart) throw new Error("Upload URL response was missing parts.");
+    const parts = await Promise.all(
+      upload.multipart.parts.map(async (part, index) => {
+        const start = index * upload.multipart!.partSizeBytes;
+        const end = Math.min(start + upload.multipart!.partSizeBytes, selected.file.size);
+        const response = await fetch(part.url, {
+          method: "PUT",
+          body: selected.file.slice(start, end),
+        });
+        if (!response.ok) {
+          throw new Error(`Upload failed for ${selected.name} part ${part.partNumber}.`);
+        }
+        const etag = response.headers.get("ETag");
+        if (!etag) {
+          throw new Error(`Upload response for ${selected.name} part ${part.partNumber} had no ETag.`);
+        }
+        return { partNumber: part.partNumber, etag };
+      }),
+    );
+    const { asset } = await v1Api.completeAssetUpload(projectId, upload.assetId, {
+      uploadId: upload.multipart.uploadId,
+      parts,
+    });
+    return asset;
+  }
+
+  if (!upload.put) throw new Error("Upload URL response was missing a PUT target.");
+  const response = await fetch(upload.put.url, {
+    method: "PUT",
+    headers: upload.put.headers,
+    body: selected.file,
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed for ${selected.name}.`);
+  }
+  const { asset } = await v1Api.completeAssetUpload(projectId, upload.assetId);
+  return asset;
 }
 
 async function registerSelectedFootage(
@@ -95,30 +149,8 @@ async function registerSelectedFootage(
     throw new Error("Select at least one video or image before generating with footage.");
   }
 
-  const uploads = await Promise.all(
-    draft.selectedFootage.map(async (selected) => {
-      const kind = assetKindForFile(selected.file);
-      if (!kind) {
-        throw new Error(`Could not determine asset kind for ${selected.name}.`);
-      }
-      const dataBase64 = await fileToBase64(selected.file);
-      const { asset } = await v1Api.registerProjectUpload(projectId, {
-        source: {
-          type: "multipart_upload",
-          dataBase64,
-          mimeType: selected.file.type || undefined,
-        },
-        kind,
-        filename: selected.name,
-        durationSec: selected.durationSec,
-        userContext: {
-          description: `Selected in Studio Source Footage: ${selected.name}`,
-          intendedUse:
-            kind === "audio" ? ["music", "voiceover", "dialogue"] : ["primary_footage"],
-        },
-      });
-      return asset;
-    }),
+  const uploads: V1Asset[] = await Promise.all(
+    draft.selectedFootage.map((selected) => uploadDirectAsset(projectId, selected)),
   );
 
   const visualAssetIds = uploads

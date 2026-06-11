@@ -403,6 +403,23 @@ export interface RegisterAssetInput {
   agentContext?: AgentAssetContext | AgentClipContext;
 }
 
+export interface DirectAssetUploadInput {
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  kind: AssetKind;
+  visibility?: "public" | "private";
+  durationSec?: number;
+  context?: AssetContext;
+  userContext?: UserAssetContext;
+  agentContext?: AgentAssetContext | AgentClipContext;
+}
+
+export interface CompleteAssetUploadInput {
+  uploadId?: string;
+  parts?: { partNumber: number; etag: string }[];
+}
+
 export interface UpdateAssetContextInput {
   context?: AssetContext;
   userContext?: UserAssetContext | null;
@@ -1153,6 +1170,122 @@ export function parseRegisterAsset(input: unknown): RegisterAssetInput {
     context,
     userContext,
     agentContext,
+  };
+}
+
+export function parseDirectAssetUpload(input: unknown): DirectAssetUploadInput {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  const filename = requireString(input.filename, "filename", fields);
+  const contentType = requireString(input.contentType, "contentType", fields);
+  if (contentType && !/^[\w.+-]+\/[\w.+-]+$/.test(contentType)) {
+    fields.push({ path: "contentType", message: "Must be a valid MIME type." });
+  }
+  let sizeBytes = 0;
+  if (
+    typeof input.sizeBytes !== "number" ||
+    !Number.isInteger(input.sizeBytes) ||
+    input.sizeBytes <= 0
+  ) {
+    fields.push({ path: "sizeBytes", message: "Must be a positive integer." });
+  } else {
+    sizeBytes = input.sizeBytes;
+  }
+  const explicitKind = parseEnum(input.kind, ASSET_KINDS, "kind", fields);
+  const inferredKind = filename ? inferKindFromName(filename) : undefined;
+  const kind = explicitKind ?? inferredKind;
+  if (!kind) {
+    fields.push({
+      path: "kind",
+      message: "Must be provided when the filename extension is unknown.",
+    });
+  }
+  let visibility: "public" | "private" | undefined;
+  if (input.visibility !== undefined && input.visibility !== null) {
+    if (input.visibility !== "public" && input.visibility !== "private") {
+      fields.push({
+        path: "visibility",
+        message: 'Must be "public" or "private".',
+      });
+    } else {
+      visibility = input.visibility;
+    }
+  }
+
+  let durationSec: number | undefined;
+  if (input.durationSec !== undefined && input.durationSec !== null) {
+    if (
+      typeof input.durationSec !== "number" ||
+      !Number.isFinite(input.durationSec) ||
+      input.durationSec < 0
+    ) {
+      fields.push({ path: "durationSec", message: "Must be a non-negative number." });
+    } else {
+      durationSec = input.durationSec;
+    }
+  }
+
+  const context = parseAssetContext(input.context, "context", fields);
+  const userContext = parseUserAssetContext(input.userContext, "userContext", fields);
+  const agentContext = parseAgentAssetContext(input.agentContext, "agentContext", fields);
+  throwIfInvalid(fields);
+  return {
+    filename: filename as string,
+    contentType: contentType as string,
+    sizeBytes,
+    kind: kind as AssetKind,
+    visibility,
+    durationSec,
+    context,
+    userContext,
+    agentContext,
+  };
+}
+
+export function parseCompleteAssetUpload(input: unknown): CompleteAssetUploadInput {
+  if (!isPlainObject(input)) {
+    throw validationError("The request body is invalid.", [
+      { path: "", message: "Must be an object." },
+    ]);
+  }
+  const fields: FieldError[] = [];
+  const uploadId = optionalString(input.uploadId, "uploadId", fields);
+  let parts: CompleteAssetUploadInput["parts"];
+  if (input.parts !== undefined && input.parts !== null) {
+    if (!Array.isArray(input.parts)) {
+      fields.push({ path: "parts", message: "Must be an array." });
+    } else {
+      parts = input.parts.map((part, index) => {
+        if (!isPlainObject(part)) {
+          fields.push({
+            path: `parts.${index}`,
+            message: "Must be an object.",
+          });
+          return { partNumber: 0, etag: "" };
+        }
+        const partNumber =
+          typeof part.partNumber === "number" && Number.isInteger(part.partNumber)
+            ? part.partNumber
+            : 0;
+        if (partNumber <= 0) {
+          fields.push({
+            path: `parts.${index}.partNumber`,
+            message: "Must be a positive integer.",
+          });
+        }
+        const etag = requireString(part.etag, `parts.${index}.etag`, fields) ?? "";
+        return { partNumber, etag };
+      });
+    }
+  }
+  throwIfInvalid(fields);
+  return {
+    uploadId,
+    parts,
   };
 }
 
