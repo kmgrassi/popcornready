@@ -52,6 +52,10 @@ import {
   V1Action,
   V1Asset,
 } from "./store";
+import {
+  downloadAssetObjectToTemp,
+  useSupabaseStorage,
+} from "../../supabase/storage";
 
 export interface ApiResult {
   status: number;
@@ -75,6 +79,20 @@ const PROVIDER_KIND_SUPPORT: Record<
   mock: ["image", "video", "audio"],
   nanobanano: [],
 };
+
+async function localPathForAssetBytes(asset: V1Asset): Promise<string> {
+  if (!asset.storageKey) {
+    throw new ApiError(
+      "asset_not_ready",
+      `Reference asset is missing stored bytes: ${asset.id}.`,
+      { assetIds: [asset.id] }
+    );
+  }
+  if (useSupabaseStorage()) {
+    return downloadAssetObjectToTemp(asset.storageKey);
+  }
+  return path.join(localDir(), asset.storageKey);
+}
 
 interface ParsedRequest {
   kind: GenerativeAssetKind;
@@ -358,7 +376,7 @@ async function runGeneration(
         { assetIds: [id] }
       );
     }
-    referencePaths.push(path.join(localDir(), asset.storageKey));
+    referencePaths.push(await localPathForAssetBytes(asset));
   }
 
   if (item) {
