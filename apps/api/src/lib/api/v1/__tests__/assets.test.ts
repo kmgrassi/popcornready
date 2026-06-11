@@ -225,7 +225,11 @@ dbTest("registerAsset copies a local_path asset into managed storage as ready", 
   });
   assert.equal(asset.status, "ready");
   assert.equal(asset.kind, "audio");
-  assert.ok(asset.storageKey);
+  assert.equal(
+    asset.storageKey,
+    `${localAuth.workspaceId}/${project.id}/${asset.id}/narration.mp3`
+  );
+  assert.equal(asset.storageBucket, "assets-public");
   assert.ok(asset.id);
   assert.equal(asset.assetKnowledge?.assetId, asset.id);
   assert.equal(asset.clipUnderstanding?.assetId, asset.id);
@@ -235,6 +239,29 @@ dbTest("registerAsset copies a local_path asset into managed storage as ready", 
   const copied = path.join(localDir(), asset.storageKey!);
   const bytes = await fs.readFile(copied, "utf8");
   assert.equal(bytes, "fake-audio-bytes");
+});
+
+dbTest("registerAsset writes multipart_upload bytes through managed storage", async () => {
+  const asset = await registerAsset(localAuth, project.id, {
+    filename: "poster.png",
+    source: {
+      type: "multipart_upload",
+      dataBase64: Buffer.from("fake-png-bytes").toString("base64"),
+      mimeType: "image/png",
+    },
+  });
+
+  assert.equal(asset.status, "ready");
+  assert.equal(asset.kind, "image");
+  assert.equal(
+    asset.storageKey,
+    `${localAuth.workspaceId}/${project.id}/${asset.id}/poster.png`
+  );
+  assert.equal(asset.storageBucket, "assets-public");
+
+  const copied = path.join(localDir(), asset.storageKey!);
+  const bytes = await fs.readFile(copied, "utf8");
+  assert.equal(bytes, "fake-png-bytes");
 });
 
 dbTest("registerAsset rejects local_path outside local mode", async () => {

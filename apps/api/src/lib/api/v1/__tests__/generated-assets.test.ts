@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -118,6 +119,20 @@ dbTest("creates image, video, and audio generated assets and lists them", async 
     ["audio", "image", "video"]
   );
   assert.ok(items.every((a) => a.source.type === "generated"));
+  assert.ok(
+    items.every(
+      (asset) =>
+        asset.storageKey ===
+        `${LOCAL_WORKSPACE_ID}/${projectId}/${asset.id}/${asset.filename}`
+    )
+  );
+  assert.ok(items.every((asset) => asset.storageBucket === "assets-public"));
+  for (const asset of items) {
+    const bytes = await fs.readFile(
+      path.join(process.env.POPCORN_READY_LOCAL_DIR!, asset.storageKey!)
+    );
+    assert.ok(bytes.length > 0);
+  }
 });
 
 dbTest("persists actual audio duration in provenance", async () => {

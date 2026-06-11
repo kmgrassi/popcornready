@@ -1,16 +1,15 @@
 // Asset registration for the v1 agent API.
 //
-// PR1 supports two source modes:
+// Supports three source modes:
 //   - remote_url: persist metadata now; downloading/inspection is an asset_ingest
 //     job handled in a later PR, so the asset starts in status "pending".
-//   - local_path (AUTH_MODE=local only): copy the file into managed local storage
-//     so later operations never depend on the original source file, status "ready".
-//
-// generated sources are out of scope for PR1.
+//   - local_path (AUTH_MODE=local only): copy bytes into managed object storage.
+//   - multipart_upload: decode base64 bytes into managed object storage.
 
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
+import { writeAssetObject } from "@/lib/storage/asset-write";
 import { AuthContext } from "./auth";
 import { sha256Hex } from "./asset-graph";
 import { buildSemanticAnalysis } from "../../edit-graph/semantic-analysis";
@@ -34,10 +33,10 @@ import {
 } from "./schemas";
 import {
   addAsset,
+  createAction,
+  effectiveAssetStorageVisibility,
   getProject,
   listAssets,
-  localDir,
-  mediaUploadDir,
   updateAsset as updateStoredAsset,
   V1Asset,
 } from "./store";
@@ -304,6 +303,76 @@ async function addAssetWithDerivedKnowledge(
   });
 }
 
+async function recordStorageWriteAction(input: {
+  projectId: string;
+  assetId: string;
+  sourceType: string;
+  storageKey: string;
+  storageBucket: string;
+  contentType: string;
+}): Promise<void> {
+  await createAction({
+    projectId: input.projectId,
+    tool: "store_asset_bytes",
+    status: "applied",
+    params: {
+      sourceType: input.sourceType,
+      storageKey: input.storageKey,
+      storageBucket: input.storageBucket,
+      contentType: input.contentType,
+    },
+    outputAssetIds: [input.assetId],
+  });
+}
+
+async function writeBytesForAsset(input: {
+  auth: AuthContext;
+  projectId: string;
+  asset: V1Asset;
+  bytes: Buffer;
+  sourceType: string;
+  contentType?: string;
+}): Promise<V1Asset> {
+  const visibility = await effectiveAssetStorageVisibility({
+    workspaceId: input.auth.workspaceId,
+    projectId: input.projectId,
+    assetVisibility: input.asset.visibility ?? "public",
+  });
+  const stored = await writeAssetObject({
+    workspaceId: input.auth.workspaceId,
+    projectId: input.projectId,
+    assetId: input.asset.id,
+    filename: input.asset.filename,
+    bytes: input.bytes,
+    visibility,
+    contentType: input.contentType,
+  });
+  const updated = await updateStoredAsset(
+    input.auth.workspaceId,
+    input.projectId,
+    input.asset.id,
+    (asset) => {
+      asset.status = "ready";
+      asset.storageKey = stored.storageKey;
+      asset.storageBucket = stored.storageBucket;
+      asset.contentHash = sha256Hex(input.bytes);
+      const derived = withDerivedAssetKnowledge(asset);
+      asset.assetKnowledge = derived.assetKnowledge;
+      asset.clipUnderstanding = derived.clipUnderstanding;
+      asset.semanticAnalysis = derived.semanticAnalysis;
+    }
+  );
+  await recordStorageWriteAction({
+    projectId: input.projectId,
+    assetId: updated.id,
+    sourceType: input.sourceType,
+    storageKey: stored.storageKey,
+    storageBucket: stored.storageBucket,
+    contentType: stored.contentType,
+  });
+  return updated;
+}
+
 export async function registerAsset(
   auth: AuthContext,
   projectId: string,
@@ -359,16 +428,7 @@ export async function registerAsset(
     const filename = input.filename || basename(srcPath);
     const kind = resolveKind(input.kind, filename);
 
-    const ext = path.extname(srcPath);
-    const destDir = mediaUploadDir(auth.workspaceId, projectId);
-    await fs.mkdir(destDir, { recursive: true });
-    // The on-disk byte name is a storage key (its own namespace), NOT the DB row
-    // id — the DB assigns the asset id. Use a random key so the bytes can land
-    // before the row exists.
-    const destPath = path.join(destDir, `${randomUUID()}${ext}`);
-    await fs.copyFile(srcPath, destPath);
-    const bytes = await fs.readFile(destPath);
-    const storageKey = path.relative(localDir(), destPath);
+    const bytes = await fs.readFile(srcPath);
 
     const asset: V1Asset = {
       // Placeholder; addAsset omits it on insert and the DB assigns the real id.
@@ -378,9 +438,8 @@ export async function registerAsset(
       projectId,
       kind,
       filename,
-      status: "ready",
+      status: "pending",
       source: { type: "local_path", path: srcPath },
-      storageKey,
       durationSec: input.durationSec,
       context: input.context,
       userContext: input.userContext,
@@ -389,7 +448,14 @@ export async function registerAsset(
       createdAt: now,
       updatedAt: now,
     };
-    return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
+    const created = await addAssetWithDerivedKnowledge(auth, projectId, asset, now);
+    return writeBytesForAsset({
+      auth,
+      projectId,
+      asset: created,
+      bytes,
+      sourceType: "local_path",
+    });
   }
 
   if (input.source.type === "multipart_upload") {
@@ -409,13 +475,6 @@ export async function registerAsset(
       throw new ApiError("asset_invalid", "Uploaded asset bytes are empty.");
     }
 
-    const ext = path.extname(filename);
-    const destDir = mediaUploadDir(auth.workspaceId, projectId);
-    await fs.mkdir(destDir, { recursive: true });
-    const destPath = path.join(destDir, `${randomUUID()}${ext}`);
-    await fs.writeFile(destPath, bytes);
-    const storageKey = path.relative(localDir(), destPath);
-
     const asset: V1Asset = {
       id: "",
       schemaVersion: SCHEMA_VERSIONS.asset,
@@ -423,12 +482,11 @@ export async function registerAsset(
       projectId,
       kind,
       filename,
-      status: "ready",
+      status: "pending",
       source: {
         type: "multipart_upload",
         ...(input.source.mimeType ? { mimeType: input.source.mimeType } : {}),
       },
-      storageKey,
       durationSec: input.durationSec,
       context: input.context,
       userContext: input.userContext,
@@ -437,7 +495,15 @@ export async function registerAsset(
       createdAt: now,
       updatedAt: now,
     };
-    return addAssetWithDerivedKnowledge(auth, projectId, asset, now);
+    const created = await addAssetWithDerivedKnowledge(auth, projectId, asset, now);
+    return writeBytesForAsset({
+      auth,
+      projectId,
+      asset: created,
+      bytes,
+      sourceType: "multipart_upload",
+      contentType: input.source.mimeType,
+    });
   }
 
   throw new ApiError(
