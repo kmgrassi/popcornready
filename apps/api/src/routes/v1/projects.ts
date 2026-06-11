@@ -5,6 +5,7 @@ import {
   parseAnalyzeBatch,
   parseCreateProject,
   parsePagination,
+  parseSetProjectVisibility,
 } from "@/lib/api/v1/schemas";
 import {
   analyzeAssetBatch,
@@ -14,6 +15,7 @@ import {
   createProject,
   getProject,
   listProjects,
+  setProjectVisibility,
 } from "@/lib/api/v1/store";
 import { getStoryboard, putStoryboard } from "@/lib/api/v1/storyboard";
 
@@ -57,6 +59,23 @@ projectsRouter.get(
       throw new ApiError("validation_failed", "projectId is required.");
     }
     const project = await getProject(auth.workspaceId, params.projectId);
+    return { status: 200, body: { project } };
+  })
+);
+
+projectsRouter.patch(
+  "/projects/:projectId",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const { visibility } = parseSetProjectVisibility(body);
+    const project = await setProjectVisibility(
+      auth.workspaceId,
+      params.projectId,
+      visibility,
+      { actorId: auth.actor.id }
+    );
     return { status: 200, body: { project } };
   })
 );

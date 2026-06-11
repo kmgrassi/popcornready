@@ -78,6 +78,10 @@ import {
   UserAssetContext,
   VideoBrief,
 } from "./schemas";
+import {
+  reconcileAssetStorage,
+  type VisibilityObjectStore,
+} from "../../storage/visibility-move";
 
 export interface V1Workspace {
   id: string;
@@ -93,6 +97,7 @@ export interface V1Project {
   workspaceId: string;
   name: string;
   status: "active" | "deleted";
+  visibility?: "public" | "private";
   brief: VideoBrief | null;
   currentBriefVersionId: string | null;
   hasStoryboard?: boolean;
@@ -120,6 +125,7 @@ export interface V1Asset {
   visibility?: "public" | "private";
   remoteUrl?: string;
   storageKey?: string;
+  storageBucket?: string;
   durationSec?: number;
   context?: AssetContext;
   userContext?: UserAssetContext;
@@ -431,6 +437,7 @@ function mapProject(
     workspaceId: row.workspace_id,
     name: row.name,
     status: row.status,
+    visibility: row.visibility,
     brief: projection.brief ?? null,
     currentBriefVersionId: projection.currentBriefVersionId ?? null,
     hasStoryboard: projection.hasStoryboard ?? false,
@@ -969,6 +976,7 @@ interface AssetRow {
   inputs_fingerprint: string | null;
   remote_url: string | null;
   storage_key: string | null;
+  storage_bucket: string | null;
   source: AgentAssetSource;
   duration_sec: number | null;
   description: string | null;
@@ -1030,6 +1038,7 @@ function assetToRow(asset: V1Asset): AssetRow {
         : null),
     remote_url: asset.remoteUrl ?? null,
     storage_key: asset.storageKey ?? null,
+    storage_bucket: asset.storageBucket ?? null,
     source: asset.source,
     duration_sec: asset.durationSec ?? null,
     description: asset.userContext?.description ?? asset.context?.summary ?? null,
@@ -1104,6 +1113,7 @@ function mapAsset(row: AssetRow): V1Asset {
   };
   if (row.remote_url != null) asset.remoteUrl = row.remote_url;
   if (row.storage_key != null) asset.storageKey = row.storage_key;
+  if (row.storage_bucket != null) asset.storageBucket = row.storage_bucket;
   if (row.duration_sec != null) asset.durationSec = row.duration_sec;
   if (envelope.context !== undefined) asset.context = envelope.context;
   if (envelope.userContext !== undefined) asset.userContext = envelope.userContext;
@@ -2256,6 +2266,7 @@ export async function updateAsset(
       filename: row.filename,
       remote_url: row.remote_url,
       storage_key: row.storage_key,
+      storage_bucket: row.storage_bucket,
       duration_sec: row.duration_sec,
       description: row.description,
       context: row.context,
@@ -2273,29 +2284,197 @@ export async function updateAsset(
   return mapAsset(data as AssetRow);
 }
 
-// Flip an asset's public/private visibility. Updates only the visibility column
-// (tenancy-scoped) so it never clobbers other fields. Tier gating is deferred —
-// the DB visibility-tier triggers were dropped (migration 20260609000000), so any
-// member of the workspace can set either value.
 export async function setAssetVisibility(
   workspaceId: string,
   projectId: string,
   assetId: string,
-  visibility: "public" | "private"
+  visibility: "public" | "private",
+  options: { actorId?: string; store?: VisibilityObjectStore } = {}
 ): Promise<V1Asset> {
   const db = getServiceSupabase();
-  const { data, error } = await db
+
+  const { data: projectData, error: projectError } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(projectError)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(projectError, "setAssetVisibility project");
+  if (!projectData) throw notFound(`Project not found: ${projectId}`);
+  const project = projectData as ProjectRow;
+
+  const { data: currentData, error: currentError } = await db
     .from("assets")
-    .update({ visibility, updated_at: new Date().toISOString() })
+    .select("*")
     .eq("id", assetId)
     .eq("project_id", projectId)
     .eq("workspace_id", workspaceId)
-    .select("*")
     .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
-  throwOnError(error, "setAssetVisibility");
-  if (!data) throw notFound(`Asset not found: ${assetId}`);
-  return mapAsset(data as AssetRow);
+  if (isNoRows(currentError)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(currentError, "setAssetVisibility current");
+  if (!currentData) throw notFound(`Asset not found: ${assetId}`);
+  const current = currentData as AssetRow;
+
+  const action = await createAction({
+    projectId,
+    tool: "set_asset_visibility",
+    status: "running",
+    params: {
+      actorId: options.actorId,
+      assetId,
+      previousVisibility: current.visibility ?? "public",
+      visibility,
+      projectVisibility: project.visibility ?? "public",
+    },
+    inputAssetIds: [assetId],
+    rationale: `Set asset visibility to ${visibility}.`,
+  });
+
+  let updated: AssetRow | null = null;
+  try {
+    await reconcileAssetStorage({
+      asset: {
+        id: assetId,
+        storageKey: current.storage_key,
+        storageBucket: current.storage_bucket,
+        visibility,
+      },
+      projectVisibility: project.visibility ?? "public",
+      store: options.store,
+      persistStorageBucket: async (storageBucket) => {
+        const { data, error } = await db
+          .from("assets")
+          .update({
+            visibility,
+            storage_bucket: storageBucket,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", assetId)
+          .eq("project_id", projectId)
+          .eq("workspace_id", workspaceId)
+          .select("*")
+          .maybeSingle();
+        if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+        throwOnError(error, "setAssetVisibility update");
+        if (!data) throw notFound(`Asset not found: ${assetId}`);
+        updated = data as AssetRow;
+      },
+    });
+    await updateAction(action.id, {
+      status: "applied",
+      outputAssetIds: [assetId],
+    });
+  } catch (error) {
+    await updateAction(action.id, {
+      status: "failed",
+      error: {
+        message: error instanceof Error ? error.message : "Visibility update failed.",
+      },
+    });
+    throw error;
+  }
+
+  if (!updated) throw new ApiError("internal_error", "Asset visibility update failed.");
+  return mapAsset(updated);
+}
+
+export async function setProjectVisibility(
+  workspaceId: string,
+  projectId: string,
+  visibility: "public" | "private",
+  options: { actorId?: string; store?: VisibilityObjectStore } = {}
+): Promise<V1Project> {
+  const db = getServiceSupabase();
+
+  const { data: projectData, error: projectError } = await db
+    .from("projects")
+    .select("*")
+    .eq("id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (isNoRows(projectError)) throw notFound(`Project not found: ${projectId}`);
+  throwOnError(projectError, "setProjectVisibility project");
+  if (!projectData) throw notFound(`Project not found: ${projectId}`);
+  const project = projectData as ProjectRow;
+
+  const { data: assetData, error: assetError } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .neq("media", "data");
+  throwOnError(assetError, "setProjectVisibility assets");
+  const assets = (assetData ?? []) as AssetRow[];
+
+  const action = await createAction({
+    projectId,
+    tool: "set_project_visibility",
+    status: "running",
+    params: {
+      actorId: options.actorId,
+      previousVisibility: project.visibility ?? "public",
+      visibility,
+      assetCount: assets.length,
+    },
+    inputAssetIds: assets.map((asset) => asset.id),
+    rationale: `Set project visibility to ${visibility} and reconcile asset storage.`,
+  });
+
+  try {
+    for (const asset of assets) {
+      await reconcileAssetStorage({
+        asset: {
+          id: asset.id,
+          storageKey: asset.storage_key,
+          storageBucket: asset.storage_bucket,
+          visibility: asset.visibility ?? "public",
+        },
+        projectVisibility: visibility,
+        store: options.store,
+        persistStorageBucket: async (storageBucket) => {
+          const { error } = await db
+            .from("assets")
+            .update({
+              storage_bucket: storageBucket,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", asset.id)
+            .eq("project_id", projectId)
+            .eq("workspace_id", workspaceId);
+          throwOnError(error, "setProjectVisibility asset bucket");
+        },
+      });
+    }
+
+    const { data, error } = await db
+      .from("projects")
+      .update({ visibility, updated_at: new Date().toISOString() })
+      .eq("id", projectId)
+      .eq("workspace_id", workspaceId)
+      .neq("status", "deleted")
+      .select("*")
+      .maybeSingle();
+    if (isNoRows(error)) throw notFound(`Project not found: ${projectId}`);
+    throwOnError(error, "setProjectVisibility update project");
+    if (!data) throw notFound(`Project not found: ${projectId}`);
+
+    await updateAction(action.id, {
+      status: "applied",
+      outputAssetIds: assets.map((asset) => asset.id),
+    });
+    return mapProjectWithProjection(db, data as ProjectRow);
+  } catch (error) {
+    await updateAction(action.id, {
+      status: "failed",
+      error: {
+        message: error instanceof Error ? error.message : "Project visibility update failed.",
+      },
+    });
+    throw error;
+  }
 }
 
 export async function updateAssetAnalysis(

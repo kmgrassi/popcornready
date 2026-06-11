@@ -94,7 +94,8 @@ assetsRouter.patch(
       auth.workspaceId,
       projectId,
       assetId,
-      visibility
+      visibility,
+      { actorId: auth.actor.id }
     );
     return { status: 200, body: { asset } };
   })
