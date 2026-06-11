@@ -68,6 +68,8 @@ export interface StoryboardPanel {
   panelIndex: number;
   imageAssetId: string | null;
   promptAssetId: string | null;
+  url?: string;
+  thumbnailUrl?: string;
   status: StoryboardItemStatus;
   isSelected: boolean;
   approvedAt: string | null;

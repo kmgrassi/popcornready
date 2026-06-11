@@ -551,9 +551,15 @@ export function AssetsPage() {
 }
 
 function AssetPreview({ asset }: { asset: WorkspaceAsset }) {
-  const src = asset.thumbnailUrl ?? asset.url;
-  if (src && asset.kind === "image") return <img className={styles.media} src={src} alt="" loading="lazy" />;
-  if (src && asset.kind === "video") return <video className={styles.media} src={src} muted playsInline preload="metadata" />;
+  if (asset.kind === "image" && (asset.thumbnailUrl || asset.url)) {
+    return <img className={styles.media} src={asset.thumbnailUrl ?? asset.url} alt="" loading="lazy" />;
+  }
+  if (asset.kind === "video" && asset.url) {
+    return <video className={styles.media} src={asset.url} poster={asset.thumbnailUrl} muted playsInline preload="metadata" />;
+  }
+  if (asset.kind === "video" && asset.thumbnailUrl) {
+    return <img className={styles.media} src={asset.thumbnailUrl} alt="" loading="lazy" />;
+  }
   return <div className={`${styles.media} ${styles.mediaEmpty}`}><span>{titleCase(asset.kind)}</span></div>;
 }
 
