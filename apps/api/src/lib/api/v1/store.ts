@@ -2983,6 +2983,20 @@ export interface WorkspaceOutputSummary {
   createdAt: string;
 }
 
+export interface ProjectWatchMedia {
+  assetId: string;
+  projectId: string;
+  projectName: string;
+  filename: string;
+  kind: "video";
+  url: string;
+  posterUrl?: string;
+  durationSec?: number;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ListWorkspaceOutputsDeps {
   listProjects: (workspaceId: string) => Promise<WorkspaceProjectRef[]>;
   artifactStore: Pick<AgentApiStore, "listArtifactsForProject">;
@@ -3036,6 +3050,135 @@ export async function listWorkspaceOutputs(
       return output;
     }),
     nextCursor: paged.nextCursor,
+  };
+}
+
+async function projectedAssetUrl(
+  row: Pick<AssetRow, "remote_url" | "storage_key" | "storage_bucket" | "visibility">
+): Promise<{
+  url: string | null;
+  expiresAt?: string;
+}> {
+  if (row.storage_key) {
+    const expiresInSec = 3600;
+    try {
+      return {
+        url:
+          (await resolveAssetUrl(row, {
+            privateTtlSec: expiresInSec,
+          })) ?? row.remote_url,
+        expiresAt: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+      };
+    } catch {
+      return { url: row.remote_url };
+    }
+  }
+
+  return { url: row.remote_url };
+}
+
+async function selectedMediaAsset(
+  db: SupabaseClient,
+  projectId: string,
+  slotRole: string,
+  media: AssetMedia
+): Promise<AssetRow | null> {
+  let selectionQuery = db
+    .from("current_selections")
+    .select("active_asset_id")
+    .eq("project_id", projectId)
+    .eq("slot_role", slotRole);
+
+  if (slotRole === "cut" || slotRole === "poster") {
+    selectionQuery = selectionQuery.is("slot_owner_lineage_id", null);
+  }
+
+  const selected = await selectionQuery
+    .order("seq", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(selected.error)) return null;
+  throwOnError(selected.error, `selectedMediaAsset ${slotRole}`);
+
+  const activeAssetId = (selected.data as CurrentSelectionRow | null)?.active_asset_id;
+  if (!activeAssetId) return null;
+
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("id", activeAssetId)
+    .eq("media", media)
+    .eq("status", "ready")
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, `selectedMediaAsset asset ${slotRole}`);
+  return (data as AssetRow | null) ?? null;
+}
+
+async function renderForCutAsset(
+  db: SupabaseClient,
+  projectId: string,
+  cutAssetId: string
+): Promise<AssetRow | null> {
+  const edgeRows = await db
+    .from("asset_edges")
+    .select("from_id")
+    .eq("project_id", projectId)
+    .eq("to_id", cutAssetId);
+  throwOnError(edgeRows.error, "renderForCutAsset edges");
+
+  const renderIds = [...new Set(((edgeRows.data ?? []) as Array<{ from_id: string }>).map((row) => row.from_id))];
+  if (renderIds.length === 0) return null;
+
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("kind", "render")
+    .eq("media", "video")
+    .eq("status", "ready")
+    .in("id", renderIds)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (isNoRows(error)) return null;
+  throwOnError(error, "renderForCutAsset render");
+  return (data as AssetRow | null) ?? null;
+}
+
+export async function getProjectWatchMedia(
+  workspaceId: string,
+  projectId: string
+): Promise<ProjectWatchMedia | null> {
+  const project = await getProject(workspaceId, projectId);
+  const db = getServiceSupabase();
+  const directRender = await selectedMediaAsset(db, projectId, "cut", "video");
+  const cut = directRender ? null : await selectedDataAsset(db, projectId, "cut", "composite");
+  const render = directRender ?? (cut ? await renderForCutAsset(db, projectId, cut.id) : null);
+  if (!render || render.kind !== "render") return null;
+
+  const media = await projectedAssetUrl(render);
+  if (!media.url) return null;
+
+  const posterAsset =
+    (await selectedMediaAsset(db, projectId, "poster", "image")) ??
+    (await selectedMediaAsset(db, projectId, "keyframe", "image"));
+  const poster = posterAsset ? await projectedAssetUrl(posterAsset) : { url: null };
+
+  return {
+    assetId: render.id,
+    projectId,
+    projectName: project.name,
+    filename: render.filename,
+    kind: "video",
+    url: media.url,
+    ...(poster.url ? { posterUrl: poster.url } : {}),
+    ...(render.duration_sec != null ? { durationSec: render.duration_sec } : {}),
+    ...(media.expiresAt ? { expiresAt: media.expiresAt } : {}),
+    createdAt: iso(render.created_at),
+    updatedAt: iso(render.updated_at),
   };
 }
 

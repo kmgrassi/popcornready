@@ -16,6 +16,7 @@ import { HomePage } from "./routes/HomePage";
 import { LaunchpadPage } from "./routes/LaunchpadPage";
 import { LibraryPage } from "./routes/LibraryPage";
 import { LoginPage } from "./routes/LoginPage";
+import { ProjectWatchPage } from "./routes/ProjectWatchPage";
 import { SignupPage } from "./routes/SignupPage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { TemplatesPage } from "./routes/TemplatesPage";
@@ -52,6 +53,10 @@ export function App() {
           <Route
             path="/projects/:projectId/storyboard"
             element={<StoryboardPage />}
+          />
+          <Route
+            path="/projects/:projectId/watch"
+            element={<ProjectWatchPage />}
           />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />

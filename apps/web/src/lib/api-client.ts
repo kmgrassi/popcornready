@@ -243,6 +243,27 @@ export interface AssetMediaResponse {
   expiresAt: string;
 }
 
+export interface ProjectWatchMedia {
+  assetId: string;
+  projectId: string;
+  projectName: string;
+  filename: string;
+  kind: "video";
+  url: string;
+  posterUrl?: string;
+  durationSec?: number;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectWatchResponse {
+  media: ProjectWatchMedia | null;
+  fallback: {
+    storyboardUrl: string;
+  };
+}
+
 export interface GenerationRunArtifactResponse {
   artifact: {
     artifactId: string;
@@ -446,6 +467,11 @@ export const v1Api = {
   getProjectStoryboard: (projectId: string, signal?: AbortSignal) =>
     apiRequest<ProjectStoryboardResponse>(
       `/api/v1/projects/${encodeURIComponent(projectId)}/storyboard`,
+      { signal }
+    ),
+  getProjectWatch: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<ProjectWatchResponse>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/watch`,
       { signal }
     ),
   saveProjectStoryboard: (

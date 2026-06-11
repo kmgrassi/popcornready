@@ -69,6 +69,10 @@ function projectCollectionPath(projectId: string, extraParams?: Record<string, s
   return `/library/projects?${params.toString()}`;
 }
 
+function projectWatchPath(projectId: string) {
+  return `/projects/${encodeURIComponent(projectId)}/watch`;
+}
+
 function statusChipClass(status: string) {
   if (status === "running" || status === "processing") return styles.statusRunning;
   if (status === "succeeded" || status === "ready") return styles.statusSucceeded;
@@ -636,6 +640,13 @@ export function OutputsPage() {
                       to={projectCollectionPath(output.projectId, { timelineId: output.timelineId })}
                     >
                       Project
+                    </ButtonLink>
+                    <ButtonLink
+                      variant="ghost"
+                      size="sm"
+                      to={projectWatchPath(output.projectId)}
+                    >
+                      Watch
                     </ButtonLink>
                   </div>
                 </article>
