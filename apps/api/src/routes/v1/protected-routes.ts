@@ -11,6 +11,7 @@ import { meRouter } from "./me.js";
 import { miscCapabilitiesRouter } from "./misc-capabilities.js";
 import { planRouter } from "./plan.js";
 import { projectsRouter } from "./projects.js";
+import { storyboardsRouter } from "./storyboards.js";
 import { studioDraftsRouter } from "./studio-drafts.js";
 import { timelinesRouter } from "./timelines.js";
 import { workspacesRouter } from "./workspaces.js";
@@ -25,6 +26,7 @@ export function mountProtectedV1Routes(v1: Router) {
   v1.use(briefRouter);
   v1.use(miscCapabilitiesRouter);
   v1.use(planRouter);
+  v1.use(storyboardsRouter);
   v1.use(generationEntrypointsRouter);
   v1.use(generationRunsRouter);
   v1.use(studioDraftsRouter);
