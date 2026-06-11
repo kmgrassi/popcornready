@@ -15,6 +15,7 @@ import {
   createProject,
   getProject,
   listProjects,
+  setProjectPoster,
   setProjectVisibility,
 } from "@/lib/api/v1/store";
 import { getStoryboard, putStoryboard } from "@/lib/api/v1/storyboard";
@@ -76,6 +77,23 @@ projectsRouter.patch(
       visibility,
       { actorId: auth.actor.id }
     );
+    return { status: 200, body: { project } };
+  })
+);
+
+// Set the project's poster (the movie-poster thumbnail shown in dashboard
+// grids): points the project-scoped 'poster' selection slot at an image asset.
+projectsRouter.post(
+  "/projects/:projectId/poster",
+  mutation(async ({ auth, body }, params) => {
+    if (!params.projectId) {
+      throw new ApiError("validation_failed", "projectId is required.");
+    }
+    const assetId = (body as { assetId?: unknown } | null)?.assetId;
+    if (typeof assetId !== "string" || assetId.length === 0) {
+      throw new ApiError("validation_failed", "assetId is required.");
+    }
+    const project = await setProjectPoster(auth.workspaceId, params.projectId, assetId);
     return { status: 200, body: { project } };
   })
 );
