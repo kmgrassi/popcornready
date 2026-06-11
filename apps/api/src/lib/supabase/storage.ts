@@ -1,14 +1,10 @@
 // Supabase Storage adapter for asset bytes.
 //
 // Server-side only: uses the service_role admin client to upload/download asset
-// files and to mint signed URLs for the browser. Gated by the same DB_BACKEND
+// files for eval fixtures and legacy Supabase-backed writes. Gated by the same DB_BACKEND
 // flag as the Postgres store — when "supabase", the v1 asset writers put bytes in
 // the `assets` bucket and persist the object path as the asset's storageKey;
 // otherwise bytes stay on local disk under .local/media (unchanged).
-//
-// The `assets` bucket is private (see the storage-bucket migration), so reads go
-// through the admin client (server render/export) or short-lived signed URLs
-// (browser). No public bucket access.
 
 import { promises as fs } from "fs";
 import os from "os";
@@ -87,15 +83,4 @@ export async function downloadAssetObjectToTemp(objectPath: string): Promise<str
   await fs.mkdir(path.dirname(localPath), { recursive: true });
   await fs.writeFile(localPath, Buffer.from(await data.arrayBuffer()));
   return localPath;
-}
-
-export async function createSignedAssetUrl(
-  objectPath: string,
-  expiresInSec = 3600
-): Promise<string> {
-  const { data, error } = await getSupabaseAdmin()
-    .storage.from(ASSET_BUCKET)
-    .createSignedUrl(objectPath, expiresInSec);
-  if (error) throw error;
-  return data.signedUrl;
 }

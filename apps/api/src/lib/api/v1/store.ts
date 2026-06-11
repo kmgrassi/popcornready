@@ -66,8 +66,8 @@ import {
   type GenerationRunsStore,
 } from "../../v1/generation-runs/store";
 import { getRequestSupabase } from "../../supabase/clients";
-import { createSignedAssetUrl } from "../../supabase/storage";
 import { agentApiStore, type AgentApiStore } from "../../agent-api/jobs";
+import { resolveAssetUrl } from "../../storage/asset-urls";
 import {
   AgentAssetSource,
   AgentAssetContext,
@@ -689,9 +689,12 @@ interface PosterAssetRow {
   status: "ready" | "pending";
   remote_url: string | null;
   storage_key: string | null;
+  storage_bucket: string | null;
+  visibility: "public" | "private" | null;
 }
 
-const POSTER_ASSET_COLUMNS = "id, media, status, remote_url, storage_key";
+const POSTER_ASSET_COLUMNS =
+  "id, media, status, remote_url, storage_key, storage_bucket, visibility";
 
 interface PosterVisibilityOpts {
   publicOnly?: boolean;
@@ -767,18 +770,11 @@ async function projectPosterAsset(
   );
 }
 
-// Browser-usable URL for a poster asset: short-lived signed URL for bytes in
-// the private assets bucket, otherwise the asset's remote URL.
+// Browser-usable URL for a poster asset. Uses the same storage resolver as the
+// asset payload mapper so public/private delivery stays consistent.
 async function posterUrlFor(asset: PosterAssetRow | null): Promise<string | null> {
   if (!asset) return null;
-  if (asset.storage_key) {
-    try {
-      return await createSignedAssetUrl(asset.storage_key);
-    } catch {
-      // Signing can fail for stale/local-backend storage keys; fall through.
-    }
-  }
-  return asset.remote_url;
+  return (await resolveAssetUrl(asset)) ?? null;
 }
 
 async function projectProjection(
@@ -1240,7 +1236,7 @@ async function withGraphMetadataForInsert(
   };
 }
 
-function mapAsset(row: AssetRow): V1Asset {
+function mapAssetRow(row: AssetRow): V1Asset {
   const envelope = row.context ?? {};
   const asset: V1Asset = {
     id: row.id,
@@ -1277,6 +1273,37 @@ function mapAsset(row: AssetRow): V1Asset {
   }
   if (row.visibility != null) asset.visibility = row.visibility;
   return asset;
+}
+
+async function mapAsset(row: AssetRow): Promise<V1Asset> {
+  const asset = mapAssetRow(row);
+  const resolvedUrl = await resolveAssetUrl(row);
+  if (resolvedUrl) asset.remoteUrl = resolvedUrl;
+  return asset;
+}
+
+async function mapAssets(rows: AssetRow[]): Promise<V1Asset[]> {
+  return Promise.all(rows.map(mapAsset));
+}
+
+async function getAssetRow(
+  db: SupabaseClient,
+  workspaceId: string,
+  projectId: string,
+  assetId: string,
+  context: string
+): Promise<AssetRow> {
+  const { data, error } = await db
+    .from("assets")
+    .select("*")
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
+  throwOnError(error, context);
+  if (!data) throw notFound(`Asset not found: ${assetId}`);
+  return data as AssetRow;
 }
 
 // ---------------------------------------------------------------------------
@@ -2418,17 +2445,7 @@ export async function getAsset(
   assetId: string
 ): Promise<V1Asset> {
   const db = getServiceSupabase();
-  const { data, error } = await db
-    .from("assets")
-    .select("*")
-    .eq("id", assetId)
-    .eq("project_id", projectId)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (isNoRows(error)) throw notFound(`Asset not found: ${assetId}`);
-  throwOnError(error, "getAsset");
-  if (!data) throw notFound(`Asset not found: ${assetId}`);
-  return mapAsset(data as AssetRow);
+  return mapAsset(await getAssetRow(db, workspaceId, projectId, assetId, "getAsset"));
 }
 
 export async function updateAsset(
@@ -2439,11 +2456,13 @@ export async function updateAsset(
 ): Promise<V1Asset> {
   // Read-modify-write: load the current row (with tenancy filter), apply the
   // mutation in memory, then persist the full row back.
-  const current = await getAsset(workspaceId, projectId, assetId);
+  const db = getServiceSupabase();
+  const current = mapAssetRow(
+    await getAssetRow(db, workspaceId, projectId, assetId, "updateAsset read")
+  );
   updater(current);
   current.updatedAt = new Date().toISOString();
 
-  const db = getServiceSupabase();
   const row = assetToRow(current);
   const { data, error } = await db
     .from("assets")
@@ -2527,7 +2546,7 @@ export async function listAssets(
     .eq("workspace_id", workspaceId)
     .neq("media", "data");
   throwOnError(error, "listAssets");
-  const all = (data as AssetRow[]).map(mapAsset);
+  const all = await mapAssets(data as AssetRow[]);
   return paginate(all, limit, cursor);
 }
 
@@ -2853,7 +2872,8 @@ export async function listPublicAssets(
 
   const { data, error } = await query;
   throwOnError(error, "listPublicAssets");
-  return paginate((data as AssetWithProjectRow[]).map(mapAsset), limit, cursor);
+  const assets = await mapAssets(data as AssetWithProjectRow[]);
+  return paginate(assets, limit, cursor);
 }
 
 export type DiscoverSearchItem =
@@ -2886,12 +2906,13 @@ export async function searchPublicContent(
       const item = mapProject(project);
       return { type: "project", item, id: `project:${item.id}`, createdAt: item.createdAt };
     });
-  const assetItems: DiscoverSearchItem[] = (assetsResult.data as AssetRow[]).map(
-    (asset) => {
-      const item = mapAsset(asset);
-      return { type: "asset", item, id: `asset:${item.id}`, createdAt: item.createdAt };
-    }
-  );
+  const publicAssets = await mapAssets(assetsResult.data as AssetRow[]);
+  const assetItems: DiscoverSearchItem[] = publicAssets.map((item) => ({
+    type: "asset",
+    item,
+    id: `asset:${item.id}`,
+    createdAt: item.createdAt,
+  }));
 
   return paginate([...projectItems, ...assetItems], limit, cursor);
 }
@@ -2919,7 +2940,8 @@ export async function listCharacterAnchorAssets(
     .eq("workspace_id", workspaceId)
     .neq("media", "data");
   throwOnError(error, "listCharacterAnchorAssets");
-  const anchors = (data as AssetRow[]).map(mapAsset).filter(isCharacterAnchorAsset);
+  const mapped = await mapAssets(data as AssetRow[]);
+  const anchors = mapped.filter(isCharacterAnchorAsset);
   return paginate(anchors, limit, cursor);
 }
 
