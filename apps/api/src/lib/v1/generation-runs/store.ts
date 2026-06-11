@@ -149,6 +149,7 @@ interface RunRow {
 }
 
 const RUN_STATE_VERSION = "generationRunState.v1";
+const RUN_STATE_WRITE_ATTEMPTS = 5;
 
 interface StoredRunState {
   v: typeof RUN_STATE_VERSION;
@@ -487,18 +488,47 @@ export function createSupabaseGenerationRunsStore(
     return (data as RunRow | null) ?? null;
   }
 
-  async function writeRunState(runId: string, state: StoredRunState): Promise<void> {
-    const { error } = await db
-      .from("generation_runs")
-      .update({ gates: state, updated_at: new Date().toISOString() })
-      .eq("id", runId);
-    if (error) fail("update run state", error);
-  }
-
   async function requireRunState(runId: string): Promise<{ row: RunRow; state: StoredRunState }> {
     const row = await getRunRow(runId);
     if (!row) throw new Error(`generation run not found: ${runId}`);
     return { row, state: parseRunState(row.gates) };
+  }
+
+  async function writeRunRow(
+    runId: string,
+    expectedUpdatedAt: string,
+    patch: Partial<RunRow>,
+    op: string
+  ): Promise<RunRow | null> {
+    const { data, error } = await db
+      .from("generation_runs")
+      .update(patch)
+      .eq("id", runId)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("*")
+      .maybeSingle();
+    if (error) fail(op, error);
+    return (data as RunRow | null) ?? null;
+  }
+
+  async function mutateRunRow<T>(
+    runId: string,
+    op: string,
+    mutate: (row: RunRow, state: StoredRunState, now: string) => { patch: Partial<RunRow>; result: T }
+  ): Promise<T> {
+    for (let attempt = 0; attempt < RUN_STATE_WRITE_ATTEMPTS; attempt += 1) {
+      const { row, state } = await requireRunState(runId);
+      const now = new Date().toISOString();
+      const { patch, result } = mutate(row, state, now);
+      const updated = await writeRunRow(
+        runId,
+        row.updated_at,
+        { ...patch, updated_at: now },
+        op
+      );
+      if (updated) return result;
+    }
+    throw new Error(`generation run update conflict after retries: ${runId}`);
   }
 
   function stagesForRow(row: RunRow): GenerationStage[] {
@@ -532,32 +562,26 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async updateRun(runId, patch) {
-      const currentRow = await getRunRow(runId);
-      if (!currentRow) throw new Error(`generation run not found: ${runId}`);
-      const current = rowToRun(currentRow);
-      const currentState = parseRunState(currentRow.gates);
-      const next: GenerationRun = {
-        ...current,
-        ...patch,
-        runId: current.runId,
-        projectId: current.projectId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      const nextState: StoredRunState = {
-        ...currentState,
-        briefVersionId: next.briefVersionId,
-        reviewGates: next.reviewGates,
-        reviewGate: next.reviewGate,
-        reviewFeedback: next.reviewFeedback,
-        currentStageType: next.currentStageType,
-      };
-      const { error } = await db
-        .from("generation_runs")
-        .update({ ...runToRow(next), gates: nextState })
-        .eq("id", runId);
-      if (error) fail("update run", error);
-      return next;
+      return mutateRunRow(runId, "update run", (currentRow, currentState, now) => {
+        const current = rowToRun(currentRow);
+        const next: GenerationRun = {
+          ...current,
+          ...patch,
+          runId: current.runId,
+          projectId: current.projectId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...currentState,
+          briefVersionId: next.briefVersionId,
+          reviewGates: next.reviewGates,
+          reviewGate: next.reviewGate,
+          reviewFeedback: next.reviewFeedback,
+          currentStageType: next.currentStageType,
+        };
+        return { patch: { ...runToRow(next), gates: nextState }, result: next };
+      });
     },
 
     async listRunsForProject(projectId) {
@@ -571,20 +595,22 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async saveStage(input) {
-      const now = new Date().toISOString();
-      const { state } = await requireRunState(input.runId);
-      const stage: GenerationStage = {
-        ...input,
-        stageId: `${input.runId}:${input.type}`,
-        createdAt: now,
-        updatedAt: now,
-      };
-      state.stages = [
-        ...state.stages.filter((candidate) => candidate.stageId !== stage.stageId),
-        stage,
-      ].sort((a, b) => a.order - b.order);
-      await writeRunState(input.runId, state);
-      return stage;
+      return mutateRunRow(input.runId, "save stage", (_row, state, now) => {
+        const stage: GenerationStage = {
+          ...input,
+          stageId: `${input.runId}:${input.type}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stages: [
+            ...state.stages.filter((candidate) => candidate.stageId !== stage.stageId),
+            stage,
+          ].sort((a, b) => a.order - b.order),
+        };
+        return { patch: { gates: nextState }, result: stage };
+      });
     },
 
     async getStage(stageId) {
@@ -595,23 +621,26 @@ export function createSupabaseGenerationRunsStore(
 
     async updateStage(stageId, patch) {
       const runId = runIdFromStageId(stageId);
-      const { row, state } = await requireRunState(runId);
-      const current = stagesForRow(row).find((stage) => stage.stageId === stageId);
-      if (!current) throw new Error(`generation stage not found: ${stageId}`);
-      const next: GenerationStage = {
-        ...current,
-        ...patch,
-        stageId: current.stageId,
-        runId: current.runId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      const baseStages = state.stages.length ? state.stages : syntheticStages(row);
-      state.stages = baseStages
-        .map((stage) => (stage.stageId === stageId ? next : stage))
-        .sort((a, b) => a.order - b.order);
-      await writeRunState(runId, state);
-      return next;
+      return mutateRunRow(runId, "update stage", (row, state, now) => {
+        const current = stagesForRow(row).find((stage) => stage.stageId === stageId);
+        if (!current) throw new Error(`generation stage not found: ${stageId}`);
+        const next: GenerationStage = {
+          ...current,
+          ...patch,
+          stageId: current.stageId,
+          runId: current.runId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const baseStages = state.stages.length ? state.stages : syntheticStages(row);
+        const nextState: StoredRunState = {
+          ...state,
+          stages: baseStages
+            .map((stage) => (stage.stageId === stageId ? next : stage))
+            .sort((a, b) => a.order - b.order),
+        };
+        return { patch: { gates: nextState }, result: next };
+      });
     },
 
     async listStagesForRun(runId) {
@@ -620,18 +649,20 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async saveStageItem(input) {
-      const now = new Date().toISOString();
       const runId = runIdFromStageId(input.stageId);
-      const { state } = await requireRunState(runId);
-      const item: GenerationStageItem = {
-        ...input,
-        itemId: `${input.stageId}:item:${randomUUID()}`,
-        createdAt: now,
-        updatedAt: now,
-      };
-      state.stageItems = [...state.stageItems, item];
-      await writeRunState(runId, state);
-      return item;
+      return mutateRunRow(runId, "save stage item", (_row, state, now) => {
+        const item: GenerationStageItem = {
+          ...input,
+          itemId: `${input.stageId}:item:${randomUUID()}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageItems: [...state.stageItems, item],
+        };
+        return { patch: { gates: nextState }, result: item };
+      });
     },
 
     async getStageItem(itemId) {
@@ -644,22 +675,25 @@ export function createSupabaseGenerationRunsStore(
     async updateStageItem(itemId, patch) {
       const stageId = stageIdFromItemId(itemId);
       const runId = runIdFromStageId(stageId);
-      const { state } = await requireRunState(runId);
-      const current = state.stageItems.find((item) => item.itemId === itemId);
-      if (!current) throw new Error(`generation stage item not found: ${itemId}`);
-      const next: GenerationStageItem = {
-        ...current,
-        ...patch,
-        itemId: current.itemId,
-        stageId: current.stageId,
-        createdAt: current.createdAt,
-        updatedAt: new Date().toISOString(),
-      };
-      state.stageItems = state.stageItems.map((item) =>
-        item.itemId === itemId ? next : item
-      );
-      await writeRunState(runId, state);
-      return next;
+      return mutateRunRow(runId, "update stage item", (_row, state, now) => {
+        const current = state.stageItems.find((item) => item.itemId === itemId);
+        if (!current) throw new Error(`generation stage item not found: ${itemId}`);
+        const next: GenerationStageItem = {
+          ...current,
+          ...patch,
+          itemId: current.itemId,
+          stageId: current.stageId,
+          createdAt: current.createdAt,
+          updatedAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageItems: state.stageItems.map((item) =>
+            item.itemId === itemId ? next : item
+          ),
+        };
+        return { patch: { gates: nextState }, result: next };
+      });
     },
 
     async listStageItemsForStage(stageId) {
@@ -671,17 +705,19 @@ export function createSupabaseGenerationRunsStore(
     },
 
     async saveStageArtifact(input) {
-      const now = new Date().toISOString();
       const runId = input.runId || runIdFromStageId(input.stageId);
-      const { state } = await requireRunState(runId);
-      const artifact: GenerationStageArtifact = {
-        ...input,
-        artifactId: `${input.stageId}:artifact:${randomUUID()}`,
-        createdAt: now,
-      };
-      state.stageArtifacts = [...state.stageArtifacts, artifact];
-      await writeRunState(runId, state);
-      return artifact;
+      return mutateRunRow(runId, "save stage artifact", (_row, state, now) => {
+        const artifact: GenerationStageArtifact = {
+          ...input,
+          artifactId: `${input.stageId}:artifact:${randomUUID()}`,
+          createdAt: now,
+        };
+        const nextState: StoredRunState = {
+          ...state,
+          stageArtifacts: [...state.stageArtifacts, artifact],
+        };
+        return { patch: { gates: nextState }, result: artifact };
+      });
     },
 
     async getStageArtifact(artifactId) {
