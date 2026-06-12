@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 import styles from "./Button.module.css";
 
@@ -11,10 +11,14 @@ interface ButtonStyleProps {
   variant?: ButtonVariant;
   size?: ButtonSize;
   className?: string;
+  fullWidth?: boolean;
+  leadingIcon?: ReactNode;
+  trailingIcon?: ReactNode;
+  isLoading?: boolean;
 }
 
-function buttonClass({ variant = "primary", size = "md", className }: ButtonStyleProps) {
-  return [styles.btn, styles[variant], styles[size], className]
+function buttonClass({ variant = "primary", size = "md", fullWidth, className }: ButtonStyleProps) {
+  return [styles.btn, styles[variant], styles[size], fullWidth ? styles.fullWidth : null, className]
     .filter(Boolean)
     .join(" ");
 }
@@ -22,20 +26,68 @@ function buttonClass({ variant = "primary", size = "md", className }: ButtonStyl
 export function Button({
   variant,
   size,
+  fullWidth,
+  leadingIcon,
+  trailingIcon,
+  isLoading = false,
   className,
+  children,
+  disabled,
   type = "button",
   ...rest
 }: ButtonStyleProps & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type={type} className={buttonClass({ variant, size, className })} {...rest} />
+    <button
+      type={type}
+      className={buttonClass({ variant, size, fullWidth, className })}
+      disabled={disabled || isLoading}
+      aria-busy={isLoading || undefined}
+      {...rest}
+    >
+      {isLoading ? <span className={styles.spinner} aria-hidden="true" /> : leadingIcon}
+      <span className={styles.label}>{children}</span>
+      {trailingIcon}
+    </button>
   );
 }
 
 export function ButtonLink({
   variant,
   size,
+  fullWidth,
+  leadingIcon,
+  trailingIcon,
+  isLoading = false,
   className,
+  children,
+  onClick,
+  tabIndex,
+  "aria-disabled": ariaDisabled,
   ...rest
 }: ButtonStyleProps & LinkProps) {
-  return <Link className={buttonClass({ variant, size, className })} {...rest} />;
+  const disabled = isLoading || ariaDisabled === true || ariaDisabled === "true";
+
+  function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (disabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    onClick?.(event);
+  }
+
+  return (
+    <Link
+      className={buttonClass({ variant, size, fullWidth, className })}
+      aria-busy={isLoading || undefined}
+      aria-disabled={disabled || undefined}
+      onClick={handleClick}
+      tabIndex={disabled ? -1 : tabIndex}
+      {...rest}
+    >
+      {isLoading ? <span className={styles.spinner} aria-hidden="true" /> : leadingIcon}
+      <span className={styles.label}>{children}</span>
+      {trailingIcon}
+    </Link>
+  );
 }

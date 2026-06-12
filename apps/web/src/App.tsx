@@ -9,6 +9,7 @@ import { RunProgressPage } from "./routes/RunProgressPage";
 import { StudioPage } from "./routes/StudioPage";
 import { StoryboardPage } from "./routes/StoryboardPage";
 import { GenerationCardsPage } from "./routes/dev/GenerationCardsPage";
+import { DesignSystemPage } from "./routes/dev/DesignSystemPage";
 import { AdminPage } from "./routes/AdminPage";
 import { AdminEvalsPage } from "./routes/AdminEvalsPage";
 import { BrandKitPage } from "./routes/BrandKitPage";
@@ -59,6 +60,7 @@ export function App() {
             element={<ProjectWatchPage />}
           />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/dev/design-system" element={<DesignSystemPage />} />
           <Route path="/dev/generation-cards" element={<GenerationCardsPage />} />
           <Route path="/evals" element={<RedirectWithSearch to="/library/evals" />} />
           <Route path="/admin" element={<AdminPage />} />

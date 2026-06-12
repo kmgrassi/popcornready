@@ -1,0 +1,75 @@
+.heading,
+.text,
+.eyebrow {
+  margin: 0;
+}
+
+.heading {
+  color: var(--text-strong);
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: var(--line-heading);
+}
+
+.heading-sm {
+  font-size: var(--title-sm);
+}
+
+.heading-md {
+  font-size: var(--title-md);
+}
+
+.heading-lg {
+  font-size: var(--title-lg);
+}
+
+.heading-xl {
+  font-size: var(--title-xl);
+  line-height: var(--line-tight);
+}
+
+.text {
+  line-height: var(--line-body);
+}
+
+.text-xs {
+  font-size: var(--text-xs);
+  line-height: var(--line-caption);
+}
+
+.text-sm {
+  font-size: var(--text-sm);
+}
+
+.text-md {
+  font-size: var(--text-md);
+}
+
+.text-lg {
+  font-size: var(--text-lg);
+}
+
+.tone-default {
+  color: var(--text);
+}
+
+.tone-muted {
+  color: var(--muted);
+}
+
+.tone-strong {
+  color: var(--text-strong);
+}
+
+.tone-danger {
+  color: var(--danger-text);
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  line-height: var(--line-caption);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}

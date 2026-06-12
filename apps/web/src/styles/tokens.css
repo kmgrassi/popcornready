@@ -49,6 +49,10 @@
   /* Page-title / step-heading scale for the guided studio (PR 0). Larger than
    * --title-lg so the active step / empty-state headline dominates the view. */
   --title-xl: 36px;
+  --line-tight: 1.15;
+  --line-heading: 1.2;
+  --line-body: 1.5;
+  --line-caption: 1.35;
 
   /* Section-spacing convention (PR 0): an 8/12/16 rhythm for stacking sections,
    * cards, and form rows. Use these semantic aliases instead of raw --space-*
