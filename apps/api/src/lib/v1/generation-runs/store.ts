@@ -152,6 +152,7 @@ const RUN_STATE_VERSION = "generationRunState.v1";
 const RUN_STATE_WRITE_ATTEMPTS = 5;
 
 interface StoredRunState {
+  schema_version: typeof RUN_STATE_VERSION;
   v: typeof RUN_STATE_VERSION;
   briefVersionId?: string;
   reviewGates?: GenerationRun["reviewGates"];
@@ -168,8 +169,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseRunState(value: unknown): StoredRunState {
-  if (isRecord(value) && value.v === RUN_STATE_VERSION) {
+  if (
+    isRecord(value) &&
+    (value.schema_version === RUN_STATE_VERSION || value.v === RUN_STATE_VERSION)
+  ) {
     return {
+      schema_version: RUN_STATE_VERSION,
       v: RUN_STATE_VERSION,
       briefVersionId:
         typeof value.briefVersionId === "string" ? value.briefVersionId : undefined,
@@ -201,6 +206,7 @@ function parseRunState(value: unknown): StoredRunState {
     };
   }
   return {
+    schema_version: RUN_STATE_VERSION,
     v: RUN_STATE_VERSION,
     reviewGates: Array.isArray(value) ? (value as GenerationRun["reviewGates"]) : undefined,
     stages: [],
@@ -211,6 +217,7 @@ function parseRunState(value: unknown): StoredRunState {
 
 function runStateFromRun(run: GenerationRun): StoredRunState {
   return {
+    schema_version: RUN_STATE_VERSION,
     v: RUN_STATE_VERSION,
     briefVersionId: run.briefVersionId,
     reviewGates: run.reviewGates,
