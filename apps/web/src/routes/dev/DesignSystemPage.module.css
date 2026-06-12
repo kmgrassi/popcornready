@@ -1,0 +1,17 @@
+.shell {
+  width: min(100%, var(--content-max));
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-4);
+}
+
+.swatch {
+  min-height: 38px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 800;
+  line-height: var(--line-caption);
+}

@@ -1,0 +1,79 @@
+.root {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  color: var(--text-strong);
+  font-size: var(--text-md);
+  font-weight: 800;
+  line-height: var(--line-caption);
+}
+
+.description {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-body);
+}
+
+.input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.track {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  transition:
+    background var(--transition),
+    transform var(--transition);
+}
+
+.input:checked + .track {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.input:checked + .track .thumb {
+  background: var(--accent);
+  transform: translateX(18px);
+}
+
+.input:focus-visible + .track {
+  box-shadow: var(--ring);
+}
+
+.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
