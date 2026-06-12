@@ -22,8 +22,11 @@ function stablePublicUrl(key: string): string {
 }
 
 function localPublicPath(key: string): string {
-  if (key.startsWith("/")) return key;
-  return `/${key.replace(/^media\//, "")}`;
+  const config = readStorageConfig();
+  const path = key.startsWith("/") ? key : `/${key.replace(/^media\//, "")}`;
+  // Absolute against the API origin: the SPA runs on a different origin, and
+  // the API statically serves the local object store (see server.ts).
+  return `${config.localUrlBase}${path}`;
 }
 
 function privateDeliveryBucket(config: StorageConfig): string {

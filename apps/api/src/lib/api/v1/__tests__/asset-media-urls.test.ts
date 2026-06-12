@@ -22,21 +22,28 @@ test("assetMediaUrlsForRow reuses image URLs as thumbnails", async () => {
   assert.equal(media.expiresAt, "2026-06-11T13:00:00.000Z");
 });
 
-test("assetMediaUrlsForRow falls back to a local static URL for legacy local storage keys", async () => {
-  const media = await assetMediaUrlsForRow(
-    {
-      media: "video",
-      kind: "clip",
-      status: "ready",
-      remote_url: null,
-      storage_key: "media/uploads/ws1/p1/dev-only.mp4",
-    },
-    { now: fixedNow }
-  );
+test("assetMediaUrlsForRow serves legacy local storage keys from the local media origin", async () => {
+  const previousBase = process.env.STORAGE_LOCAL_URL_BASE;
+  process.env.STORAGE_LOCAL_URL_BASE = "http://localhost:4200";
+  try {
+    const media = await assetMediaUrlsForRow(
+      {
+        media: "video",
+        kind: "clip",
+        status: "ready",
+        remote_url: null,
+        storage_key: "media/uploads/ws1/p1/dev-only.mp4",
+      },
+      { now: fixedNow }
+    );
 
-  assert.equal(media.url, "/uploads/ws1/p1/dev-only.mp4");
-  assert.equal(media.thumbnailUrl, null);
-  assert.equal(media.expiresAt, "2026-06-11T13:00:00.000Z");
+    assert.equal(media.url, "http://localhost:4200/uploads/ws1/p1/dev-only.mp4");
+    assert.equal(media.thumbnailUrl, null);
+    assert.equal(media.expiresAt, "2026-06-11T13:00:00.000Z");
+  } finally {
+    if (previousBase === undefined) delete process.env.STORAGE_LOCAL_URL_BASE;
+    else process.env.STORAGE_LOCAL_URL_BASE = previousBase;
+  }
 });
 
 test("assetMediaUrlsForRow keeps remote URLs ahead of non-local storage keys", async () => {
