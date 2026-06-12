@@ -5,6 +5,25 @@
   max-width: 720px;
 }
 
+.wide {
+  width: min(100% - 48px, 840px);
+  max-width: 840px;
+  margin: 0 auto;
+}
+
+@media (min-width: 1180px) {
+  .wide {
+    width: min(100% - 48px, 1040px);
+    max-width: 1040px;
+  }
+}
+
+@media (max-width: 760px) {
+  .wide {
+    width: min(100% - 24px, 100%);
+  }
+}
+
 .header {
   display: flex;
   flex-direction: column;

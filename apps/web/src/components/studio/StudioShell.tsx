@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GENERATION_STAGE_LABELS,
   type GateableGenerationStageType,
@@ -95,6 +95,7 @@ export function StudioShell({
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [initialPayload, setInitialPayload] = useState<StudioDraftPayload | null>(null);
   const [flowKey, setFlowKey] = useState(0);
+  const autoStartRequestedRef = useRef(false);
 
   const refreshDrafts = useCallback(async () => {
     setDraftsLoading(true);
@@ -154,7 +155,12 @@ export function StudioShell({
   }, [initialStarted, navigate, openPanel, seededBrief]);
 
   useEffect(() => {
-    if (!initialStarted || activeDraftId || draftId) return;
+    if (!initialStarted || draftId) {
+      autoStartRequestedRef.current = false;
+      return;
+    }
+    if (activeDraftId || autoStartRequestedRef.current) return;
+    autoStartRequestedRef.current = true;
     void startNewDraft(initialStep ?? "brief");
   }, [activeDraftId, draftId, initialStarted, initialStep, startNewDraft]);
 

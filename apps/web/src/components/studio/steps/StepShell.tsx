@@ -20,6 +20,8 @@ export interface StepShellProps {
   nextDisabled?: boolean;
   /** Use the prominent CTA variant for the primary action. */
   nextCta?: boolean;
+  /** Let complex workflow steps use more horizontal room. */
+  wide?: boolean;
 }
 
 /**
@@ -39,9 +41,12 @@ export function StepShell({
   nextLabel = "Continue",
   nextDisabled = false,
   nextCta = false,
+  wide = false,
 }: StepShellProps) {
+  const cardClassName = [styles.step, wide ? styles.wide : ""].filter(Boolean).join(" ");
+
   return (
-    <Card padding="lg" elevated className={styles.step}>
+    <Card padding="lg" elevated className={cardClassName}>
       <header className={styles.header}>
         <h2 className={styles.heading}>{heading}</h2>
         {description ? <p className={styles.description}>{description}</p> : null}

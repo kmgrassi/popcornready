@@ -9,6 +9,7 @@ import {
 import type { User } from "@supabase/supabase-js";
 import {
   clearAllSupabaseAuthStorage,
+  clearBrowserSessionState,
   clearOtherSupabaseAuthStorage,
   getSupabaseClient,
   resolveBrowserSupabaseConfig,
@@ -143,12 +144,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     setError(null);
-    const supabase = getSupabaseClient();
-    await supabase.auth.signOut();
+    if (configured) {
+      try {
+        const supabase = getSupabaseClient();
+        await supabase.auth.signOut();
+      } catch {
+        // Still clear browser state so a stale local session cannot keep the
+        // user signed in after an auth/network failure.
+      }
+    }
     clearAllSupabaseAuthStorage();
+    clearBrowserSessionState();
     setUser(null);
     setStatus("unauthenticated");
-  }, []);
+  }, [configured]);
 
   // Lets a view drop a stale surfaced error without a status change — e.g. the
   // auth form clears the previous message when the user switches login <-> signup.
