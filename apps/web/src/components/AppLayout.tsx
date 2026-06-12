@@ -28,7 +28,7 @@ const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
 // Primary workspace nav. Library groups the collection routes until PR 5 gives
 // it a dedicated tab shell.
 const PRIMARY_NAV = [
-  { label: "Create", to: "/studio", activePaths: ["/studio"] },
+  { label: "Create", to: "/studio?start=1", activePaths: ["/studio"] },
   {
     label: "Library",
     to: "/library",
@@ -170,7 +170,7 @@ export function AuthenticatedAppLayout() {
           <span>Popcorn Ready</span>
         </Link>
 
-        <ButtonLink className={styles.newVideo} variant="primary" to="/studio">
+        <ButtonLink className={styles.newVideo} variant="primary" to="/studio?start=1">
           New video
         </ButtonLink>
 

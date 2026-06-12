@@ -4,10 +4,28 @@ import {
   GENERATION_STAGE_LABELS,
   type GateableGenerationStageType,
 } from "@popcorn/shared/v1/types";
-import { Disclosure } from "../../ui/Disclosure";
 import type { StepProps } from "../useStudioFlow";
 import { StepShell } from "./StepShell";
 import styles from "./GenerateStep.module.css";
+
+const CHECKPOINT_DESCRIPTIONS: Record<GateableGenerationStageType, string> = {
+  brief_intake:
+    "The agent turns your prompt, format, footage choice, and creative direction into a clean working brief.",
+  creative_plan:
+    "The agent decides the story structure: hook, beats, pacing, and the intended viewer takeaway.",
+  storyboard:
+    "The agent sketches the visual sequence before generating full media, so you can review the shape early.",
+  asset_generation:
+    "The agent generates or selects the visuals needed for each beat in the plan.",
+  audio_generation:
+    "The agent creates or selects narration, dialogue, music, or sound when the cut needs audio.",
+  timeline_assembly:
+    "The agent places media, captions, and timing into an editable rough-cut timeline.",
+  quality_review:
+    "The agent checks the cut for coherence, pacing, and obvious issues before handing it back.",
+  export:
+    "The app renders the finished timeline into a reviewable video file.",
+};
 
 export interface GenerateStepProps extends StepProps {
   /** Kicks the create-project + start-run flow on the shell's StudioFlow. */
@@ -21,9 +39,8 @@ export interface GenerateStepProps extends StepProps {
 }
 
 /**
- * GenerateStep — step 4. The one scaffold that's wired live: clicking
- * "Generate rough cut" calls `flow.startGeneration()` so the shell can run
- * end-to-end (the calm checklist + review-gate config disclosure land in PR 4).
+ * GenerateStep — step 4. The handoff controls for how autonomous the run should
+ * be before the user reviews generated work.
  */
 export function GenerateStep({
   draft,
@@ -32,7 +49,6 @@ export function GenerateStep({
   onEditBrief,
   error,
   back,
-  openPanel,
 }: GenerateStepProps) {
   const [submitting, setSubmitting] = useState(false);
   const [goalExpanded, setGoalExpanded] = useState(false);
@@ -60,8 +76,8 @@ export function GenerateStep({
 
   return (
     <StepShell
-      heading="Generate rough cut"
-      description="Hand the brief to the generation engine. We'll plan the story, select clips, and assemble an editable timeline."
+      heading="Set checkpoints"
+      description="Choose where the agent should pause for approval before it keeps working."
       comingSoonPr="PR 4"
       onBack={back}
       onNext={generate}
@@ -69,34 +85,44 @@ export function GenerateStep({
       nextDisabled={!draft.goal.trim() || submitting}
       nextCta
     >
-      <div className={styles.summary}>
-        <div className={styles.summaryItem}>
-          <div className={styles.summaryHeading}>
-            <span>Goal</span>
-            <button className={styles.editButton} type="button" onClick={onEditBrief}>
-              Edit
+      <section className={styles.summarySection} aria-labelledby="checkpoint-summary-heading">
+        <div>
+          <h3 id="checkpoint-summary-heading" className={styles.sectionTitle}>
+            Run summary
+          </h3>
+          <p className={styles.sectionHelp}>
+            Confirm the brief the agent will use before it starts generating.
+          </p>
+        </div>
+        <div className={styles.summary}>
+          <div className={styles.summaryItem}>
+            <div className={styles.summaryHeading}>
+              <span>Goal</span>
+              <button className={styles.editButton} type="button" onClick={onEditBrief}>
+                Edit
+              </button>
+            </div>
+            <button
+              className={`${styles.goalText} ${goalExpanded ? styles.goalTextExpanded : ""}`}
+              type="button"
+              aria-expanded={goalExpanded}
+              onClick={() => setGoalExpanded((expanded) => !expanded)}
+            >
+              {goal || "—"}
             </button>
           </div>
-          <button
-            className={`${styles.goalText} ${goalExpanded ? styles.goalTextExpanded : ""}`}
-            type="button"
-            aria-expanded={goalExpanded}
-            onClick={() => setGoalExpanded((expanded) => !expanded)}
-          >
-            {goal || "—"}
-          </button>
+          <div className={styles.summaryItem}>
+            <span>Format</span>
+            <strong>
+              {draft.aspectRatio}, {draft.targetLengthSec}s
+            </strong>
+          </div>
+          <div className={styles.summaryItem}>
+            <span>Source</span>
+            <strong>{draft.footageChoice === "upload" ? "Your footage" : "Prompt only"}</strong>
+          </div>
         </div>
-        <div className={styles.summaryItem}>
-          <span>Format</span>
-          <strong>
-            {draft.aspectRatio}, {draft.targetLengthSec}s
-          </strong>
-        </div>
-        <div className={styles.summaryItem}>
-          <span>Source</span>
-          <strong>{draft.footageChoice === "upload" ? "Your footage" : "Prompt only"}</strong>
-        </div>
-      </div>
+      </section>
       <aside className={styles.nextStep} aria-label="What happens next">
         <span className={styles.nextStepIcon} aria-hidden="true">
           i
@@ -109,66 +135,56 @@ export function GenerateStep({
           </p>
         </div>
       </aside>
-      <Disclosure
-        className={styles.config}
-        summary="Generation options"
-        defaultOpen={openPanel === "generation"}
-      >
-        <div className={styles.configGrid}>
-          <fieldset className={styles.group}>
-            <legend className={styles.legend}>Captions</legend>
-            <label
-              className={`${styles.checkboxCard} ${
-                draft.showCaptions ? styles.checkboxCardChecked : ""
-              }`}
-            >
-              <input
-                className={styles.checkboxInput}
-                type="checkbox"
-                checked={draft.showCaptions}
-                onChange={(event) => update({ showCaptions: event.target.checked })}
-              />
-              <span className={styles.checkboxCopy}>
-                <strong>Generate captions</strong>
-                <small>Include caption text in the generated timeline.</small>
-              </span>
-            </label>
-          </fieldset>
+      <fieldset className={styles.group}>
+        <legend className={styles.legend}>Review checkpoints</legend>
+        <p className={styles.help}>
+          Select the stages where the run should stop and wait for your approval.
+          Leave all unchecked for a fully automatic rough cut.
+        </p>
+        <ol className={styles.gateSequence}>
+          {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
+            const checked = draft.reviewGates.includes(stage);
+            const description = CHECKPOINT_DESCRIPTIONS[stage];
+            const tooltipId = `checkpoint-${stage}-description`;
 
-          <fieldset className={styles.group}>
-            <legend className={styles.legend}>Review gates</legend>
-            <p className={styles.help}>
-              Pause before expensive stages when you want to approve the work.
-            </p>
-            <ol className={styles.gateSequence}>
-              {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
-                const checked = draft.reviewGates.includes(stage);
-
-                return (
-                  <li className={styles.gateStep} key={stage}>
-                    <label
-                      className={`${styles.checkboxCard} ${
-                        checked ? styles.checkboxCardChecked : ""
-                      }`}
-                    >
-                      <input
-                        className={styles.checkboxInput}
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleReviewGate(stage)}
-                      />
-                      <span className={styles.checkboxCopy}>
-                        <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
-                        <small>Ask before continuing past this stage.</small>
+            return (
+              <li className={styles.gateStep} key={stage}>
+                <label
+                  className={`${styles.checkboxCard} ${
+                    checked ? styles.checkboxCardChecked : ""
+                  }`}
+                >
+                  <input
+                    className={styles.checkboxInput}
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleReviewGate(stage)}
+                  />
+                  <span className={styles.checkboxCopy}>
+                    <span className={styles.checkpointTitleRow}>
+                      <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
+                      <span
+                        className={styles.infoBadge}
+                        role="img"
+                        tabIndex={0}
+                        aria-label={`${GENERATION_STAGE_LABELS[stage]} info`}
+                        aria-describedby={tooltipId}
+                        title={description}
+                      >
+                        i
                       </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ol>
-          </fieldset>
-        </div>
-      </Disclosure>
+                      <span id={tooltipId} className={styles.tooltip} role="tooltip">
+                        {description}
+                      </span>
+                    </span>
+                    <small>Pause here so you can approve or request changes.</small>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ol>
+      </fieldset>
       {error ? <p className="new-project-error">{error}</p> : null}
     </StepShell>
   );
