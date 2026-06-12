@@ -65,7 +65,7 @@ export function GenerateStep({
       comingSoonPr="PR 4"
       onBack={back}
       onNext={generate}
-      nextLabel={submitting ? "Starting run..." : "Generate rough cut"}
+      nextLabel={submitting ? "Starting run..." : "Start generating"}
       nextDisabled={!draft.goal.trim() || submitting}
       nextCta
     >
@@ -97,6 +97,18 @@ export function GenerateStep({
           <strong>{draft.footageChoice === "upload" ? "Your footage" : "Prompt only"}</strong>
         </div>
       </div>
+      <aside className={styles.nextStep} aria-label="What happens next">
+        <span className={styles.nextStepIcon} aria-hidden="true">
+          i
+        </span>
+        <div>
+          <h3>What happens when you start?</h3>
+          <p>
+            We'll create the project, generate or select media, assemble an editable
+            rough cut, then take you to Review when it's ready.
+          </p>
+        </div>
+      </aside>
       <Disclosure
         className={styles.config}
         summary="Generation options"
