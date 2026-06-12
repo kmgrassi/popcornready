@@ -1,5 +1,5 @@
 -- Seed data for local/dev. Applied by `supabase db reset` (local) and can be run
--- against remote manually. Recreates the dev workspace + smoke-test projects.
+-- against remote manually. Recreates the dev workspace.
 --
 -- IDs are DB-generated uuids now (the app no longer mints text ids), so the seed
 -- inserts by natural key and lets gen_random_uuid() fill the primary keys. The
@@ -14,24 +14,4 @@ select 'workspace.v1', 'dev_workspace',
 where not exists (
   select 1 from public.workspaces
   where owner_id is null and lower(name) = 'dev_workspace'
-);
-
--- Smoke-test projects under the dev workspace.
-insert into public.projects (schema_version, workspace_id, name, status, created_at, updated_at)
-select 'project.v1', w.id, v.name, 'active', v.created_at, v.created_at
-from (
-  select id from public.workspaces
-  where owner_id is null and lower(name) = 'dev_workspace'
-  limit 1
-) w
-cross join (values
-  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:20:15.340Z'),
-  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:24:34.857Z'),
-  ('NVIDIA Cosmos smoke test', timestamptz '2026-06-02T15:30:14.727Z')
-) as v(name, created_at)
-where not exists (
-  select 1
-  from public.projects p
-  join public.workspaces ww on ww.id = p.workspace_id
-  where ww.owner_id is null and lower(ww.name) = 'dev_workspace'
 );
