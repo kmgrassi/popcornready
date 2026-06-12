@@ -237,16 +237,18 @@ export function RunsPage() {
 // Poster art with a graceful fallback: rows can reference media whose bytes
 // are gone (e.g. pre-storage-cutover dev assets), so a failed image load
 // degrades to the initial-letter placeholder instead of a broken-image glyph.
+// The failure is keyed to the URL that failed, not a sticky flag, so a
+// refreshed URL on the same mounted card retries automatically.
 function ProjectPoster({ name, posterUrl }: { name: string; posterUrl?: string | null }) {
-  const [failed, setFailed] = useState(false);
-  if (posterUrl && !failed) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (posterUrl && posterUrl !== failedUrl) {
     return (
       <img
         className={styles.poster}
         src={posterUrl}
         alt=""
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={() => setFailedUrl(posterUrl)}
       />
     );
   }
@@ -574,18 +576,19 @@ export function AssetsPage() {
 function AssetPreview({ asset }: { asset: WorkspaceAsset }) {
   // Rows can reference media whose bytes are gone (pre-storage-cutover dev
   // assets); degrade to the kind placeholder instead of a broken-image glyph.
-  const [failed, setFailed] = useState(false);
-  const handleError = () => setFailed(true);
-  if (!failed) {
-    if (asset.kind === "image" && (asset.thumbnailUrl || asset.url)) {
-      return <img className={styles.media} src={asset.thumbnailUrl ?? asset.url} alt="" loading="lazy" onError={handleError} />;
-    }
-    if (asset.kind === "video" && asset.url) {
-      return <video className={styles.media} src={asset.url} poster={asset.thumbnailUrl} muted playsInline preload="metadata" onError={handleError} />;
-    }
-    if (asset.kind === "video" && asset.thumbnailUrl) {
-      return <img className={styles.media} src={asset.thumbnailUrl} alt="" loading="lazy" onError={handleError} />;
-    }
+  // Failures are keyed to the URL that failed (not a sticky flag) so a
+  // refreshed signed URL on the same mounted card retries automatically, and
+  // a failed video src still falls through to its thumbnail.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imageSrc = asset.thumbnailUrl ?? asset.url;
+  if (asset.kind === "image" && imageSrc && imageSrc !== failedSrc) {
+    return <img className={styles.media} src={imageSrc} alt="" loading="lazy" onError={() => setFailedSrc(imageSrc)} />;
+  }
+  if (asset.kind === "video" && asset.url && asset.url !== failedSrc) {
+    return <video className={styles.media} src={asset.url} poster={asset.thumbnailUrl} muted playsInline preload="metadata" onError={() => setFailedSrc(asset.url ?? null)} />;
+  }
+  if (asset.kind === "video" && asset.thumbnailUrl && asset.thumbnailUrl !== failedSrc) {
+    return <img className={styles.media} src={asset.thumbnailUrl} alt="" loading="lazy" onError={() => setFailedSrc(asset.thumbnailUrl ?? null)} />;
   }
   return <div className={`${styles.media} ${styles.mediaEmpty}`}><span>{titleCase(asset.kind)}</span></div>;
 }
