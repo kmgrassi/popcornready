@@ -183,6 +183,12 @@ export async function createGenerationRunExecution(
   });
 }
 
+export async function createGenerationRunExecutionForRun(
+  args: BuildGenerationRunExecutionArgs
+): Promise<GenerationRunExecution> {
+  return buildGenerationRunExecution(args);
+}
+
 function orderedAttachedJobIds(stages: GenerationStage[]): string[] {
   const seen = new Set<string>();
   const ids: string[] = [];
