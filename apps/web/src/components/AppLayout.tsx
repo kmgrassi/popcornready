@@ -11,6 +11,7 @@ import {
   NavLink,
   Outlet,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { canAccessAdminSurface } from "./auth/AdminRoute";
@@ -18,7 +19,7 @@ import { AuthNavButton } from "./auth/AuthNavButton";
 import { LogoMark } from "./LogoMark";
 import { CommandPalette } from "./palette/Palette";
 import ThemeToggle from "./ThemeToggle";
-import { ButtonLink } from "./ui/Button";
+import { Button, ButtonLink } from "./ui/Button";
 import { v1Api, type MeResponse } from "../lib/api-client";
 import styles from "./AppLayout.module.css";
 
@@ -28,7 +29,7 @@ const VALID_THEMES = new Set(["popcorn", "popcorn-warm", "popcorn-night"]);
 // Primary workspace nav. Library groups the collection routes until PR 5 gives
 // it a dedicated tab shell.
 const PRIMARY_NAV = [
-  { label: "Create", to: "/studio?start=1", activePaths: ["/studio"] },
+  { label: "Create", to: "/studio", activePaths: ["/studio"] },
   {
     label: "Library",
     to: "/library",
@@ -96,6 +97,7 @@ const DEV_AUTOPILOT = import.meta.env.DEV;
 export function AuthenticatedAppLayout() {
   const auth = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [meError, setMeError] = useState<string | null>(null);
 
@@ -140,6 +142,13 @@ export function AuthenticatedAppLayout() {
       ? "Local mode"
       : me?.authMode ?? "Hosted mode";
   const showAdmin = canAccessAdminSurface(auth);
+  const canSignOut = auth.configured && auth.status === "authenticated";
+
+  async function signOut() {
+    if (!canSignOut) return;
+    await auth.signOut();
+    navigate("/login", { replace: true });
+  }
 
   if (auth.status === "loading") {
     return (
@@ -243,6 +252,11 @@ export function AuthenticatedAppLayout() {
             <Link className={styles.accountLink} to="/settings">
               {accountLabel}
             </Link>
+            {canSignOut ? (
+              <Button variant="secondary" size="sm" onClick={() => void signOut()}>
+                Log out
+              </Button>
+            ) : null}
           </div>
         </header>
         <main className={styles.routeFrame}>

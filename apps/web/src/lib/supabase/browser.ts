@@ -92,6 +92,77 @@ export function clearAllSupabaseAuthStorage() {
   clearSupabaseAuthStorage(() => true);
 }
 
+function cookieDomainsFor(hostname: string): Array<string | null> {
+  const domains: Array<string | null> = [null];
+  if (!hostname || hostname === "localhost" || /^[\d.]+$/.test(hostname)) {
+    return domains;
+  }
+
+  domains.push(hostname, `.${hostname}`);
+  const parts = hostname.split(".");
+  for (let index = 1; index < parts.length - 1; index += 1) {
+    domains.push(`.${parts.slice(index).join(".")}`);
+  }
+  return Array.from(new Set(domains));
+}
+
+function cookiePathsFor(pathname: string): string[] {
+  const paths = new Set<string>(["/"]);
+  const parts = pathname.split("/").filter(Boolean);
+  let current = "";
+  for (const part of parts) {
+    current += `/${part}`;
+    paths.add(current);
+  }
+  return Array.from(paths);
+}
+
+function clearAccessibleCookies() {
+  try {
+    const cookieNames = document.cookie
+      .split(";")
+      .map((cookie) => cookie.split("=")[0]?.trim())
+      .filter((name): name is string => Boolean(name));
+    const domains = cookieDomainsFor(window.location.hostname);
+    const paths = cookiePathsFor(window.location.pathname);
+
+    for (const name of cookieNames) {
+      for (const path of paths) {
+        for (const domain of domains) {
+          document.cookie = [
+            `${encodeURIComponent(name)}=`,
+            "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+            "Max-Age=0",
+            `Path=${path}`,
+            domain ? `Domain=${domain}` : "",
+            "SameSite=Lax",
+          ]
+            .filter(Boolean)
+            .join("; ");
+        }
+      }
+    }
+  } catch {
+    // Cookie access can be blocked in hardened browser contexts.
+  }
+}
+
+export function clearBrowserSessionState() {
+  try {
+    window.localStorage.clear();
+  } catch {
+    // Ignore storage access failures.
+  }
+
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // Ignore storage access failures.
+  }
+
+  clearAccessibleCookies();
+}
+
 export function getSupabaseClient(): SupabaseClient {
   if (client) return client;
 

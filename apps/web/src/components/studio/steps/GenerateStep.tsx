@@ -8,24 +8,27 @@ import type { StepProps } from "../useStudioFlow";
 import { StepShell } from "./StepShell";
 import styles from "./GenerateStep.module.css";
 
-const CHECKPOINT_DESCRIPTIONS: Record<GateableGenerationStageType, string> = {
-  brief_intake:
-    "The agent turns your prompt, format, footage choice, and creative direction into a clean working brief.",
-  creative_plan:
-    "The agent decides the story structure: hook, beats, pacing, and the intended viewer takeaway.",
-  storyboard:
-    "The agent sketches the visual sequence before generating full media, so you can review the shape early.",
-  asset_generation:
-    "The agent generates or selects the visuals needed for each beat in the plan.",
-  audio_generation:
-    "The agent creates or selects narration, dialogue, music, or sound when the cut needs audio.",
-  timeline_assembly:
-    "The agent places media, captions, and timing into an editable rough-cut timeline.",
-  quality_review:
-    "The agent checks the cut for coherence, pacing, and obvious issues before handing it back.",
-  export:
-    "The app renders the finished timeline into a reviewable video file.",
+const NEXT_STAGE_LABELS: Partial<Record<GateableGenerationStageType, string>> = {
+  brief_intake: "Plan",
+  creative_plan: "Storyboard",
+  storyboard: "Visuals",
+  asset_generation: "Audio",
+  audio_generation: "Timeline",
+  timeline_assembly: "Review",
+  quality_review: "Render",
 };
+
+function checkpointDescription(stage: GateableGenerationStageType, checked: boolean): string {
+  const nextStage = NEXT_STAGE_LABELS[stage];
+  if (checked) {
+    return nextStage
+      ? `The run will pause before continuing on to ${nextStage}.`
+      : "The run will pause after rendering is ready.";
+  }
+  return nextStage
+    ? `The run continues automatically to ${nextStage}.`
+    : "The run completes automatically after rendering.";
+}
 
 export interface GenerateStepProps extends StepProps {
   /** Kicks the create-project + start-run flow on the shell's StudioFlow. */
@@ -76,9 +79,9 @@ export function GenerateStep({
 
   return (
     <StepShell
+      wide
       heading="Set checkpoints"
       description="Choose where the agent should pause for approval before it keeps working."
-      comingSoonPr="PR 4"
       onBack={back}
       onNext={generate}
       nextLabel={submitting ? "Starting run..." : "Start generating"}
@@ -135,17 +138,15 @@ export function GenerateStep({
           </p>
         </div>
       </aside>
-      <fieldset className={styles.group}>
+      <fieldset className={`${styles.group} ${styles.checkpointPanel}`}>
         <legend className={styles.legend}>Review checkpoints</legend>
         <p className={styles.help}>
           Select the stages where the run should stop and wait for your approval.
           Leave all unchecked for a fully automatic rough cut.
         </p>
         <ol className={styles.gateSequence}>
-          {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
+          {GATEABLE_GENERATION_STAGE_TYPES.map((stage, index) => {
             const checked = draft.reviewGates.includes(stage);
-            const description = CHECKPOINT_DESCRIPTIONS[stage];
-            const tooltipId = `checkpoint-${stage}-description`;
 
             return (
               <li className={styles.gateStep} key={stage}>
@@ -160,24 +161,22 @@ export function GenerateStep({
                     checked={checked}
                     onChange={() => toggleReviewGate(stage)}
                   />
+                  <span className={styles.checkpointMarker} aria-hidden="true">
+                    {index + 1}
+                  </span>
                   <span className={styles.checkboxCopy}>
-                    <span className={styles.checkpointTitleRow}>
+                    <span className={styles.checkpointHeader}>
                       <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
                       <span
-                        className={styles.infoBadge}
-                        role="img"
-                        tabIndex={0}
-                        aria-label={`${GENERATION_STAGE_LABELS[stage]} info`}
-                        aria-describedby={tooltipId}
-                        title={description}
+                        className={styles.checkpointSignal}
+                        aria-hidden="true"
                       >
-                        i
-                      </span>
-                      <span id={tooltipId} className={styles.tooltip} role="tooltip">
-                        {description}
+                        {checked ? "X" : "→"}
                       </span>
                     </span>
-                    <small>Pause here so you can approve or request changes.</small>
+                    <small>
+                      {checkpointDescription(stage, checked)}
+                    </small>
                   </span>
                 </label>
               </li>

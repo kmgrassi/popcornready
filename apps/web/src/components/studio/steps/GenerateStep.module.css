@@ -22,7 +22,7 @@
 .summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .summaryItem {
@@ -43,12 +43,10 @@
 
 .summaryItem strong {
   display: block;
-  overflow: hidden;
   color: var(--text-strong);
   font-size: var(--text-md);
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .summaryHeading {
@@ -89,7 +87,6 @@
   width: 100%;
   min-width: 0;
   padding: 0;
-  overflow: hidden;
   border: 0;
   background: transparent;
   color: var(--text-strong);
@@ -98,8 +95,6 @@
   font-weight: 800;
   line-height: 1.45;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -174,6 +169,14 @@
   border: 0;
 }
 
+.checkpointPanel {
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
 .legend {
   color: var(--text-strong);
   font-size: var(--text-md);
@@ -188,10 +191,12 @@
 }
 
 .checkboxCard {
-  display: flex;
-  align-items: flex-start;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-3);
   box-sizing: border-box;
+  height: 100%;
   min-width: 0;
   padding: var(--space-4);
   border: 1px solid var(--border);
@@ -206,8 +211,8 @@
 }
 
 .checkboxCard:hover {
-  border-color: color-mix(in srgb, var(--cta) 34%, var(--border));
-  background: color-mix(in srgb, var(--surface) 88%, var(--cta));
+  border-color: color-mix(in srgb, var(--cta) 42%, var(--border));
+  background: color-mix(in srgb, var(--surface) 94%, var(--cta));
 }
 
 .checkboxCard:has(.checkboxInput:focus-visible) {
@@ -217,22 +222,26 @@
 }
 
 .checkboxCardChecked {
-  border-color: color-mix(in srgb, var(--cta) 68%, var(--border));
-  background: color-mix(in srgb, var(--surface) 88%, var(--cta));
+  border-color: color-mix(in srgb, var(--cta) 76%, var(--border));
+  background:
+    linear-gradient(var(--accent-soft), var(--accent-soft)),
+    var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cta) 22%, transparent);
 }
 
 .checkboxCardChecked:hover {
-  border-color: color-mix(in srgb, var(--cta) 82%, var(--border));
-  background: color-mix(in srgb, var(--surface) 84%, var(--cta));
+  border-color: color-mix(in srgb, var(--cta) 86%, var(--border));
 }
 
 .checkboxInput {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-top: 3px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
   accent-color: var(--cta);
   cursor: pointer;
+  opacity: 0;
 }
 
 .checkboxInput:focus-visible {
@@ -240,10 +249,9 @@
 }
 
 .checkboxCopy {
-  position: relative;
   display: grid;
-  gap: var(--space-1);
-  flex: 1;
+  gap: var(--space-2);
+  align-content: start;
   min-width: 0;
 }
 
@@ -260,172 +268,102 @@
   line-height: 1.45;
 }
 
-.checkpointTitleRow {
-  position: relative;
-  display: flex;
+.checkpointHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
 
-.checkpointTitleRow strong {
+.checkpointHeader strong {
   min-width: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
-.infoBadge {
-  position: relative;
+.checkpointMarker {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.checkpointSignal {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 900;
   line-height: 1;
-  cursor: help;
 }
 
-.infoBadge:hover,
-.infoBadge:focus-visible {
-  border-color: var(--accent);
-  color: var(--accent-strong);
-  outline: none;
+.checkboxCardChecked .checkpointMarker {
+  border-color: color-mix(in srgb, var(--cta) 72%, var(--accent-border));
+  background: var(--cta);
+  color: var(--cta-contrast);
 }
 
-.tooltip {
-  position: absolute;
-  z-index: 10;
-  bottom: calc(100% + var(--space-2));
-  left: 0;
-  width: min(260px, calc(100vw - var(--space-6)));
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: var(--shadow-lg);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  line-height: 1.45;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(4px);
-  transition:
-    opacity var(--transition),
-    transform var(--transition);
-}
-
-.infoBadge:hover + .tooltip,
-.infoBadge:focus-visible + .tooltip {
-  opacity: 1;
-  transform: translateY(0);
+.checkboxCardChecked .checkpointSignal {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .gateSequence {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .gateStep {
-  position: relative;
+  display: flex;
   min-width: 0;
 }
 
-.gateStep:not(:last-child)::after {
-  content: "↓";
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 20px;
-  margin: var(--space-1) 0 calc(-1 * var(--space-2)) 13px;
-  color: color-mix(in srgb, var(--cta) 72%, var(--muted));
-  font-size: var(--text-sm);
-  font-weight: 900;
-  line-height: 1;
+.gateStep .checkboxCard {
+  width: 100%;
+  min-height: 154px;
 }
 
-@media (min-width: 980px) {
-  .gateSequence {
+@media (max-width: 900px) {
+  .summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: stretch;
   }
 
-  .gateStep {
-    display: flex;
-    min-width: 0;
-  }
-
-  .gateStep .checkboxCard {
-    width: 100%;
-    padding: var(--space-4);
-  }
-
-  .gateStep .checkboxInput {
-    margin-top: 3px;
-  }
-
-  .gateStep:not(:last-child)::after {
-    content: "→";
-    position: absolute;
-    top: 19px;
-    right: calc(-1 * var(--space-3));
-    z-index: 1;
-    width: var(--space-3);
-    height: 20px;
-    margin: 0;
-    color: color-mix(in srgb, var(--cta) 72%, var(--muted));
-  }
-
-  .gateStep:nth-child(2n)::after {
-    content: none;
-  }
-
-  .checkpointTitleRow {
-    flex-wrap: wrap;
-  }
-
-  .checkboxCopy strong {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .checkboxCopy small {
-    font-size: var(--text-sm);
-  }
-
-  .tooltip {
-    left: 50%;
-    transform: translate(-50%, 4px);
-  }
-
-  .infoBadge:hover + .tooltip,
-  .infoBadge:focus-visible + .tooltip {
-    transform: translate(-50%, 0);
-  }
-}
-
-@media (min-width: 1180px) {
-  .gateSequence {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .gateStep:nth-child(2n)::after {
-    content: "→";
-  }
-
-  .gateStep:nth-child(4n)::after {
-    content: none;
+  .summaryItem:first-child {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 760px) {
   .summary {
     grid-template-columns: 1fr;
+  }
+
+  .summaryItem:first-child {
+    grid-column: auto;
+  }
+
+  .checkpointPanel {
+    padding: var(--space-4);
   }
 }
