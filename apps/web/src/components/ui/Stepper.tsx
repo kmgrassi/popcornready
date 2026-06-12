@@ -18,6 +18,11 @@ export interface StepperProps {
    * buttons so the user can jump back. Steps after the active one stay inert.
    */
   onStepClick?: (index: number, step: Step) => void;
+  /**
+   * Highest step index that should be clickable. Defaults to the active index,
+   * which preserves the usual "jump back only" behavior.
+   */
+  clickableThroughIndex?: number;
   className?: string;
 }
 
@@ -28,14 +33,20 @@ export interface StepperProps {
  * steps marked complete. Purely presentational: the active step and any
  * navigation are owned by the caller (the Studio flow machine).
  */
-export function Stepper({ steps, activeIndex, onStepClick, className }: StepperProps) {
+export function Stepper({
+  steps,
+  activeIndex,
+  onStepClick,
+  clickableThroughIndex = activeIndex,
+  className,
+}: StepperProps) {
   const classes = [styles.stepper, className].filter(Boolean).join(" ");
   return (
     <ol className={classes}>
       {steps.map((step, index) => {
         const status =
           index < activeIndex ? "done" : index === activeIndex ? "active" : "upcoming";
-        const interactive = Boolean(onStepClick) && index <= activeIndex;
+        const interactive = Boolean(onStepClick) && index <= clickableThroughIndex;
         const content = (
           <>
             <span className={styles.marker} aria-hidden="true">

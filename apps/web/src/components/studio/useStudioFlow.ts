@@ -79,7 +79,7 @@ export interface BriefDraft {
   style: string;
   callToAction: string;
 
-  // Generate-step config (seed + captions + review gates).
+  // Run handoff config (seed, captions, and review checkpoints).
   provider: string;
   seedKind: SeedKind;
   seedSize: string;

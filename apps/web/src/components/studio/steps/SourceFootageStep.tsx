@@ -158,6 +158,33 @@ export function SourceFootageStep({ draft, update, next, back }: StepProps) {
           )}
         </section>
       ) : null}
+
+      <section className={styles.outputPanel} aria-labelledby="footage-output-heading">
+        <div>
+          <h3 id="footage-output-heading" className={styles.outputTitle}>
+            Output preferences
+          </h3>
+          <p className={styles.outputHelp}>
+            These travel with the footage and brief when the agent builds the cut.
+          </p>
+        </div>
+        <label
+          className={`${styles.checkboxCard} ${
+            draft.showCaptions ? styles.checkboxCardChecked : ""
+          }`}
+        >
+          <input
+            className={styles.checkboxInput}
+            type="checkbox"
+            checked={draft.showCaptions}
+            onChange={(event) => update({ showCaptions: event.target.checked })}
+          />
+          <span className={styles.checkboxCopy}>
+            <strong>Generate captions</strong>
+            <small>Include caption text in the generated timeline.</small>
+          </span>
+        </label>
+      </section>
     </StepShell>
   );
 }

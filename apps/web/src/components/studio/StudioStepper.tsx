@@ -6,7 +6,7 @@ const STEP_LABELS: Record<StudioStep, string> = {
   brief: "Brief",
   footage: "Footage",
   story: "Story",
-  generate: "Generate",
+  generate: "Checkpoints",
   review: "Review",
   export: "Export",
 };
@@ -18,6 +18,8 @@ export interface StudioStepperProps {
   step: StudioStep;
   /** Jump to a completed/active step (steps after the active one stay inert). */
   onStepClick?: (step: StudioStep) => void;
+  /** Allow direct navigation through a specific step, even if it is upcoming. */
+  clickableThroughStep?: StudioStep;
 }
 
 /**
@@ -25,12 +27,20 @@ export interface StudioStepperProps {
  * `StudioStep` vocabulary into the presentational step list. Keeps the step
  * labels in one place so steps stay consistent across the shell.
  */
-export function StudioStepper({ step, onStepClick }: StudioStepperProps) {
+export function StudioStepper({
+  step,
+  onStepClick,
+  clickableThroughStep,
+}: StudioStepperProps) {
   const activeIndex = STUDIO_STEPS.indexOf(step);
+  const clickableThroughIndex = clickableThroughStep
+    ? STUDIO_STEPS.indexOf(clickableThroughStep)
+    : activeIndex;
   return (
     <Stepper
       steps={STEPPER_STEPS}
       activeIndex={activeIndex}
+      clickableThroughIndex={clickableThroughIndex}
       onStepClick={
         onStepClick
           ? (index) => onStepClick(STUDIO_STEPS[index])

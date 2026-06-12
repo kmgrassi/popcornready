@@ -180,7 +180,6 @@ export function StudioShell({
           drafts={drafts}
           loading={draftsLoading}
           error={draftsError}
-          onStart={() => void startNewDraft()}
           onResume={(id) => void openDraft(id)}
           onDelete={(id) => void removeDraft(id)}
         />
@@ -290,12 +289,11 @@ function StudioFlowView({
   // initial + started: the wizard's setup steps.
   return (
     <main className={styles.shell}>
-      <div className={styles.cta}>
-        <Button variant="cta" size="lg" onClick={() => flow.goTo("brief")}>
-          Start new video
-        </Button>
-      </div>
-      <StudioStepper step={flow.step} onStepClick={flow.goTo} />
+      <StudioStepper
+        step={flow.step}
+        onStepClick={flow.goTo}
+        clickableThroughStep="generate"
+      />
       <section className={styles.stepBody}>
         <ActiveStep
           key={`${flow.step}:${openPanel ?? ""}`}

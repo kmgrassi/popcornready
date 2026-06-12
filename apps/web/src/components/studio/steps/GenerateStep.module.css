@@ -1,8 +1,28 @@
+.summarySection {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-md);
+  font-weight: 800;
+}
+
+.sectionHelp {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
-  margin: var(--space-4) 0;
 }
 
 .summaryItem {
@@ -171,6 +191,7 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
+  box-sizing: border-box;
   min-width: 0;
   padding: var(--space-4);
   border: 1px solid var(--border);
@@ -219,6 +240,7 @@
 }
 
 .checkboxCopy {
+  position: relative;
   display: grid;
   gap: var(--space-1);
   flex: 1;
@@ -236,6 +258,70 @@
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: 1.45;
+}
+
+.checkpointTitleRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.checkpointTitleRow strong {
+  min-width: 0;
+}
+
+.infoBadge {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: help;
+}
+
+.infoBadge:hover,
+.infoBadge:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  outline: none;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  width: min(260px, calc(100vw - var(--space-6)));
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity var(--transition),
+    transform var(--transition);
+}
+
+.infoBadge:hover + .tooltip,
+.infoBadge:focus-visible + .tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .gateSequence {
@@ -262,6 +348,80 @@
   font-size: var(--text-sm);
   font-weight: 900;
   line-height: 1;
+}
+
+@media (min-width: 980px) {
+  .gateSequence {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .gateStep {
+    display: flex;
+    min-width: 0;
+  }
+
+  .gateStep .checkboxCard {
+    width: 100%;
+    padding: var(--space-4);
+  }
+
+  .gateStep .checkboxInput {
+    margin-top: 3px;
+  }
+
+  .gateStep:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    top: 19px;
+    right: calc(-1 * var(--space-3));
+    z-index: 1;
+    width: var(--space-3);
+    height: 20px;
+    margin: 0;
+    color: color-mix(in srgb, var(--cta) 72%, var(--muted));
+  }
+
+  .gateStep:nth-child(2n)::after {
+    content: none;
+  }
+
+  .checkpointTitleRow {
+    flex-wrap: wrap;
+  }
+
+  .checkboxCopy strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .checkboxCopy small {
+    font-size: var(--text-sm);
+  }
+
+  .tooltip {
+    left: 50%;
+    transform: translate(-50%, 4px);
+  }
+
+  .infoBadge:hover + .tooltip,
+  .infoBadge:focus-visible + .tooltip {
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (min-width: 1180px) {
+  .gateSequence {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .gateStep:nth-child(2n)::after {
+    content: "→";
+  }
+
+  .gateStep:nth-child(4n)::after {
+    content: none;
+  }
 }
 
 @media (max-width: 760px) {

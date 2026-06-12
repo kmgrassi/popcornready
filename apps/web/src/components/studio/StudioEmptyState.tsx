@@ -4,8 +4,6 @@ import type { StudioDraftSummary } from "../../lib/draftStore";
 import styles from "./StudioShell.module.css";
 
 export interface StudioEmptyStateProps {
-  /** Enter the Brief step and start a new video. */
-  onStart: () => void;
   drafts?: StudioDraftSummary[];
   loading?: boolean;
   error?: string | null;
@@ -15,11 +13,10 @@ export interface StudioEmptyStateProps {
 
 /**
  * StudioEmptyState — the Studio zero state (PR 1). The first thing a new user
- * sees: one headline, one line of support, and a single prominent CTA so the
- * first action is obvious within seconds.
+ * sees: one headline, one line of support, and any resumable drafts. Starting
+ * a new video lives in the app navigation.
  */
 export function StudioEmptyState({
-  onStart,
   drafts = [],
   loading = false,
   error = null,
@@ -31,11 +28,6 @@ export function StudioEmptyState({
       <EmptyState
         headline="Create your first AI rough cut"
         supporting="Start with a brief, add footage, then review an editable timeline."
-        action={
-          <Button variant="cta" size="lg" onClick={onStart}>
-            Start new video
-          </Button>
-        }
       />
       <section className={styles.draftPanel} aria-label="Continue a draft">
         <div className={styles.draftHeader}>
@@ -81,7 +73,7 @@ function stepLabel(step: StudioDraftSummary["step"]): string {
     brief: "Brief",
     footage: "Footage",
     story: "Story",
-    generate: "Generate",
+    generate: "Checkpoints",
     review: "Review",
     export: "Export",
   };
