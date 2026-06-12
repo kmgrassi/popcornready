@@ -110,16 +110,17 @@ interface BriefVersionRow {
   id: string;
   schema_version: string;
   project_id: string;
-  content: BriefVersion["brief"];
+  content: BriefVersion["brief"] & { schema_version?: string };
   created_at: string;
 }
 
 function rowToBriefVersion(r: BriefVersionRow): BriefVersion {
+  const { schema_version: _contentSchemaVersion, ...brief } = r.content;
   return {
     id: r.id,
     schemaVersion: "brief.v1",
     projectId: r.project_id,
-    brief: r.content,
+    brief,
     createdAt: r.created_at,
   };
 }
@@ -152,7 +153,7 @@ interface AssetRow {
   url: string | null;
   remote_url: string | null;
   storage_key: string | null;
-  params: { generatedAssetJobId?: string } | null;
+  params: { schema_version?: string; generatedAssetJobId?: string } | null;
   duration_sec: number | null;
   description: string | null;
   context: { userContext?: V1Asset["userContext"]; agentContext?: V1Asset["agentContext"] } | null;
@@ -163,6 +164,18 @@ interface AssetRow {
   source: unknown;
   created_at: string;
   updated_at: string;
+}
+
+const JSONB_SCHEMA_KEY = "schema_version";
+
+function markJsonbPayload<T extends object>(
+  schemaVersion: string,
+  payload: T
+): T & { schema_version: string } {
+  return {
+    [JSONB_SCHEMA_KEY]: schemaVersion,
+    ...(payload as Record<string, unknown>),
+  } as T & { schema_version: string };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -267,7 +280,9 @@ function assetToRow(a: V1Asset): AssetRow {
     url: a.url ?? null,
     remote_url: a.source === "remote_url" ? a.url : null,
     storage_key: null,
-    params: a.generatedAssetJobId ? { generatedAssetJobId: a.generatedAssetJobId } : null,
+    params: a.generatedAssetJobId
+      ? markJsonbPayload("asset_params.v1", { generatedAssetJobId: a.generatedAssetJobId })
+      : null,
     duration_sec: a.durationSec ?? null,
     description: a.description ?? null,
     context: Object.keys(context).length ? context : null,
@@ -649,7 +664,7 @@ export function createSupabaseStore(
         media: "data",
         status: "ready",
         role: "current_brief",
-        content: brief.brief,
+        content: markJsonbPayload("brief.v1", brief.brief),
         created_at: brief.createdAt,
         updated_at: brief.createdAt,
       });
