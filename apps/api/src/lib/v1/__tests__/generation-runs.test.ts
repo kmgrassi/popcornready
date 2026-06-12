@@ -12,6 +12,7 @@ import {
   cancelGenerationRun,
   createPersistedRunProgressEmitter,
   createGenerationRunsStore,
+  createSupabaseGenerationRunsStore,
   createRunWithSeedStages,
   pauseAfterStageIfReviewGate,
   rejectReviewGate,
@@ -466,6 +467,49 @@ test("refresh recovery: a fresh store over the same dir reads prior records", as
   const items = await reopened.listStageItemsForStage(stage.stageId);
   assert.equal(items.length, 1);
   assert.equal(items[0].label, "Beat 1");
+});
+
+test("Supabase run rows stamp gates with a schema marker", async () => {
+  const captured: { insertedRow?: Record<string, any> } = {};
+  const db = {
+    from(table: string) {
+      assert.equal(table, "generation_runs");
+      return {
+        insert(row: Record<string, any>) {
+          captured.insertedRow = row;
+          return {
+            select() {
+              return {
+                async single() {
+                  return {
+                    data: {
+                      ...row,
+                      id: "11111111-1111-4111-8111-111111111111",
+                    },
+                    error: null,
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const supabaseStore = createSupabaseGenerationRunsStore(db as never);
+  const run = await supabaseStore.createRun({
+    projectId: "proj_schema",
+    status: "queued",
+    reviewGates: ["creative_plan"],
+  });
+
+  assert.equal(run.runId, "11111111-1111-4111-8111-111111111111");
+  assert.ok(captured.insertedRow);
+  const gates = captured.insertedRow.gates as Record<string, unknown>;
+  assert.equal(gates.schema_version, "generationRunState.v1");
+  assert.equal(gates.v, "generationRunState.v1");
+  assert.deepEqual(gates.reviewGates, ["creative_plan"]);
 });
 
 
