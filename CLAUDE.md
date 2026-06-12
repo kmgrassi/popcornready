@@ -17,10 +17,10 @@ timeline with patches" model.
 
 The app is **moving off the Next.js monolith** into a monorepo split. Target stack:
 
-- **Frontend:** Vite + **React Router v7 (data mode)** SPA → Netlify — the
-  authenticated dashboard + all client logic. (Vite replaces CRA; do not add CRA.
-  Avoid building new SSR/RSC-coupled logic — Next's server model is what we're
-  leaving.)
+- **Frontend:** Vite + **React Router v7 (data mode)** SPA → Netlify, with
+  **TanStack Query** for API-owned server state — the authenticated dashboard +
+  all client logic. (Vite replaces CRA; do not add CRA. Avoid building new
+  SSR/RSC-coupled logic — Next's server model is what we're leaving.)
 - **Backend:** **Express API** → Railway — business logic, the generation/job
   stack, Supabase access, and the harper-server-style auth middleware.
 - **Data/auth:** **Supabase** (Postgres + Storage + Auth). App identity is
@@ -78,6 +78,17 @@ user edits it, or the agent targets it by name, prefer relational columns/rows.
 
 - Run the dev server with `NODE_ENV=development` (a stray `NODE_ENV=test` makes
   Next skip `.env.local` and drop API keys).
+- Front-end server state belongs in **TanStack Query**. Use it for API/Supabase
+  reads, mutations, polling, retries, and invalidation in `apps/web`; do not add
+  Redux, Zustand, or a bespoke global store for server-owned data. Keep local
+  React state/reducers for ephemeral UI state and rich in-component workflows
+  such as unsaved form fields, open panels, active editor selections, and
+  temporary notes.
+- When migrating existing web screens, move one route or hook at a time: reuse
+  the existing typed API client functions, define stable query keys near the
+  owning client module, replace local `loading`/`error` fetch state with
+  `useQuery`, replace imperative write flows with `useMutation`, and invalidate
+  or update the affected query keys after successful mutations.
 - Directory shape should reduce shared edit hotspots while keeping code
   modular. Prefer cohesive feature/route files plus small explicit mount files
   over broad `index.ts` aggregators. When adding Express route groups, add or

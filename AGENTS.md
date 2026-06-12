@@ -25,6 +25,21 @@ produced the code so the right agent can be routed back in:
 - When planning parallel work, split tasks so each PR mostly edits distinct
   route, page, component, or package files.
 
+## Front-End State Hygiene
+
+- Use **TanStack Query** for `apps/web` state that comes from the API or
+  Supabase: queries, mutations, polling, retries, cache updates, and
+  invalidation. The app root already provides the shared query client.
+- Keep local React state for ephemeral UI concerns: unsaved form fields, active
+  controls, open panels, drag/selection state, temporary review notes, and
+  reducer-owned workflow state.
+- Do not add Redux, Zustand, or another global client store for server-owned
+  data. If a screen needs shared API data, expose it through typed query hooks or
+  query-key helpers next to the existing `apps/web/src/lib/*` client module.
+- Migrate incrementally. Prefer one route, page, or hook per PR, reusing the
+  existing API client functions and replacing manual `useEffect` loading/error
+  state with `useQuery` / `useMutation`.
+
 ## Asset-Graph Migration Hygiene
 
 - The target generation model is the immutable asset graph:
