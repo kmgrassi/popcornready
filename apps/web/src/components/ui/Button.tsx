@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 import styles from "./Button.module.css";
 
@@ -60,12 +60,29 @@ export function ButtonLink({
   isLoading = false,
   className,
   children,
+  onClick,
+  tabIndex,
+  "aria-disabled": ariaDisabled,
   ...rest
 }: ButtonStyleProps & LinkProps) {
+  const disabled = isLoading || ariaDisabled === true || ariaDisabled === "true";
+
+  function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (disabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    onClick?.(event);
+  }
+
   return (
     <Link
       className={buttonClass({ variant, size, fullWidth, className })}
       aria-busy={isLoading || undefined}
+      aria-disabled={disabled || undefined}
+      onClick={handleClick}
+      tabIndex={disabled ? -1 : tabIndex}
       {...rest}
     >
       {isLoading ? <span className={styles.spinner} aria-hidden="true" /> : leadingIcon}
