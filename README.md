@@ -52,7 +52,9 @@ The codebase is a **pnpm + Turbo monorepo** (the original Next.js monolith in
 [`docs/repository-structure.md`](docs/repository-structure.md) for the full
 directory map. The split:
 
-- **Frontend** — Vite + React Router v7 (data mode) SPA → Netlify.
+- **Frontend** — Vite + React Router v7 (data mode) SPA → Netlify, with
+  **TanStack Query** for server-state caching, mutations, polling, and
+  invalidation.
 - **Backend** — Express API → Railway (logic, the generation/job stack, Supabase).
 - **Data/auth** — Supabase (Postgres + Storage + Auth); app identity is
   `public.users.id`, mapped from `auth.uid()` only inside RLS.
@@ -62,6 +64,23 @@ rationale, and PR breakdown live in
 [`docs/scopes/supabase-cutover-prs.md`](docs/scopes/supabase-cutover-prs.md); see
 also the agent guide [`CLAUDE.md`](CLAUDE.md) and the identity model in
 [`docs/supabase-identity-and-rls.md`](docs/supabase-identity-and-rls.md).
+
+### Front-end state direction
+
+Use **TanStack Query** for front-end state that is owned by the API or Supabase:
+workspace summaries, projects, assets, outputs, generation runs, draft records,
+signed media URLs, mutations, polling, retries, and cache invalidation. The
+`QueryClientProvider` is installed at the Vite app root in
+`apps/web/src/main.tsx`, and the shared client lives at
+`apps/web/src/lib/queryClient.ts`.
+
+Keep local React state for ephemeral UI state: form inputs before persistence,
+open/closed panels, selected tabs, inline editor drafts, focused controls, and
+temporary review notes. Do not introduce Redux, Zustand, or another global
+client store for API data. When migrating existing screens, prefer small
+route-by-route changes: wrap existing functions from `apps/web/src/lib/*` in
+`useQuery` / `useMutation`, replace manual loading/error state, and invalidate
+or update the relevant query keys after mutations.
 
 ## Features
 
