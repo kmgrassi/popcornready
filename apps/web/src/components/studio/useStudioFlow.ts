@@ -18,7 +18,7 @@ import type { StoryContext } from "@popcorn/shared/types";
 import { v1Api } from "../../lib/api-client";
 import { deleteDraft, saveDraft, type StudioDraftPayload } from "../../lib/draftStore";
 import type { GenerationRunResultArtifact } from "../../lib/v1/generation-runs/status";
-import { createAndStartRun } from "../../lib/startRun";
+import { createAndStartRun, type StartRunResult } from "../../lib/startRun";
 import type { SelectedFootage } from "../../lib/upload";
 
 // --- State / step vocabularies ---------------------------------------------
@@ -148,7 +148,7 @@ export interface StudioFlow {
   next(): void;
   update(patch: Partial<BriefDraft>): void;
   /** Create the project + start the run, then switch state to 'generating'. */
-  startGeneration(): Promise<void>;
+  startGeneration(): Promise<StartRunResult>;
   /**
    * Approve the active run's review gate and resume. No-op when not gated.
    * Re-polls immediately so the generating view reflects the resumed run.
@@ -346,7 +346,8 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
   const startGeneration = useCallback(async () => {
     setError(undefined);
     try {
-      const { projectId: createdProjectId, runId } = await createAndStartRun(brief);
+      const result = await createAndStartRun(brief);
+      const { projectId: createdProjectId, runId } = result;
       setProjectId(createdProjectId);
       setReviewProject(null);
       setReviewTimeline(null);
@@ -368,6 +369,7 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
         projectId: createdProjectId,
         runId,
       });
+      return result;
     } catch (startError) {
       setError(
         startError instanceof Error
