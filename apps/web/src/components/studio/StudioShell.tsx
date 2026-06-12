@@ -218,6 +218,7 @@ function StudioFlowView({
   initialStep?: StudioStep;
   openPanel?: string;
 }) {
+  const navigate = useNavigate();
   const flow = useStudioFlow({
     initialBrief,
     draftId: draftId === LOCAL_DRAFT_ID ? undefined : draftId,
@@ -306,6 +307,16 @@ function StudioFlowView({
           step={flow.step}
           flow={flow}
           openPanel={openPanel}
+          onGenerationStarted={(projectId, runId) => {
+            const params = new URLSearchParams();
+            if (draftId !== LOCAL_DRAFT_ID) params.set("studioDraft", draftId);
+            const query = params.toString();
+            navigate(
+              `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}${
+                query ? `?${query}` : ""
+              }`,
+            );
+          }}
         />
       </section>
     </main>
@@ -316,10 +327,12 @@ function ActiveStep({
   step,
   flow,
   openPanel,
+  onGenerationStarted,
 }: {
   step: StudioStep;
   flow: ReturnType<typeof useStudioFlow>;
   openPanel?: string;
+  onGenerationStarted?: (projectId: string, runId: string) => void;
 }) {
   const stepProps = {
     draft: flow.brief,
@@ -342,7 +355,10 @@ function ActiveStep({
         <GenerateStep
           {...stepProps}
           error={flow.error}
-          onGenerate={flow.startGeneration}
+          onGenerate={async () => {
+            const result = await flow.startGeneration();
+            onGenerationStarted?.(result.projectId, result.runId);
+          }}
           onEditBrief={() => flow.goTo("brief")}
           openPanel={openPanel}
         />

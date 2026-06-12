@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import type { GenerationRun } from "@popcorn/shared/v1/types";
 import { ProgressView } from "../components/progress/ProgressView";
 import { v1Api } from "../lib/api-client";
@@ -17,8 +17,18 @@ function isTerminal(status: GenerationRun["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "canceled";
 }
 
+function studioReviewPath(draftId: string): string {
+  const params = new URLSearchParams({
+    draft: draftId,
+    step: "review",
+  });
+  return `/studio?${params.toString()}`;
+}
+
 export function RunProgressPage() {
   const { projectId, runId } = useParams();
+  const [params] = useSearchParams();
+  const studioDraftId = params.get("studioDraft");
 
   if (!projectId || !runId) {
     return (
@@ -31,10 +41,24 @@ export function RunProgressPage() {
     );
   }
 
-  return <RunProgress projectId={projectId} runId={runId} />;
+  return (
+    <RunProgress
+      projectId={projectId}
+      runId={runId}
+      studioDraftId={studioDraftId}
+    />
+  );
 }
 
-function RunProgress({ projectId, runId }: { projectId: string; runId: string }) {
+function RunProgress({
+  projectId,
+  runId,
+  studioDraftId,
+}: {
+  projectId: string;
+  runId: string;
+  studioDraftId?: string | null;
+}) {
   const [payload, setPayload] = useState<GenerationRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<
@@ -44,6 +68,7 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
   const [reviewFeedbackNote, setReviewFeedbackNote] = useState("");
   const pollNowRef = useRef<(() => void) | null>(null);
   const hint = readLastRunHint(projectId);
+  const studioReturnPath = studioDraftId ? studioReviewPath(studioDraftId) : null;
   const reviewGateKey = payload?.run.reviewGate?.stageId ?? null;
 
   const applyPayload = useCallback(
@@ -155,12 +180,16 @@ function RunProgress({ projectId, runId }: { projectId: string; runId: string })
               Last seen run <code>{hint.runId}</code> was {hint.status}.
             </p>
           ) : null}
-          <Link className="secondary compact" to="/studio">
+          <Link className="secondary compact" to={studioReturnPath ?? "/studio"}>
             Back to studio
           </Link>
         </div>
       </main>
     );
+  }
+
+  if (studioReturnPath && payload.run.status === "succeeded") {
+    return <Navigate to={studioReturnPath} replace />;
   }
 
   return (
