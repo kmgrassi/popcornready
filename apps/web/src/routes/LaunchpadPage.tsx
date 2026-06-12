@@ -1,31 +1,18 @@
-import { useCallback } from "react";
-import type { DashboardSummaryResponse } from "@popcorn/shared/v1/dashboard";
 import { HeroCard } from "../components/home/HeroCard";
 import { RecentOutputsStrip } from "../components/home/RecentOutputsStrip";
 import { Button } from "../components/ui/Button";
 import { ErrorState } from "../components/ui/StateCard";
-import { v1Api } from "../lib/api-client";
-import { dashboardSummaryHasActiveRuns } from "../lib/v1/dashboard/polling";
-import { dashboardApi } from "../lib/v1/dashboard/client";
-import { useDashboardPolling } from "../lib/dashboard/polling";
+import { useAuth } from "../components/auth/AuthProvider";
 import { deriveNextAction } from "../lib/nextAction";
+import { useDashboardSummaryQuery } from "../lib/queryClient";
 import styles from "./LaunchpadPage.module.css";
 
-export function LaunchpadPage() {
-  const fetchSummary = useCallback(async (signal: AbortSignal) => {
-    const { workspaceId } = await v1Api.me();
-    return dashboardApi.getSummary(workspaceId, signal);
-  }, []);
+const DEV_AUTOPILOT = import.meta.env.DEV;
 
-  const {
-    data,
-    error,
-    loading,
-    refresh,
-  } = useDashboardPolling<DashboardSummaryResponse>({
-    fetcher: fetchSummary,
-    hasActiveRuns: (payload) => dashboardSummaryHasActiveRuns(payload.summary),
-  });
+export function LaunchpadPage() {
+  const auth = useAuth();
+  const authScope = auth.user?.id ?? (DEV_AUTOPILOT ? "dev-autopilot" : auth.status);
+  const { data, error, loading, refresh } = useDashboardSummaryQuery(authScope);
 
   const pulse = data?.summary ?? null;
   const action = deriveNextAction(pulse, []);
