@@ -162,6 +162,15 @@ function assertProbeInput(input: unknown, toolName: ToolName, token: string): vo
     toolName,
     confirmationToken: token,
   };
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    throw new Error(
+      `${toolName}: expected input keys ${JSON.stringify(
+        expectedKeys
+      )}, got ${JSON.stringify(actualKeys)}. Full input: ${JSON.stringify(actual)}`
+    );
+  }
   for (const [key, value] of Object.entries(expected)) {
     if (actual[key] !== value) {
       throw new Error(
