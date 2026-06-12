@@ -167,52 +167,105 @@
   font-weight: 700;
 }
 
-.option,
-.gateOption {
+.checkboxCard {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition);
 }
 
-.option input,
-.gateOption input {
+.checkboxCard:hover {
+  border-color: color-mix(in srgb, var(--cta) 34%, var(--border));
+  background: color-mix(in srgb, var(--surface) 88%, var(--cta));
+}
+
+.checkboxCard:has(.checkboxInput:focus-visible) {
+  border-color: color-mix(in srgb, var(--cta) 62%, var(--border));
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.checkboxCardChecked {
+  border-color: color-mix(in srgb, var(--cta) 68%, var(--border));
+  background: color-mix(in srgb, var(--surface) 88%, var(--cta));
+}
+
+.checkboxCardChecked:hover {
+  border-color: color-mix(in srgb, var(--cta) 82%, var(--border));
+  background: color-mix(in srgb, var(--surface) 84%, var(--cta));
+}
+
+.checkboxInput {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
   margin-top: 3px;
-  accent-color: var(--accent);
+  accent-color: var(--cta);
+  cursor: pointer;
 }
 
-.option span,
-.gateOption span {
+.checkboxInput:focus-visible {
+  outline: none;
+}
+
+.checkboxCopy {
   display: grid;
   gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
 }
 
-.option strong,
-.gateOption strong {
+.checkboxCopy strong {
   color: var(--text-strong);
   font-size: var(--text-md);
+  font-weight: 800;
+  line-height: 1.25;
 }
 
-.option small,
-.gateOption small {
+.checkboxCopy small {
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: 1.45;
 }
 
-.gateGrid {
+.gateSequence {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gateStep {
+  position: relative;
+  min-width: 0;
+}
+
+.gateStep:not(:last-child)::after {
+  content: "↓";
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+  margin: var(--space-1) 0 calc(-1 * var(--space-2)) 13px;
+  color: color-mix(in srgb, var(--cta) 72%, var(--muted));
+  font-size: var(--text-sm);
+  font-weight: 900;
+  line-height: 1;
 }
 
 @media (max-width: 760px) {
-  .summary,
-  .gateGrid {
+  .summary {
     grid-template-columns: 1fr;
   }
 }

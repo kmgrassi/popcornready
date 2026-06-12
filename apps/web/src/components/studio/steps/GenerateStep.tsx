@@ -117,13 +117,18 @@ export function GenerateStep({
         <div className={styles.configGrid}>
           <fieldset className={styles.group}>
             <legend className={styles.legend}>Captions</legend>
-            <label className={styles.option}>
+            <label
+              className={`${styles.checkboxCard} ${
+                draft.showCaptions ? styles.checkboxCardChecked : ""
+              }`}
+            >
               <input
+                className={styles.checkboxInput}
                 type="checkbox"
                 checked={draft.showCaptions}
                 onChange={(event) => update({ showCaptions: event.target.checked })}
               />
-              <span>
+              <span className={styles.checkboxCopy}>
                 <strong>Generate captions</strong>
                 <small>Include caption text in the generated timeline.</small>
               </span>
@@ -135,21 +140,32 @@ export function GenerateStep({
             <p className={styles.help}>
               Pause before expensive stages when you want to approve the work.
             </p>
-            <div className={styles.gateGrid}>
-              {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => (
-                <label className={styles.gateOption} key={stage}>
-                  <input
-                    type="checkbox"
-                    checked={draft.reviewGates.includes(stage)}
-                    onChange={() => toggleReviewGate(stage)}
-                  />
-                  <span>
-                    <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
-                    <small>Ask before continuing past this stage.</small>
-                  </span>
-                </label>
-              ))}
-            </div>
+            <ol className={styles.gateSequence}>
+              {GATEABLE_GENERATION_STAGE_TYPES.map((stage) => {
+                const checked = draft.reviewGates.includes(stage);
+
+                return (
+                  <li className={styles.gateStep} key={stage}>
+                    <label
+                      className={`${styles.checkboxCard} ${
+                        checked ? styles.checkboxCardChecked : ""
+                      }`}
+                    >
+                      <input
+                        className={styles.checkboxInput}
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleReviewGate(stage)}
+                      />
+                      <span className={styles.checkboxCopy}>
+                        <strong>{GENERATION_STAGE_LABELS[stage]}</strong>
+                        <small>Ask before continuing past this stage.</small>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ol>
           </fieldset>
         </div>
       </Disclosure>
