@@ -61,6 +61,7 @@ import {
   type StudioDraftStep,
   type StudioDraftSummary,
 } from "@popcorn/shared/v1/studio-drafts";
+import type { EditPlan } from "@popcorn/shared/types";
 import {
   getGenerationRunStore,
   type GenerationRunsStore,
@@ -497,7 +498,7 @@ interface DataAssetRow {
 // it when projecting the payload back out as a domain object.
 const CONTENT_SCHEMA_KEY = "schema_version";
 
-function markedContent(kind: "brief" | "beat", content: unknown): Record<string, unknown> {
+function markedContent(kind: "brief" | "beat" | "plan", content: unknown): Record<string, unknown> {
   return { [CONTENT_SCHEMA_KEY]: `${kind}.v1`, ...(content as Record<string, unknown>) };
 }
 
@@ -836,7 +837,7 @@ async function mapProjectWithProjection(
 async function setActiveAssetSelection(
   db: SupabaseClient,
   projectId: string,
-  slotRole: "brief" | typeof POSTER_SLOT_ROLE,
+  slotRole: "brief" | "plan" | typeof POSTER_SLOT_ROLE,
   activeAssetId: string,
   setByActionId?: string
 ): Promise<void> {
@@ -974,7 +975,7 @@ async function insertDataAsset(input: {
   db: SupabaseClient;
   workspaceId: string;
   projectId: string;
-  kind: "brief" | "beat";
+  kind: "brief" | "beat" | "plan";
   role: string;
   content: unknown;
   lineageId?: string;
@@ -1531,6 +1532,50 @@ export async function addProjectBrief(input: {
     outputAssetIds: [briefAsset.id],
   });
   return mapBriefVersion(briefAsset);
+}
+
+// Read the project's active brief (the 'brief' selection slot, falling back to
+// the latest brief asset). Returns the unwrapped VideoBrief or null. Used by the
+// plan_shots tool's precondition check.
+export async function getActiveProjectBrief(
+  projectId: string
+): Promise<VideoBrief | null> {
+  const db = getServiceSupabase();
+  const briefAsset = await selectedDataAsset(db, projectId, "brief", "brief");
+  return briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null;
+}
+
+// Persist a plan (scenes + beats) as the project's active 'plan' data asset,
+// wrapped in a plan_shots action for provenance. Mirrors addProjectBrief; the
+// plan is the immutable upstream that storyboard/keyframe/etc. read.
+export async function addProjectPlan(input: {
+  workspaceId: string;
+  projectId: string;
+  plan: EditPlan;
+}): Promise<{ planAssetId: string }> {
+  const db = getServiceSupabase();
+  const action = await createAction({
+    projectId: input.projectId,
+    tool: "plan_shots",
+    status: "running",
+    params: { source: "plan_shots" },
+    rationale: "Persist the shot plan as the project's active plan asset.",
+  });
+  const planAsset = await insertDataAsset({
+    db,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    kind: "plan",
+    role: "current_plan",
+    content: input.plan,
+    createdByActionId: action.id,
+  });
+  await setActiveAssetSelection(db, input.projectId, "plan", planAsset.id, action.id);
+  await updateAction(action.id, {
+    status: "applied",
+    outputAssetIds: [planAsset.id],
+  });
+  return { planAssetId: planAsset.id };
 }
 
 export async function getProject(
