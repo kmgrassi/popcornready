@@ -456,13 +456,6 @@ export function useStudioFlow(options: UseStudioFlowOptions = {}): StudioFlow {
     state,
   ]);
 
-  useEffect(() => {
-    if (!reviewCutQuery.error) return;
-    setReviewProject(null);
-    setReviewTimeline(null);
-    setReviewTimelineId(undefined);
-  }, [reviewCutQuery.error]);
-
   const requestRevision = useCallback(
     async (note: string) => {
       const message = note.trim();
