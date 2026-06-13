@@ -116,6 +116,7 @@ export function StudioShell({
   );
 
   useEffect(() => {
+    if (draftQuery.isFetching || draftQuery.error) return;
     const record = draftQuery.data;
     if (!record || pendingDraftId !== record.draftId) return;
     setActiveDraftId(record.draftId);
@@ -123,7 +124,7 @@ export function StudioShell({
     setFlowKey((current) => current + 1);
     setPendingDraftId(null);
     navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
-  }, [draftQuery.data, navigate, pendingDraftId]);
+  }, [draftQuery.data, draftQuery.error, draftQuery.isFetching, navigate, pendingDraftId]);
 
   useEffect(() => {
     if (!draftId || activeDraftId === draftId) return;

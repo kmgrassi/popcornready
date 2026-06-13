@@ -33,6 +33,8 @@ export function useStudioDraftQuery(draftId: string | null) {
       : [...studioDraftQueryKeys.all, "detail", "pending"],
     queryFn: () => loadDraft(draftId!),
     enabled: Boolean(draftId),
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 }
 
@@ -48,7 +50,6 @@ export function useCreateStudioDraftMutation() {
       step: StudioStep;
     }) => createDraft(draft, step),
     onSuccess: (record) => {
-      client.setQueryData(studioDraftQueryKeys.detail(record.draftId), record);
       client.setQueryData<StudioDraftSummary[] | undefined>(
         studioDraftQueryKeys.lists(),
         (current) => {
