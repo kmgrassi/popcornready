@@ -1,23 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { canAccessAdminSurface } from "../components/auth/AdminRoute";
 import { useAuth } from "../components/auth/AuthProvider";
 import { JudgmentBadge, verdictLabel, VerdictDot } from "../components/evals/JudgmentBadge";
 import { ApiClientError } from "../lib/api-client";
 import {
-  evalApi,
   stageLabel,
-  toRunDetail,
-  toSuiteSummary,
-  type EvalRunDetailView,
-  type EvalSuiteSummaryView,
-  type VerdictFlip,
 } from "../lib/evals/api";
 import {
-  fallbackEvalSuites,
-  fallbackRunDetails,
-  fallbackVerdictFlips,
-} from "../lib/evals/fallback";
+  useEvalRunDetailQuery,
+  useEvalRunDiffQuery,
+  useEvalSuitesQuery,
+} from "../lib/evals/queries";
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -29,134 +23,35 @@ function errorMessage(err: unknown): string {
   return "Something went wrong loading the eval data.";
 }
 
-function isEvalApiUnavailable(err: unknown): boolean {
-  return (
-    err instanceof ApiClientError &&
-    err.status === 404 &&
-    (err.message.includes("/api/v1/eval") || err.code === "internal_error")
-  );
-}
-
 export function EvalsPage() {
   const auth = useAuth();
   const showWorkbenchLink = canAccessAdminSurface(auth);
 
-  const [suites, setSuites] = useState<EvalSuiteSummaryView[]>([]);
-  const [suitesLoading, setSuitesLoading] = useState(true);
-  const [suitesError, setSuitesError] = useState<string | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
-
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [runDetail, setRunDetail] = useState<EvalRunDetailView | null>(null);
-  const [runLoading, setRunLoading] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
 
-  const [flips, setFlips] = useState<VerdictFlip[] | null>(null);
-  const [flipsError, setFlipsError] = useState<string | null>(null);
+  const suitesQuery = useEvalSuitesQuery();
+  const suites = suitesQuery.data?.suites ?? [];
+  const usingFallback = suitesQuery.data?.usingFallback ?? false;
+  const suitesLoading = suitesQuery.isLoading || (suitesQuery.isFetching && !suitesQuery.data);
+  const suitesError = suitesQuery.error ? errorMessage(suitesQuery.error) : null;
 
-  const loadSuites = useCallback((signal?: AbortSignal) => {
-    setSuitesLoading(true);
-    setSuitesError(null);
-    return evalApi
-      .listSuites(signal)
-      .then((res) => {
-        if (signal?.aborted) return;
-        const views = res.suites.map(toSuiteSummary);
-        setUsingFallback(false);
-        setSuites(views);
-        setActiveRunId((current) =>
-          current && views.some((suite) => suite.latestRunId === current)
-            ? current
-            : views.find((suite) => suite.latestRunId)?.latestRunId ?? null,
-        );
-      })
-      .catch((err) => {
-        if (signal?.aborted) return;
-        if (isEvalApiUnavailable(err)) {
-          setUsingFallback(true);
-          setSuites(fallbackEvalSuites);
-          setActiveRunId((current) =>
-            current && fallbackEvalSuites.some((suite) => suite.latestRunId === current)
-              ? current
-              : fallbackEvalSuites.find((suite) => suite.latestRunId)?.latestRunId ?? null,
-          );
-          return;
-        }
-        setUsingFallback(false);
-        setSuitesError(errorMessage(err));
-      })
-      .finally(() => {
-        if (signal?.aborted) return;
-        setSuitesLoading(false);
-      });
-  }, []);
+  const runQuery = useEvalRunDetailQuery(activeRunId, usingFallback);
+  const runDetail = runQuery.data ?? null;
+  const runLoading = runQuery.isLoading || (runQuery.isFetching && !runQuery.data);
+  const runError = runQuery.error ? errorMessage(runQuery.error) : null;
+
+  const flipsQuery = useEvalRunDiffQuery(runDetail, usingFallback);
+  const flips = runDetail?.previousRunId ? flipsQuery.data ?? null : null;
+  const flipsError = flipsQuery.error ? errorMessage(flipsQuery.error) : null;
 
   useEffect(() => {
-    const controller = new AbortController();
-    loadSuites(controller.signal);
-    return () => controller.abort();
-  }, [loadSuites]);
-
-  useEffect(() => {
-    if (!activeRunId) {
-      setRunDetail(null);
-      return;
-    }
-    if (usingFallback) {
-      setRunLoading(false);
-      setRunError(null);
-      setRunDetail(fallbackRunDetails[activeRunId] ?? null);
-      return;
-    }
-    const controller = new AbortController();
-    setRunLoading(true);
-    setRunError(null);
-    evalApi
-      .getRun(activeRunId, controller.signal)
-      .then((payload) => {
-        if (controller.signal.aborted) return;
-        setRunDetail(toRunDetail(payload));
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setRunError(errorMessage(err));
-        setRunDetail(null);
-      })
-      .finally(() => {
-        if (controller.signal.aborted) return;
-        setRunLoading(false);
-      });
-    return () => controller.abort();
-  }, [activeRunId, usingFallback]);
-
-  // Diff the active run against the prior run of the same suite — that is the
-  // "money view" (did my change regress?). The server carries the lineage on the
-  // run payload, so a missing prior simply yields no flips.
-  useEffect(() => {
-    if (!runDetail || !runDetail.previousRunId) {
-      setFlips(null);
-      setFlipsError(null);
-      return;
-    }
-    if (usingFallback) {
-      setFlips(fallbackVerdictFlips[runDetail.runId] ?? []);
-      setFlipsError(null);
-      return;
-    }
-    const controller = new AbortController();
-    evalApi
-      .diffRun(runDetail.runId, runDetail.previousRunId, controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        setFlips(res.flips);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setFlipsError(errorMessage(err));
-        setFlips(null);
-      });
-    return () => controller.abort();
-  }, [runDetail, usingFallback]);
+    if (!suitesQuery.data) return;
+    setActiveRunId((current) =>
+      current && suites.some((suite) => suite.latestRunId === current)
+        ? current
+        : suites.find((suite) => suite.latestRunId)?.latestRunId ?? null,
+    );
+  }, [suites, suitesQuery.data]);
 
   return (
     <main className="eval-page">
@@ -181,7 +76,7 @@ export function EvalsPage() {
         ) : suitesError ? (
           <div className="eval-state error" role="alert">
             <p>{suitesError}</p>
-            <button type="button" onClick={() => loadSuites()}>
+            <button type="button" onClick={() => void suitesQuery.refetch()}>
               Retry
             </button>
           </div>
