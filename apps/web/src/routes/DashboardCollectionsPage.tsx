@@ -1,22 +1,29 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { AssetKind, GenerationRunStatus, V1Project } from "@popcorn/shared/v1/types";
+import type { GenerationRunStatus } from "@popcorn/shared/v1/types";
 import {
-  ApiClientError,
-  v1Api,
   type WorkspaceAsset,
   type WorkspaceAssetSource,
-  type WorkspaceGenerationRun,
   type WorkspaceOutput,
 } from "../lib/api-client";
+import { useAuth } from "../components/auth/AuthProvider";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Toolbar, ToolbarField } from "../components/ui/Toolbar";
 import { Button, ButtonLink } from "../components/ui/Button";
 import { EmptyState, ErrorState } from "../components/ui/StateCard";
 import { MediaViewer, type MediaViewerItem } from "../components/media/MediaViewer";
+import {
+  useAssetMediaMutation,
+  useAssetVisibilityMutation,
+  useDashboardAssetsQuery,
+  useDashboardOutputsQuery,
+  useDashboardProjectsQuery,
+  useDashboardRunsQuery,
+} from "../lib/v1/dashboard/query";
 import styles from "./DashboardCollections.module.css";
 
 const PAGE_SIZE = 24;
+const DEV_AUTOPILOT = import.meta.env.DEV;
 const RUN_STATUSES = ["all", "queued", "running", "succeeded", "failed", "canceled"] as const;
 const ASSET_KINDS = ["all", "image", "video", "audio"] as const;
 const ASSET_SOURCES = ["all", "uploaded", "generated"] as const;
@@ -24,19 +31,6 @@ const ASSET_SOURCES = ["all", "uploaded", "generated"] as const;
 type RunStatusFilter = (typeof RUN_STATUSES)[number];
 type AssetKindFilter = (typeof ASSET_KINDS)[number];
 type AssetSourceFilter = (typeof ASSET_SOURCES)[number];
-
-interface LoadState<T> {
-  workspaceId: string | null;
-  items: T[];
-  nextCursor: string | null;
-  loading: boolean;
-  loadingMore: boolean;
-  error: ApiClientError | Error | null;
-}
-
-function initialState<T>(): LoadState<T> {
-  return { workspaceId: null, items: [], nextCursor: null, loading: true, loadingMore: false, error: null };
-}
 
 function formatDate(value?: string) {
   if (!value) return "Unknown";
@@ -57,8 +51,9 @@ function titleCase(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function isStaleRequest(signal: AbortSignal | undefined, requestId: number, latestRequestId: number) {
-  return Boolean(signal?.aborted) || requestId !== latestRequestId;
+function useDashboardAuthScope() {
+  const auth = useAuth();
+  return auth.user?.id ?? (DEV_AUTOPILOT ? "dev-autopilot" : auth.status);
 }
 
 function projectCollectionPath(projectId: string, extraParams?: Record<string, string | undefined>) {
@@ -154,37 +149,14 @@ function LoadMore({ hasMore, loading, onClick }: { hasMore: boolean; loading: bo
 
 export function RunsPage() {
   const [searchParams] = useSearchParams();
+  const authScope = useDashboardAuthScope();
   const projectId = searchParams.get("projectId") ?? undefined;
   const [status, setStatus] = useState<RunStatusFilter>("all");
-  const [state, setState] = useState<LoadState<WorkspaceGenerationRun>>(initialState<WorkspaceGenerationRun>);
-  const requestIdRef = useRef(0);
-
-  const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setState((current) => ({ ...current, loading: !cursor, loadingMore: Boolean(cursor), error: null }));
-
-    try {
-      const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      const payload = await v1Api.listWorkspaceGenerationRuns(
-        workspaceId,
-        { status, projectId, limit: PAGE_SIZE, cursor },
-        signal
-      );
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ workspaceId, items: cursor ? [...current.items, ...payload.runs] : payload.runs, nextCursor: payload.pagination.nextCursor, loading: false, loadingMore: false, error: null }));
-    } catch (error) {
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ ...current, loading: false, loadingMore: false, error: error instanceof Error ? error : new Error(String(error)) }));
-    }
-  }, [projectId, state.workspaceId, status]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(null, controller.signal);
-    return () => controller.abort();
-  }, [load]);
+  const runsQuery = useDashboardRunsQuery(authScope, {
+    status,
+    projectId,
+    limit: PAGE_SIZE,
+  });
 
   return (
     <DashboardFrame title="Runs" description="Track generation runs in this workspace.">
@@ -195,26 +167,26 @@ export function RunsPage() {
           </select>
         </ToolbarField>
       </Toolbar>
-      {state.loading ? <DashboardSkeleton /> : null}
-      {!state.loading && state.error ? (
+      {runsQuery.loading ? <DashboardSkeleton /> : null}
+      {!runsQuery.loading && runsQuery.error ? (
         <ErrorState
           title="Unable to load runs"
           body="We couldn’t load generation runs for this workspace."
-          error={state.error}
-          onRetry={() => void load(null)}
+          error={runsQuery.error}
+          onRetry={runsQuery.refetch}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length === 0 ? (
+      {!runsQuery.loading && !runsQuery.error && runsQuery.items.length === 0 ? (
         <EmptyState
           title="No runs match this filter"
           body="Start a new video or choose another status to see past generation work."
           action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length > 0 ? (
+      {!runsQuery.loading && !runsQuery.error && runsQuery.items.length > 0 ? (
         <>
           <div className={styles.list}>
-            {state.items.map((run) => (
+            {runsQuery.items.map((run) => (
               <Link className={styles.runRow} to={`/projects/${encodeURIComponent(run.projectId)}/runs/${encodeURIComponent(run.runId)}`} key={run.runId}>
                 <div>
                   <span className={styles.rowTitle}>{run.projectName}</span>
@@ -227,7 +199,7 @@ export function RunsPage() {
               </Link>
             ))}
           </div>
-          <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
+          <LoadMore hasMore={runsQuery.hasMore} loading={runsQuery.loadingMore} onClick={() => void runsQuery.fetchNextPage()} />
         </>
       ) : null}
     </DashboardFrame>
@@ -260,66 +232,31 @@ function ProjectPoster({ name, posterUrl }: { name: string; posterUrl?: string |
 }
 
 export function ProjectsPage() {
-  const [state, setState] = useState<LoadState<V1Project>>(initialState<V1Project>);
-  const requestIdRef = useRef(0);
-
-  const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setState((current) => ({ ...current, loading: !cursor, loadingMore: Boolean(cursor), error: null }));
-
-    try {
-      const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      const payload = await v1Api.listProjects({ limit: PAGE_SIZE, cursor });
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({
-        workspaceId,
-        items: cursor ? [...current.items, ...payload.projects] : payload.projects,
-        nextCursor: payload.pagination.nextCursor,
-        loading: false,
-        loadingMore: false,
-        error: null,
-      }));
-    } catch (error) {
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({
-        ...current,
-        loading: false,
-        loadingMore: false,
-        error: error instanceof Error ? error : new Error(String(error)),
-      }));
-    }
-  }, [state.workspaceId]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(null, controller.signal);
-    return () => controller.abort();
-  }, [load]);
+  const authScope = useDashboardAuthScope();
+  const projectsQuery = useDashboardProjectsQuery(authScope, PAGE_SIZE);
 
   return (
     <DashboardFrame title="Projects" description="All active video projects in this workspace.">
-      {state.loading ? <DashboardSkeleton variant="grid" /> : null}
-      {!state.loading && state.error ? (
+      {projectsQuery.loading ? <DashboardSkeleton variant="grid" /> : null}
+      {!projectsQuery.loading && projectsQuery.error ? (
         <ErrorState
           title="Unable to load projects"
           body="We couldn’t load projects for this workspace."
-          error={state.error}
-          onRetry={() => void load(null)}
+          error={projectsQuery.error}
+          onRetry={projectsQuery.refetch}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length === 0 ? (
+      {!projectsQuery.loading && !projectsQuery.error && projectsQuery.items.length === 0 ? (
         <EmptyState
           title="No projects yet"
           body="Create a video to start building your project library."
           action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length > 0 ? (
+      {!projectsQuery.loading && !projectsQuery.error && projectsQuery.items.length > 0 ? (
         <>
           <div className={`${styles.grid} ${styles.gridProjects}`}>
-            {state.items.map((project) => (
+            {projectsQuery.items.map((project) => (
               <article className={styles.projectCard} key={project.id}>
                 <Link
                   className={styles.cardLink}
@@ -360,7 +297,7 @@ export function ProjectsPage() {
               </article>
             ))}
           </div>
-          <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
+          <LoadMore hasMore={projectsQuery.hasMore} loading={projectsQuery.loadingMore} onClick={() => void projectsQuery.fetchNextPage()} />
         </>
       ) : null}
     </DashboardFrame>
@@ -368,35 +305,24 @@ export function ProjectsPage() {
 }
 
 export function AssetsPage() {
+  const authScope = useDashboardAuthScope();
   const [kind, setKind] = useState<AssetKindFilter>("all");
   const [source, setSource] = useState<AssetSourceFilter>("all");
-  const [state, setState] = useState<LoadState<WorkspaceAsset>>(initialState<WorkspaceAsset>);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [openingIds, setOpeningIds] = useState<Set<string>>(() => new Set());
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const requestIdRef = useRef(0);
+  const assetFilters = { kind, source, limit: PAGE_SIZE };
+  const assetsQuery = useDashboardAssetsQuery(authScope, assetFilters);
+  const visibilityMutation = useAssetVisibilityMutation(authScope, assetFilters);
+  const mediaMutation = useAssetMediaMutation(authScope, assetFilters);
 
   const toggleVisibility = useCallback(async (asset: WorkspaceAsset) => {
     const id = asset.assetId ?? asset.id;
     const previous = asset.visibility === "private" ? "private" : "public";
     const next = previous === "private" ? "public" : "private";
     setPendingIds((current) => new Set(current).add(id));
-    // Optimistic flip; revert on failure.
-    setState((current) => ({
-      ...current,
-      items: current.items.map((item) =>
-        (item.assetId ?? item.id) === id ? { ...item, visibility: next } : item
-      ),
-    }));
     try {
-      await v1Api.setAssetVisibility(asset.projectId, id, next);
-    } catch {
-      setState((current) => ({
-        ...current,
-        items: current.items.map((item) =>
-          (item.assetId ?? item.id) === id ? { ...item, visibility: previous } : item
-        ),
-      }));
+      await visibilityMutation.mutateAsync({ asset, visibility: next });
     } finally {
       setPendingIds((current) => {
         const updated = new Set(current);
@@ -404,39 +330,7 @@ export function AssetsPage() {
         return updated;
       });
     }
-  }, []);
-
-  const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setState((current) => ({ ...current, loading: !cursor, loadingMore: Boolean(cursor), error: null }));
-
-    try {
-      const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      const payload = await v1Api.listWorkspaceAssets(workspaceId, { kind: kind as AssetKind | "all", source: source as WorkspaceAssetSource | "all", limit: PAGE_SIZE, cursor }, signal);
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ workspaceId, items: cursor ? [...current.items, ...payload.assets] : payload.assets, nextCursor: payload.pagination.nextCursor, loading: false, loadingMore: false, error: null }));
-    } catch (error) {
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ ...current, loading: false, loadingMore: false, error: error instanceof Error ? error : new Error(String(error)) }));
-    }
-  }, [kind, source, state.workspaceId]);
-
-  const applyAssetMedia = useCallback((assetId: string, media: { url: string | null; thumbnailUrl?: string | null }) => {
-    setState((current) => ({
-      ...current,
-      items: current.items.map((asset) =>
-        (asset.assetId ?? asset.id) === assetId
-          ? {
-              ...asset,
-              url: media.url ?? undefined,
-              thumbnailUrl: media.thumbnailUrl ?? undefined,
-            }
-          : asset
-      ),
-    }));
-  }, []);
+  }, [visibilityMutation]);
 
   const openAsset = useCallback(async (asset: WorkspaceAsset) => {
     const id = asset.assetId ?? asset.id;
@@ -447,8 +341,7 @@ export function AssetsPage() {
 
     setOpeningIds((current) => new Set(current).add(id));
     try {
-      const media = await v1Api.refreshAssetMedia(id);
-      applyAssetMedia(id, media);
+      await mediaMutation.mutateAsync(id);
       setSelectedAssetId(id);
     } catch {
       setSelectedAssetId(id);
@@ -459,18 +352,12 @@ export function AssetsPage() {
         return updated;
       });
     }
-  }, [applyAssetMedia]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(null, controller.signal);
-    return () => controller.abort();
-  }, [load]);
+  }, [mediaMutation]);
 
   const selectedIndex = selectedAssetId
-    ? state.items.findIndex((asset) => (asset.assetId ?? asset.id) === selectedAssetId)
+    ? assetsQuery.items.findIndex((asset) => (asset.assetId ?? asset.id) === selectedAssetId)
     : -1;
-  const selectedAsset = selectedIndex >= 0 ? state.items[selectedIndex] : null;
+  const selectedAsset = selectedIndex >= 0 ? assetsQuery.items[selectedIndex] : null;
 
   return (
     <DashboardFrame title="Assets" description="Generated and uploaded media across all projects in this workspace.">
@@ -486,26 +373,26 @@ export function AssetsPage() {
           </select>
         </ToolbarField>
       </Toolbar>
-      {state.loading ? <DashboardSkeleton variant="grid" /> : null}
-      {!state.loading && state.error ? (
+      {assetsQuery.loading ? <DashboardSkeleton variant="grid" /> : null}
+      {!assetsQuery.loading && assetsQuery.error ? (
         <ErrorState
           title="Unable to load assets"
           body="We couldn’t load media assets for this workspace."
-          error={state.error}
-          onRetry={() => void load(null)}
+          error={assetsQuery.error}
+          onRetry={assetsQuery.refetch}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length === 0 ? (
+      {!assetsQuery.loading && !assetsQuery.error && assetsQuery.items.length === 0 ? (
         <EmptyState
           title="No assets match this filter"
           body="Upload source media or generate assets in the studio to build the workspace library."
           action={<ButtonLink variant="secondary" to="/studio">Open studio</ButtonLink>}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length > 0 ? (
+      {!assetsQuery.loading && !assetsQuery.error && assetsQuery.items.length > 0 ? (
         <>
           <div className={styles.grid}>
-            {state.items.map((asset) => {
+            {assetsQuery.items.map((asset) => {
               const id = asset.assetId ?? asset.id;
               const isPrivate = asset.visibility === "private";
               return (
@@ -547,26 +434,24 @@ export function AssetsPage() {
               );
             })}
           </div>
-          <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
+          <LoadMore hasMore={assetsQuery.hasMore} loading={assetsQuery.loadingMore} onClick={() => void assetsQuery.fetchNextPage()} />
         </>
       ) : null}
       <MediaViewer
         item={selectedAsset ? assetViewerItem(selectedAsset) : null}
         hasPrevious={selectedIndex > 0}
-        hasNext={selectedIndex >= 0 && selectedIndex < state.items.length - 1}
+        hasNext={selectedIndex >= 0 && selectedIndex < assetsQuery.items.length - 1}
         onClose={() => setSelectedAssetId(null)}
         onPrevious={() => {
-          if (selectedIndex > 0) setSelectedAssetId(state.items[selectedIndex - 1].assetId ?? state.items[selectedIndex - 1].id);
+          if (selectedIndex > 0) setSelectedAssetId(assetsQuery.items[selectedIndex - 1].assetId ?? assetsQuery.items[selectedIndex - 1].id);
         }}
         onNext={() => {
-          if (selectedIndex >= 0 && selectedIndex < state.items.length - 1) {
-            setSelectedAssetId(state.items[selectedIndex + 1].assetId ?? state.items[selectedIndex + 1].id);
+          if (selectedIndex >= 0 && selectedIndex < assetsQuery.items.length - 1) {
+            setSelectedAssetId(assetsQuery.items[selectedIndex + 1].assetId ?? assetsQuery.items[selectedIndex + 1].id);
           }
         }}
         onRefresh={async (item) => {
-          const next = await v1Api.refreshAssetMedia(item.id);
-          applyAssetMedia(item.id, next);
-          return next;
+          return mediaMutation.mutateAsync(item.id);
         }}
       />
     </DashboardFrame>
@@ -594,60 +479,37 @@ function AssetPreview({ asset }: { asset: WorkspaceAsset }) {
 }
 
 export function OutputsPage() {
-  const [state, setState] = useState<LoadState<WorkspaceOutput>>(initialState<WorkspaceOutput>);
+  const authScope = useDashboardAuthScope();
   const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
-  const requestIdRef = useRef(0);
-
-  const load = useCallback(async (cursor?: string | null, signal?: AbortSignal) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setState((current) => ({ ...current, loading: !cursor, loadingMore: Boolean(cursor), error: null }));
-
-    try {
-      const workspaceId = state.workspaceId ?? (await v1Api.me()).workspaceId;
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      const payload = await v1Api.listWorkspaceOutputs(workspaceId, { limit: PAGE_SIZE, cursor }, signal);
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ workspaceId, items: cursor ? [...current.items, ...payload.outputs] : payload.outputs, nextCursor: payload.pagination.nextCursor, loading: false, loadingMore: false, error: null }));
-    } catch (error) {
-      if (isStaleRequest(signal, requestId, requestIdRef.current)) return;
-      setState((current) => ({ ...current, loading: false, loadingMore: false, error: error instanceof Error ? error : new Error(String(error)) }));
-    }
-  }, [state.workspaceId]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(null, controller.signal);
-    return () => controller.abort();
-  }, [load]);
+  const outputsQuery = useDashboardOutputsQuery(authScope, PAGE_SIZE);
 
   const selectedIndex = selectedOutputId
-    ? state.items.findIndex((output) => output.artifactId === selectedOutputId)
+    ? outputsQuery.items.findIndex((output) => output.artifactId === selectedOutputId)
     : -1;
-  const selectedOutput = selectedIndex >= 0 ? state.items[selectedIndex] : null;
+  const selectedOutput = selectedIndex >= 0 ? outputsQuery.items[selectedIndex] : null;
 
   return (
     <DashboardFrame title="Outputs" description="Finished exported videos from every project in the active workspace.">
-      {state.loading ? <DashboardSkeleton variant="grid" /> : null}
-      {!state.loading && state.error ? (
+      {outputsQuery.loading ? <DashboardSkeleton variant="grid" /> : null}
+      {!outputsQuery.loading && outputsQuery.error ? (
         <ErrorState
           title="Unable to load outputs"
           body="We couldn’t load exported videos for this workspace."
-          error={state.error}
-          onRetry={() => void load(null)}
+          error={outputsQuery.error}
+          onRetry={outputsQuery.refetch}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length === 0 ? (
+      {!outputsQuery.loading && !outputsQuery.error && outputsQuery.items.length === 0 ? (
         <EmptyState
           title="No finished outputs yet"
           body="Exports appear here after a video finishes rendering successfully."
           action={<ButtonLink variant="secondary" to="/studio">Create a video</ButtonLink>}
         />
       ) : null}
-      {!state.loading && !state.error && state.items.length > 0 ? (
+      {!outputsQuery.loading && !outputsQuery.error && outputsQuery.items.length > 0 ? (
         <>
           <div className={`${styles.grid} ${styles.gridOutputs}`}>
-            {state.items.map((output) => {
+            {outputsQuery.items.map((output) => {
               const playbackUrl = output.playbackUrl ?? output.url;
               return (
                 <article className={styles.card} key={output.artifactId}>
@@ -685,20 +547,20 @@ export function OutputsPage() {
               );
             })}
           </div>
-          <LoadMore hasMore={Boolean(state.nextCursor)} loading={state.loadingMore} onClick={() => void load(state.nextCursor)} />
+          <LoadMore hasMore={outputsQuery.hasMore} loading={outputsQuery.loadingMore} onClick={() => void outputsQuery.fetchNextPage()} />
         </>
       ) : null}
       <MediaViewer
         item={selectedOutput ? outputViewerItem(selectedOutput) : null}
         hasPrevious={selectedIndex > 0}
-        hasNext={selectedIndex >= 0 && selectedIndex < state.items.length - 1}
+        hasNext={selectedIndex >= 0 && selectedIndex < outputsQuery.items.length - 1}
         onClose={() => setSelectedOutputId(null)}
         onPrevious={() => {
-          if (selectedIndex > 0) setSelectedOutputId(state.items[selectedIndex - 1].artifactId);
+          if (selectedIndex > 0) setSelectedOutputId(outputsQuery.items[selectedIndex - 1].artifactId);
         }}
         onNext={() => {
-          if (selectedIndex >= 0 && selectedIndex < state.items.length - 1) {
-            setSelectedOutputId(state.items[selectedIndex + 1].artifactId);
+          if (selectedIndex >= 0 && selectedIndex < outputsQuery.items.length - 1) {
+            setSelectedOutputId(outputsQuery.items[selectedIndex + 1].artifactId);
           }
         }}
       />
