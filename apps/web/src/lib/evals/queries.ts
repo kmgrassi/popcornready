@@ -17,11 +17,15 @@ import {
 type QuerySignal = QueryFunctionContext["signal"];
 
 export const evalQueryKeys = {
-  suites: () => ["evals", "suites"] as const,
-  runDetail: (source: "api" | "fallback", runId: string) =>
-    ["evals", "runs", source, runId] as const,
-  runDiff: (source: "api" | "fallback", runId: string, againstRunId: string) =>
-    ["evals", "runs", source, runId, "diff", againstRunId] as const,
+  suites: (authScope: string) => ["evals", authScope, "suites"] as const,
+  runDetail: (authScope: string, source: "api" | "fallback", runId: string) =>
+    ["evals", authScope, "runs", source, runId] as const,
+  runDiff: (
+    authScope: string,
+    source: "api" | "fallback",
+    runId: string,
+    againstRunId: string,
+  ) => ["evals", authScope, "runs", source, runId, "diff", againstRunId] as const,
 };
 
 export interface EvalSuitesQueryData {
@@ -81,26 +85,31 @@ async function getEvalRunDiff(
   return res.flips;
 }
 
-export function useEvalSuitesQuery() {
+export function useEvalSuitesQuery(authScope: string) {
   return useQuery({
-    queryKey: evalQueryKeys.suites(),
+    queryKey: evalQueryKeys.suites(authScope),
     queryFn: ({ signal }) => listEvalSuites(signal),
   });
 }
 
-export function useEvalRunDetailQuery(runId: string | null, usingFallback: boolean) {
+export function useEvalRunDetailQuery(
+  authScope: string,
+  runId: string | null,
+  usingFallback: boolean,
+) {
   const source = usingFallback ? "fallback" : "api";
 
   return useQuery({
     queryKey: runId
-      ? evalQueryKeys.runDetail(source, runId)
-      : ["evals", "runs", source, "pending"],
+      ? evalQueryKeys.runDetail(authScope, source, runId)
+      : ["evals", authScope, "runs", source, "pending"],
     queryFn: ({ signal }) => getEvalRunDetail(runId!, usingFallback, signal),
     enabled: Boolean(runId),
   });
 }
 
 export function useEvalRunDiffQuery(
+  authScope: string,
   runDetail: EvalRunDetailView | null | undefined,
   usingFallback: boolean,
 ) {
@@ -109,7 +118,7 @@ export function useEvalRunDiffQuery(
   const previousRunId = runDetail?.previousRunId ?? "pending";
 
   return useQuery({
-    queryKey: evalQueryKeys.runDiff(source, runId, previousRunId),
+    queryKey: evalQueryKeys.runDiff(authScope, source, runId, previousRunId),
     queryFn: ({ signal }) =>
       getEvalRunDiff(runDetail!.runId, runDetail!.previousRunId!, usingFallback, signal),
     enabled: Boolean(runDetail?.previousRunId),

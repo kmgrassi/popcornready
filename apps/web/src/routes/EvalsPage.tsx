@@ -13,6 +13,8 @@ import {
   useEvalSuitesQuery,
 } from "../lib/evals/queries";
 
+const DEV_AUTOPILOT = import.meta.env.DEV;
+
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
@@ -26,21 +28,22 @@ function errorMessage(err: unknown): string {
 export function EvalsPage() {
   const auth = useAuth();
   const showWorkbenchLink = canAccessAdminSurface(auth);
+  const authScope = auth.user?.id ?? (DEV_AUTOPILOT ? "dev-autopilot" : auth.status);
 
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
-  const suitesQuery = useEvalSuitesQuery();
+  const suitesQuery = useEvalSuitesQuery(authScope);
   const suites = suitesQuery.data?.suites ?? [];
   const usingFallback = suitesQuery.data?.usingFallback ?? false;
   const suitesLoading = suitesQuery.isLoading || (suitesQuery.isFetching && !suitesQuery.data);
   const suitesError = suitesQuery.error ? errorMessage(suitesQuery.error) : null;
 
-  const runQuery = useEvalRunDetailQuery(activeRunId, usingFallback);
+  const runQuery = useEvalRunDetailQuery(authScope, activeRunId, usingFallback);
   const runDetail = runQuery.data ?? null;
   const runLoading = runQuery.isLoading || (runQuery.isFetching && !runQuery.data);
   const runError = runQuery.error ? errorMessage(runQuery.error) : null;
 
-  const flipsQuery = useEvalRunDiffQuery(runDetail, usingFallback);
+  const flipsQuery = useEvalRunDiffQuery(authScope, runDetail, usingFallback);
   const flips = runDetail?.previousRunId ? flipsQuery.data ?? null : null;
   const flipsError = flipsQuery.error ? errorMessage(flipsQuery.error) : null;
 
