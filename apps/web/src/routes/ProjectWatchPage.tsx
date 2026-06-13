@@ -1,11 +1,11 @@
 import { Link, Navigate, useParams } from "react-router-dom";
 import { ButtonLink } from "../components/ui/Button";
-import { useProjectWatchQuery } from "../lib/queryClient";
+import { useProjectWatchQuery } from "../lib/project-queries";
 import styles from "./ProjectWatchPage.module.css";
 
 export function ProjectWatchPage() {
   const { projectId } = useParams();
-  const watchQuery = useProjectWatchQuery(projectId ?? "", Boolean(projectId));
+  const watchQuery = useProjectWatchQuery(projectId ?? null);
   const media = watchQuery.data?.media ?? null;
   const storyboardUrl = watchQuery.data?.fallback.storyboardUrl ?? null;
   const error =

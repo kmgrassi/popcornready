@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { StoryboardEditor } from "../components/storyboard/StoryboardEditor";
-import { useStoryboardPageQuery } from "../lib/queryClient";
+import { useStoryboardPageQuery } from "../lib/project-queries";
 
 // Storyboard editing surface for a project. The project-specific route loads
 // the requested project; the dashboard route falls back to the current studio
