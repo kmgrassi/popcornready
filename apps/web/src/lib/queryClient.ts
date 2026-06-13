@@ -97,11 +97,30 @@ export const queryKeys = {
   exportArtifact: (projectId: string, artifactId: string) =>
     ["projects", projectId, "artifacts", artifactId] as const,
   studioProject: ["studio", "project"] as const,
-  studioProjectById: (projectId: string) => ["studio", "project", projectId] as const,
+  studioProjectById: (
+    projectId: string,
+    timeline: StudioProjectTimelineKey | null = null,
+  ) => ["studio", "project", projectId, timeline] as const,
 };
 
 type MeQueryKey = ReturnType<typeof queryKeys.me>;
 type QuerySignal = QueryFunctionContext["signal"];
+type StudioProjectTimeline = NonNullable<
+  Parameters<typeof v1Api.getStudioProjectById>[1]
+>;
+type StudioProjectTimelineKey = {
+  aspectRatio: StudioProjectTimeline["aspectRatio"];
+  fps: StudioProjectTimeline["fps"];
+  showCaptions: StudioProjectTimeline["showCaptions"];
+  segments: Array<{
+    id: string;
+    clipId: string;
+    sourceInSec: number;
+    sourceOutSec: number;
+    beatId?: string;
+    caption?: string;
+  }>;
+};
 
 function isTerminal(status: GenerationRun["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "canceled";
@@ -109,6 +128,25 @@ function isTerminal(status: GenerationRun["status"]): boolean {
 
 function shouldPollRun(run: GenerationRunDetail | undefined): boolean {
   return Boolean(run && !isTerminal(run.run.status));
+}
+
+function studioProjectTimelineKey(
+  timeline: Parameters<typeof v1Api.getStudioProjectById>[1] | undefined,
+): StudioProjectTimelineKey | null {
+  if (!timeline) return null;
+  return {
+    aspectRatio: timeline.aspectRatio,
+    fps: timeline.fps,
+    showCaptions: timeline.showCaptions,
+    segments: timeline.segments.map((segment) => ({
+      id: segment.id,
+      clipId: segment.clipId,
+      sourceInSec: segment.sourceInSec,
+      sourceOutSec: segment.sourceOutSec,
+      beatId: segment.beatId,
+      caption: segment.caption,
+    })),
+  };
 }
 
 export function useMeQuery(
@@ -475,8 +513,10 @@ export function useStudioProjectByIdQuery(
   timeline?: Parameters<typeof v1Api.getStudioProjectById>[1],
   enabled = true,
 ) {
+  const timelineKey = studioProjectTimelineKey(timeline);
+
   return useQuery({
-    queryKey: queryKeys.studioProjectById(projectId),
+    queryKey: queryKeys.studioProjectById(projectId, timelineKey),
     queryFn: () => v1Api.getStudioProjectById(projectId, timeline),
     enabled: enabled && Boolean(projectId),
   });

@@ -11,7 +11,8 @@ export function StoryboardPage() {
   const storyboardQuery = useStoryboardPageQuery(routeProjectId ?? null);
   const projectId = storyboardQuery.data?.projectId ?? null;
   const storyboard = storyboardQuery.data?.storyboard ?? null;
-  const error = storyboardQuery.error
+  const hasLoadedData = storyboardQuery.data !== undefined;
+  const error = !hasLoadedData && storyboardQuery.error
     ? storyboardQuery.error instanceof Error
       ? storyboardQuery.error.message
       : "Failed to load the storyboard."
