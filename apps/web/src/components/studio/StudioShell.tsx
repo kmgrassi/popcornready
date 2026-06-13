@@ -23,13 +23,14 @@ import { ReviewStep as ReviewSetupStep } from "./steps/ReviewStep";
 import { ReviewStep } from "./ReviewStep";
 import { ExportStep } from "./steps/ExportStep";
 import {
-  createDraft,
-  deleteDraft,
-  listDrafts,
-  loadDraft,
   type StudioDraftPayload,
-  type StudioDraftSummary,
 } from "../../lib/draftStore";
+import {
+  useCreateStudioDraftMutation,
+  useDeleteStudioDraftMutation,
+  useStudioDraftQuery,
+  useStudioDraftsQuery,
+} from "../../lib/draftStoreQuery";
 import styles from "./StudioShell.module.css";
 
 const LOCAL_DRAFT_ID = "local";
@@ -89,55 +90,67 @@ export function StudioShell({
     }),
     [initialBrief],
   );
-  const [drafts, setDrafts] = useState<StudioDraftSummary[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(true);
-  const [draftsError, setDraftsError] = useState<string | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [initialPayload, setInitialPayload] = useState<StudioDraftPayload | null>(null);
+  const [pendingDraftRequest, setPendingDraftRequest] = useState<{
+    draftId: string;
+    requestedAt: number;
+  } | null>(null);
+  const [draftActionError, setDraftActionError] = useState<string | null>(null);
   const [flowKey, setFlowKey] = useState(0);
   const autoStartRequestedRef = useRef(false);
-
-  const refreshDrafts = useCallback(async () => {
-    setDraftsLoading(true);
-    setDraftsError(null);
-    try {
-      setDrafts(await listDrafts());
-    } catch (error) {
-      setDraftsError(error instanceof Error ? error.message : "Could not load drafts.");
-    } finally {
-      setDraftsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshDrafts();
-  }, [refreshDrafts]);
+  const draftsQuery = useStudioDraftsQuery();
+  const draftQuery = useStudioDraftQuery(pendingDraftRequest?.draftId ?? null);
+  const createDraftMutation = useCreateStudioDraftMutation();
+  const deleteDraftMutation = useDeleteStudioDraftMutation();
+  const drafts = draftsQuery.data ?? [];
+  const draftsLoading = draftsQuery.isLoading;
+  const draftsError =
+    draftActionError ??
+    (draftsQuery.error instanceof Error ? draftsQuery.error.message : null) ??
+    (draftQuery.error instanceof Error ? draftQuery.error.message : null);
 
   const openDraft = useCallback(
-    async (nextDraftId: string) => {
-      setDraftsError(null);
-      try {
-        const record = await loadDraft(nextDraftId);
-        setActiveDraftId(record.draftId);
-        setInitialPayload(record.payload);
-        setFlowKey((current) => current + 1);
-        navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
-      } catch (error) {
-        setDraftsError(error instanceof Error ? error.message : "Could not open draft.");
-      }
+    (nextDraftId: string) => {
+      setDraftActionError(null);
+      setPendingDraftRequest({ draftId: nextDraftId, requestedAt: Date.now() });
     },
-    [navigate],
+    [],
   );
 
   useEffect(() => {
+    if (draftQuery.isFetching || draftQuery.error) return;
+    if (!pendingDraftRequest || draftQuery.dataUpdatedAt < pendingDraftRequest.requestedAt) {
+      return;
+    }
+    const record = draftQuery.data;
+    if (!record || pendingDraftRequest.draftId !== record.draftId) return;
+    setActiveDraftId(record.draftId);
+    setInitialPayload(record.payload);
+    setFlowKey((current) => current + 1);
+    setPendingDraftRequest(null);
+    navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
+  }, [
+    draftQuery.data,
+    draftQuery.dataUpdatedAt,
+    draftQuery.error,
+    draftQuery.isFetching,
+    navigate,
+    pendingDraftRequest,
+  ]);
+
+  useEffect(() => {
     if (!draftId || activeDraftId === draftId) return;
-    void openDraft(draftId);
+    openDraft(draftId);
   }, [activeDraftId, draftId, openDraft]);
 
   const startNewDraft = useCallback(async (step: StudioStep = "brief") => {
-    setDraftsError(null);
+    setDraftActionError(null);
     try {
-      const record = await createDraft({ ...EMPTY_BRIEF_DRAFT, ...seededBrief }, step);
+      const record = await createDraftMutation.mutateAsync({
+        draft: { ...EMPTY_BRIEF_DRAFT, ...seededBrief },
+        step,
+      });
       setActiveDraftId(record.draftId);
       setInitialPayload(record.payload);
       setFlowKey((current) => current + 1);
@@ -152,7 +165,7 @@ export function StudioShell({
         replace: true,
       });
     }
-  }, [initialStarted, navigate, openPanel, seededBrief]);
+  }, [createDraftMutation, initialStarted, navigate, openPanel, seededBrief]);
 
   useEffect(() => {
     if (!initialStarted || draftId) {
@@ -165,17 +178,17 @@ export function StudioShell({
   }, [activeDraftId, draftId, initialStarted, initialStep, startNewDraft]);
 
   async function removeDraft(nextDraftId: string) {
-    setDraftsError(null);
+    setDraftActionError(null);
     try {
-      await deleteDraft(nextDraftId);
-      setDrafts((current) => current.filter((draft) => draft.draftId !== nextDraftId));
+      await deleteDraftMutation.mutateAsync(nextDraftId);
       if (nextDraftId === activeDraftId) {
         setActiveDraftId(null);
         setInitialPayload(null);
+        setPendingDraftRequest(null);
         navigate("/studio", { replace: true });
       }
     } catch (error) {
-      setDraftsError(error instanceof Error ? error.message : "Could not delete draft.");
+      setDraftActionError(error instanceof Error ? error.message : "Could not delete draft.");
     }
   }
 
