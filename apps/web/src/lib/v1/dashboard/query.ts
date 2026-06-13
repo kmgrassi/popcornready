@@ -87,6 +87,18 @@ function updateAssetPages(
   };
 }
 
+function updateMatchingAssetQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+  assetId: string,
+  update: (asset: WorkspaceAsset) => WorkspaceAsset,
+) {
+  queryClient.setQueriesData<InfiniteData<WorkspaceAssetsResponse, PageCursor>>(
+    { queryKey: ["dashboard", "assets", workspaceId] },
+    (current) => updateAssetPages(current, assetId, update),
+  );
+}
+
 function flattenPages<TPage, TItem>(
   pages: TPage[] | undefined,
   selectItems: (page: TPage) => TItem[],
@@ -252,9 +264,6 @@ export function useAssetVisibilityMutation(
 ) {
   const queryClient = useQueryClient();
   const meQuery = useMeQuery(authScope);
-  const queryKey = meQuery.data
-    ? dashboardCollectionQueryKeys.assets(meQuery.data.workspaceId, filters)
-    : null;
 
   return useMutation({
     mutationFn: ({
@@ -265,37 +274,47 @@ export function useAssetVisibilityMutation(
       visibility: "public" | "private";
     }) => v1Api.setAssetVisibility(asset.projectId, assetKey(asset), visibility),
     onMutate: async ({ asset, visibility }) => {
-      if (!queryKey) return {};
-      await queryClient.cancelQueries({ queryKey });
-      const previous =
-        queryClient.getQueryData<InfiniteData<WorkspaceAssetsResponse, PageCursor>>(
-          queryKey,
-        );
-      queryClient.setQueryData<
-        InfiniteData<WorkspaceAssetsResponse, PageCursor>
-      >(queryKey, (current) =>
-        updateAssetPages(current, assetKey(asset), (item) => ({
-          ...item,
-          visibility,
-        })),
-      );
-      return { previous, queryKey };
+      const workspaceId = meQuery.data?.workspaceId;
+      if (!workspaceId) return {};
+      const id = assetKey(asset);
+      const previousVisibility: "public" | "private" =
+        asset.visibility === "private" ? "private" : "public";
+      await queryClient.cancelQueries({
+        queryKey: ["dashboard", "assets", workspaceId],
+      });
+      updateMatchingAssetQueries(queryClient, workspaceId, id, (item) => ({
+        ...item,
+        visibility,
+      }));
+      return { assetId: id, previousVisibility, workspaceId };
     },
     onError: (_error, _variables, context) => {
-      if (context?.queryKey && context.previous) {
-        queryClient.setQueryData(context.queryKey, context.previous);
-      }
+      if (!context?.workspaceId) return;
+      updateMatchingAssetQueries(
+        queryClient,
+        context.workspaceId,
+        context.assetId,
+        (item) => ({
+          ...item,
+          visibility: context.previousVisibility,
+        }),
+      );
     },
     onSuccess: (payload, { asset, visibility }) => {
-      if (!queryKey) return;
-      queryClient.setQueryData<
-        InfiniteData<WorkspaceAssetsResponse, PageCursor>
-      >(queryKey, (current) =>
-        updateAssetPages(current, assetKey(asset), (item) => ({
+      const workspaceId = meQuery.data?.workspaceId;
+      if (!workspaceId) return;
+      updateMatchingAssetQueries(
+        queryClient,
+        workspaceId,
+        assetKey(asset),
+        (item) => ({
           ...item,
           visibility: payload.asset.visibility ?? visibility,
-        })),
+        }),
       );
+      void queryClient.invalidateQueries({
+        queryKey: ["dashboard", "assets", workspaceId],
+      });
     },
   });
 }
