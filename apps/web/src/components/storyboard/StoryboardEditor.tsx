@@ -4,7 +4,7 @@ import type {
   StoryboardBeat,
   StoryboardScene,
 } from "@popcorn/shared/v1/types";
-import { v1Api } from "../../lib/api-client";
+import { useSaveProjectStoryboardMutation } from "../../lib/queryClient";
 import "./storyboard.css";
 
 type EditableBeat = Pick<
@@ -115,6 +115,7 @@ export function StoryboardEditor({
   projectId,
   initialStoryboard,
 }: StoryboardEditorProps) {
+  const saveStoryboard = useSaveProjectStoryboardMutation(projectId);
   const [storyboardId, setStoryboardId] = useState<string | null>(
     initialStoryboard?.id ?? null
   );
@@ -190,7 +191,7 @@ export function StoryboardEditor({
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await v1Api.saveProjectStoryboard(projectId, {
+      const result = await saveStoryboard.mutateAsync({
         id: storyboardId ?? "",
         status,
         scenes: scenes.map((scene) => ({
