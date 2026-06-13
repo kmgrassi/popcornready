@@ -26,6 +26,7 @@ import { toOrchestratorRegistry } from "@/lib/orchestrator-tools/to-orchestrator
 import { agentApiStore } from "@/lib/agent-api/jobs";
 import { orchestratorModel, type OrchestratorModel } from "./model";
 import { executeRegisteredTool, type ToolRegistry } from "./registry";
+import type { ToolCallResult } from "./types";
 
 const DEFAULT_MAX_TURNS = 50;
 
@@ -130,7 +131,7 @@ export async function runOrchestratorToCompletion(
     });
   }
   if (run.status !== "running") return run;
-  return driveLoop(run, r);
+  return driveGuarded(run, r);
 }
 
 // Re-enter a parked run. If it's waiting on an async job, advance only once the
@@ -142,7 +143,7 @@ export async function resumeOrchestratorRun(
 ): Promise<OrchestratorRun> {
   const r = resolved(deps);
   let run = await r.store.getOrchestratorRun(runId);
-  if (run.status === "running") return driveLoop(run, r);
+  if (run.status === "running") return driveGuarded(run, r);
   if (run.status !== "waiting") return run;
 
   // Determine the parking job (latest in-flight action carrying a job id).
@@ -165,10 +166,31 @@ export async function resumeOrchestratorRun(
   }
   // Not job-parked (or job done) → it's a gate the caller has resolved. Continue.
   run = await r.store.updateOrchestratorRun(runId, { status: "running" });
-  return driveLoop(run, r);
+  return driveGuarded(run, r);
 }
 
 type Resolved = ReturnType<typeof resolved>;
+
+// Drive the loop, but guarantee a terminal run: any uncaught error (a model/store
+// failure that driveLoop doesn't already convert into a failed result) marks the
+// run 'failed' with the error before rethrowing, so it is never left 'running'.
+async function driveGuarded(run: OrchestratorRun, r: Resolved): Promise<OrchestratorRun> {
+  try {
+    return await driveLoop(run, r);
+  } catch (err) {
+    const error = {
+      kind: "provider_failed",
+      message: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    };
+    try {
+      await finish(run, "failed", r, error);
+    } catch {
+      // best-effort; surface the original error regardless.
+    }
+    throw err;
+  }
+}
 
 async function driveLoop(run: OrchestratorRun, r: Resolved): Promise<OrchestratorRun> {
   for (let turn = 0; turn < r.maxTurns; turn += 1) {
@@ -197,9 +219,30 @@ async function driveLoop(run: OrchestratorRun, r: Resolved): Promise<Orchestrato
       return finish(run, "succeeded", r);
     }
 
-    // Gate: pause before a gated stage unless the user has approved it.
+    // Gate handling. A user-rejected stage must NOT run and must NOT park forever:
+    // record a recoverable failure so the rejection lands in priorResults and the
+    // model picks a different step. A pending/reached gate pauses for the user; an
+    // approved gate falls through and executes.
     const gates = await r.store.listRunGates(run.id);
     const gate = gates.find((g) => g.stage === decision.toolName);
+    if (gate && gate.status === "rejected") {
+      await r.store.recordInvocation({
+        projectId: run.projectId,
+        orchestratorRunId: run.id,
+        tool: decision.toolName,
+        status: "failed",
+        params: decision.input,
+        outputAssetIds: [],
+        jobIds: [],
+        error: {
+          kind: "approval_rejected",
+          message: `The ${decision.toolName} gate was rejected; choose a different step.`,
+          recoverable: true,
+        },
+      });
+      run = await r.store.getOrchestratorRun(run.id);
+      continue; // next turn — the model now sees the rejection
+    }
     if (gate && gate.status !== "approved") {
       if (gate.status === "pending") {
         await r.store.markGateReached(run.id, decision.toolName);
@@ -207,17 +250,40 @@ async function driveLoop(run: OrchestratorRun, r: Resolved): Promise<Orchestrato
       return park(run, r);
     }
 
-    const result = await executeRegisteredTool({
-      registry: r.registry,
-      toolName: decision.toolName,
-      input: decision.input,
-      context: {
-        workspaceId: r.workspaceId,
+    // A wired tool may THROW (DB/provider exception) instead of returning a
+    // ToolCallResult. Catch it so the run reaches a terminal 'failed' state with a
+    // persisted error rather than being left stuck 'running'.
+    let result: ToolCallResult;
+    try {
+      result = await executeRegisteredTool({
+        registry: r.registry,
+        toolName: decision.toolName,
+        input: decision.input,
+        context: {
+          workspaceId: r.workspaceId,
+          projectId: run.projectId,
+          orchestratorRunId: run.id,
+          actorId: "orchestrator",
+        },
+      });
+    } catch (err) {
+      const error = {
+        kind: "provider_failed",
+        message: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+      };
+      await r.store.recordInvocation({
         projectId: run.projectId,
         orchestratorRunId: run.id,
-        actorId: "orchestrator",
-      },
-    });
+        tool: decision.toolName,
+        status: "failed",
+        params: decision.input,
+        outputAssetIds: [],
+        jobIds: [],
+        error,
+      });
+      return finish(run, "failed", r, error);
+    }
 
     await r.store.recordInvocation({
       projectId: run.projectId,

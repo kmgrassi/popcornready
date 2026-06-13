@@ -243,6 +243,39 @@ test("parks before a gated stage and resumes once the gate is approved", async (
   assert.equal(store.actions.length, 1);
 });
 
+test("a rejected gate records a failure and lets the model continue (never parks forever)", async () => {
+  const store = new FakeStore(runFixture(), [gateFixture("create_or_load_brief", "rejected")]);
+  // The model first tries the rejected tool, then (seeing it failed) finishes.
+  const { model } = scriptedModel([
+    { type: "tool_call", toolName: "create_or_load_brief" },
+    { type: "done" },
+  ]);
+  const registry = fakeRegistry({ create_or_load_brief: () => ok(["asset_brief"]) });
+
+  const run = await runOrchestratorToCompletion("run1", deps(store, model, registry));
+
+  assert.equal(run.status, "succeeded", "must not be left waiting on a rejected gate");
+  assert.equal(store.actions.length, 1);
+  assert.equal(store.actions[0].status, "failed", "the rejected stage is recorded as a failure");
+});
+
+test("a tool that throws marks the run failed with a persisted error", async () => {
+  const store = new FakeStore(runFixture());
+  const { model } = scriptedModel([{ type: "tool_call", toolName: "plan_shots" }]);
+  const registry = fakeRegistry({
+    plan_shots: () => {
+      throw new Error("database is down");
+    },
+  });
+
+  const run = await runOrchestratorToCompletion("run1", deps(store, model, registry));
+
+  assert.equal(run.status, "failed", "an exception must not leave the run stuck running");
+  assert.match((run.error as { message?: string }).message ?? "", /database is down/);
+  assert.equal(store.actions.length, 1);
+  assert.equal(store.actions[0].status, "failed");
+});
+
 test("a recoverable failure keeps the run going; an unrecoverable one fails it", async () => {
   const recoverableStore = new FakeStore(runFixture());
   const { model: recModel } = scriptedModel([
