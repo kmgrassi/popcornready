@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
-import type { VersionedTimeline } from "@popcorn/shared/v1/types";
+import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "../../ui/Button";
 import {
-  v1Api,
   type ExportDurationPolicy,
   type ExportJob,
-  type ExportRenderArtifact,
   type StartTimelineExportInput,
 } from "../../../lib/api-client";
+import {
+  useStartStudioTimelineExportMutation,
+  useStudioExportArtifactQuery,
+  useStudioLatestTimelineQuery,
+  useStudioTimelineExportQuery,
+} from "../studioQueries";
 import type { StepProps } from "../useStudioFlow";
 import { StepShell } from "./StepShell";
 import styles from "./ExportStep.module.css";
@@ -76,53 +79,36 @@ function formatDuration(seconds?: number) {
  * export route and resolves the resulting artifact for the done state.
  */
 export function ExportStep({ back, projectId, completeDraft }: StepProps) {
-  const [timeline, setTimeline] = useState<VersionedTimeline | null>(null);
-  const [timelineLoading, setTimelineLoading] = useState(Boolean(projectId));
-  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [quality, setQuality] = useState<ExportQuality>("standard");
   const [showCaptions, setShowCaptions] = useState(true);
   const [durationPolicy, setDurationPolicy] =
     useState<ExportDurationPolicy>("match_longest_media");
-  const [job, setJob] = useState<ExportJob | null>(null);
-  const [artifact, setArtifact] = useState<ExportRenderArtifact | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const completedJobId = useRef<string | null>(null);
+  const activeProjectId = projectId ?? "";
+  const timelineQuery = useStudioLatestTimelineQuery(activeProjectId, Boolean(projectId));
+  const timeline = timelineQuery.data?.timeline ?? null;
+  const timelineId = timeline?.id ?? "";
+  const startExportMutation = useStartStudioTimelineExportMutation(activeProjectId, timelineId);
+  const exportQuery = useStudioTimelineExportQuery(
+    activeProjectId,
+    jobId ?? "",
+    Boolean(projectId && jobId),
+  );
+  const job = exportQuery.data?.job ?? null;
+  const artifactId = job?.result?.artifactId ?? "";
+  const artifactQuery = useStudioExportArtifactQuery(
+    activeProjectId,
+    artifactId,
+    job?.status === "succeeded" && Boolean(artifactId),
+  );
+  const artifact = artifactQuery.data?.artifact ?? null;
 
   useEffect(() => {
-    if (!projectId) {
-      setTimeline(null);
-      setTimelineLoading(false);
-      setTimelineError(null);
-      return;
-    }
+    if (timeline) setShowCaptions(timeline.showCaptions ?? true);
+  }, [timeline?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    let cancelled = false;
-    setTimelineLoading(true);
-    setTimelineError(null);
-
-    v1Api
-      .getLatestProjectTimeline(projectId)
-      .then(({ timeline: loadedTimeline }) => {
-        if (cancelled) return;
-        setTimeline(loadedTimeline);
-        setShowCaptions(loadedTimeline?.showCaptions ?? true);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setTimelineError(
-          error instanceof Error ? error.message : "Could not load the current timeline.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setTimelineLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  const timelineId = timeline?.id ?? null;
   const duration = formatDuration(
     timeline?.segments.reduce(
       (total, segment) => total + Math.max(0, segment.sourceOutSec - segment.sourceInSec),
@@ -131,64 +117,55 @@ export function ExportStep({ back, projectId, completeDraft }: StepProps) {
   );
   const canExport = Boolean(projectId && timeline && timeline.segments.length > 0 && timelineId);
 
-  async function resolveArtifact(nextJob: ExportJob) {
-    if (!projectId || !nextJob.result?.artifactId) return;
-    const { artifact: loadedArtifact } = await v1Api.getExportArtifact(
-      projectId,
-      nextJob.result.artifactId,
-    );
-    setArtifact(loadedArtifact);
-  }
-
-  async function pollExport(nextJob: ExportJob) {
-    if (!projectId) return;
-    setJob(nextJob);
-
-    if (nextJob.status === "succeeded") {
-      await resolveArtifact(nextJob);
-      await completeDraft?.();
-      return;
-    }
-
-    if (isTerminal(nextJob)) return;
-
-    window.setTimeout(async () => {
-      try {
-        const { job: updatedJob } = await v1Api.getTimelineExport(projectId, nextJob.id);
-        await pollExport(updatedJob);
-      } catch (error) {
-        setExportError(
-          error instanceof Error ? error.message : "Could not refresh the export status.",
-        );
-      }
-    }, 2000);
-  }
-
   async function startExport() {
-    if (!projectId || !timelineId || !canExport || submitting) return;
-    setSubmitting(true);
+    if (!projectId || !timelineId || !canExport || startExportMutation.isPending) return;
     setExportError(null);
-    setArtifact(null);
+    setJobId(null);
+    completedJobId.current = null;
 
     try {
-      const { job: createdJob } = await v1Api.startTimelineExport(projectId, timelineId, {
+      const { job: createdJob } = await startExportMutation.mutateAsync({
         format: "mp4",
         quality,
         durationPolicy,
         showCaptions,
       });
-      await pollExport(createdJob);
+      setJobId(createdJob.id);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : "Could not start export.");
-    } finally {
-      setSubmitting(false);
     }
   }
 
+  useEffect(() => {
+    if (job?.status !== "succeeded" || completedJobId.current === job.id) return;
+    if (artifactId && !artifactQuery.isSuccess) return;
+    completedJobId.current = job.id;
+    void completeDraft?.();
+  }, [artifactId, artifactQuery.isSuccess, completeDraft, job?.id, job?.status]);
+
   const done = job?.status === "succeeded";
-  const exportBusy = submitting || Boolean(job && !isTerminal(job));
+  const exportBusy = startExportMutation.isPending || Boolean(job && !isTerminal(job));
   const jobError = job?.status === "failed" ? job.error?.message : null;
   const directUrl = artifact?.url ?? null;
+  const timelineLoading = timelineQuery.isLoading;
+  const timelineError =
+    timelineQuery.error instanceof Error
+      ? timelineQuery.error.message
+      : timelineQuery.error
+        ? "Could not load the current timeline."
+        : null;
+  const exportQueryError =
+    exportQuery.error instanceof Error
+      ? exportQuery.error.message
+      : exportQuery.error
+        ? "Could not refresh the export status."
+        : null;
+  const artifactError =
+    artifactQuery.error instanceof Error
+      ? artifactQuery.error.message
+      : artifactQuery.error
+        ? "Could not load the exported artifact."
+        : null;
 
   return (
     <StepShell
@@ -282,6 +259,8 @@ export function ExportStep({ back, projectId, completeDraft }: StepProps) {
           </p>
         ) : null}
         {exportError ? <p className={styles.error}>{exportError}</p> : null}
+        {exportQueryError ? <p className={styles.error}>{exportQueryError}</p> : null}
+        {artifactError ? <p className={styles.error}>{artifactError}</p> : null}
         {jobError ? <p className={styles.error}>{jobError}</p> : null}
 
         {done ? (
