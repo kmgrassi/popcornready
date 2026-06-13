@@ -1,65 +1,24 @@
-import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { ButtonLink } from "../components/ui/Button";
-import { v1Api, type ProjectWatchMedia } from "../lib/api-client";
+import { useProjectWatchQuery } from "../lib/queryClient";
 import styles from "./ProjectWatchPage.module.css";
-
-type LoadState =
-  | { status: "loading"; media: null; storyboardUrl: null; error: null }
-  | { status: "ready"; media: ProjectWatchMedia; storyboardUrl: string; error: null }
-  | { status: "empty"; media: null; storyboardUrl: string; error: null }
-  | { status: "error"; media: null; storyboardUrl: null; error: Error };
 
 export function ProjectWatchPage() {
   const { projectId } = useParams();
-  const [state, setState] = useState<LoadState>({
-    status: "loading",
-    media: null,
-    storyboardUrl: null,
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!projectId) return;
-
-    const controller = new AbortController();
-    setState({ status: "loading", media: null, storyboardUrl: null, error: null });
-
-    v1Api
-      .getProjectWatch(projectId, controller.signal)
-      .then((payload) => {
-        if (controller.signal.aborted) return;
-        if (!payload.media) {
-          setState({
-            status: "empty",
-            media: null,
-            storyboardUrl: payload.fallback.storyboardUrl,
-            error: null,
-          });
-          return;
-        }
-        setState({
-          status: "ready",
-          media: payload.media,
-          storyboardUrl: payload.fallback.storyboardUrl,
-          error: null,
-        });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({
-          status: "error",
-          media: null,
-          storyboardUrl: null,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
-      });
-
-    return () => controller.abort();
-  }, [projectId]);
+  const watchQuery = useProjectWatchQuery(projectId ?? "", Boolean(projectId));
+  const media = watchQuery.data?.media ?? null;
+  const storyboardUrl = watchQuery.data?.fallback.storyboardUrl ?? null;
+  const error =
+    watchQuery.error instanceof Error
+      ? watchQuery.error
+      : watchQuery.error
+        ? new Error(String(watchQuery.error))
+        : null;
 
   if (!projectId) return <Navigate to="/library/projects" replace />;
-  if (state.status === "empty") return <Navigate to={state.storyboardUrl} replace />;
+  if (!watchQuery.isLoading && !error && !media && storyboardUrl) {
+    return <Navigate to={storyboardUrl} replace />;
+  }
 
   return (
     <main className={styles.shell}>
@@ -68,12 +27,12 @@ export function ProjectWatchPage() {
           <Link className={styles.backLink} to="/library/projects">
             Library
           </Link>
-          <h1>{state.media?.projectName ?? "Watch project"}</h1>
-          {state.media ? (
+          <h1>{media?.projectName ?? "Watch project"}</h1>
+          {media ? (
             <p>
-              {state.media.filename}
-              {formatDuration(state.media.durationSec)
-                ? ` - ${formatDuration(state.media.durationSec)}`
+              {media.filename}
+              {formatDuration(media.durationSec)
+                ? ` - ${formatDuration(media.durationSec)}`
                 : ""}
             </p>
           ) : (
@@ -88,27 +47,27 @@ export function ProjectWatchPage() {
         </ButtonLink>
       </header>
 
-      {state.status === "loading" ? (
+      {watchQuery.isLoading ? (
         <section className={styles.panel} aria-busy="true">
           <div className={styles.placeholder}>Loading render...</div>
         </section>
       ) : null}
 
-      {state.status === "error" ? (
+      {error ? (
         <section className={styles.panel}>
           <div className={styles.placeholder}>
             <strong>Unable to load this render.</strong>
-            <span>{state.error.message}</span>
+            <span>{error.message}</span>
           </div>
         </section>
       ) : null}
 
-      {state.status === "ready" ? (
+      {media ? (
         <section className={styles.panel} aria-label="Project render">
           <video
             className={styles.video}
-            src={state.media.url}
-            poster={state.media.posterUrl}
+            src={media.url}
+            poster={media.posterUrl}
             controls
             playsInline
             preload="metadata"

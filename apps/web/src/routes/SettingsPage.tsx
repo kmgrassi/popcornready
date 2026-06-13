@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../components/auth/AuthProvider";
 import ThemeToggle from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
-import { v1Api, type MeResponse } from "../lib/api-client";
+import { useMeQuery } from "../lib/queryClient";
 import styles from "./SettingsPage.module.css";
 
 const QUIET_LINKS = [
@@ -29,33 +29,22 @@ const QUIET_LINKS = [
   },
 ];
 
+const DEV_AUTOPILOT = import.meta.env.DEV;
+
 export function SettingsPage() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [meError, setMeError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (auth.status === "loading") return;
-    let cancelled = false;
-
-    v1Api
-      .me()
-      .then((payload) => {
-        if (cancelled) return;
-        setMe(payload);
-        setMeError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setMe(null);
-        setMeError(err instanceof Error ? err.message : String(err));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [auth.status]);
+  const authScope = auth.user?.id ?? (DEV_AUTOPILOT ? "dev-autopilot" : auth.status);
+  const meQuery = useMeQuery(authScope, {
+    enabled: auth.status !== "loading",
+  });
+  const me = meQuery.data ?? null;
+  const meError =
+    meQuery.error instanceof Error
+      ? meQuery.error.message
+      : meQuery.error
+        ? String(meQuery.error)
+        : null;
 
   const accountLabel = useMemo(() => {
     if (auth.user?.email) return auth.user.email;
