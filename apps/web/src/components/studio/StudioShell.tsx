@@ -92,12 +92,15 @@ export function StudioShell({
   );
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [initialPayload, setInitialPayload] = useState<StudioDraftPayload | null>(null);
-  const [pendingDraftId, setPendingDraftId] = useState<string | null>(null);
+  const [pendingDraftRequest, setPendingDraftRequest] = useState<{
+    draftId: string;
+    requestedAt: number;
+  } | null>(null);
   const [draftActionError, setDraftActionError] = useState<string | null>(null);
   const [flowKey, setFlowKey] = useState(0);
   const autoStartRequestedRef = useRef(false);
   const draftsQuery = useStudioDraftsQuery();
-  const draftQuery = useStudioDraftQuery(pendingDraftId);
+  const draftQuery = useStudioDraftQuery(pendingDraftRequest?.draftId ?? null);
   const createDraftMutation = useCreateStudioDraftMutation();
   const deleteDraftMutation = useDeleteStudioDraftMutation();
   const drafts = draftsQuery.data ?? [];
@@ -110,21 +113,31 @@ export function StudioShell({
   const openDraft = useCallback(
     (nextDraftId: string) => {
       setDraftActionError(null);
-      setPendingDraftId(nextDraftId);
+      setPendingDraftRequest({ draftId: nextDraftId, requestedAt: Date.now() });
     },
     [],
   );
 
   useEffect(() => {
     if (draftQuery.isFetching || draftQuery.error) return;
+    if (!pendingDraftRequest || draftQuery.dataUpdatedAt < pendingDraftRequest.requestedAt) {
+      return;
+    }
     const record = draftQuery.data;
-    if (!record || pendingDraftId !== record.draftId) return;
+    if (!record || pendingDraftRequest.draftId !== record.draftId) return;
     setActiveDraftId(record.draftId);
     setInitialPayload(record.payload);
     setFlowKey((current) => current + 1);
-    setPendingDraftId(null);
+    setPendingDraftRequest(null);
     navigate(`/studio?draft=${encodeURIComponent(record.draftId)}`, { replace: true });
-  }, [draftQuery.data, draftQuery.error, draftQuery.isFetching, navigate, pendingDraftId]);
+  }, [
+    draftQuery.data,
+    draftQuery.dataUpdatedAt,
+    draftQuery.error,
+    draftQuery.isFetching,
+    navigate,
+    pendingDraftRequest,
+  ]);
 
   useEffect(() => {
     if (!draftId || activeDraftId === draftId) return;
@@ -171,7 +184,7 @@ export function StudioShell({
       if (nextDraftId === activeDraftId) {
         setActiveDraftId(null);
         setInitialPayload(null);
-        setPendingDraftId(null);
+        setPendingDraftRequest(null);
         navigate("/studio", { replace: true });
       }
     } catch (error) {
