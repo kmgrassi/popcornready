@@ -21,6 +21,7 @@ import {
   type StartUploadedFootageRunInput,
   type WorkspaceAssetSource,
 } from "./api-client";
+import { projectQueryKeys } from "./project-queries";
 import { dashboardApi } from "./v1/dashboard/client";
 import type { GenerationRunDetail } from "./v1/generation-runs/status";
 
@@ -57,9 +58,6 @@ export const queryKeys = {
   project: (projectId: string) => ["projects", projectId] as const,
   projectStoryboard: (projectId: string) =>
     ["projects", projectId, "storyboard"] as const,
-  storyboardPage: (projectId: string | null) =>
-    ["storyboard-page", projectId ?? "studio"] as const,
-  projectWatch: (projectId: string) => ["projects", projectId, "watch"] as const,
   dashboardSummary: (workspaceId: string) =>
     ["dashboard", "summary", workspaceId] as const,
   workspaceGenerationRuns: (
@@ -244,24 +242,6 @@ export function useProjectStoryboardQuery(projectId: string, enabled = true) {
   });
 }
 
-export function useStoryboardPageQuery(routeProjectId: string | null) {
-  return useQuery({
-    queryKey: queryKeys.storyboardPage(routeProjectId),
-    queryFn: async () => {
-      if (routeProjectId) {
-        const { storyboard } = await v1Api.getProjectStoryboard(routeProjectId);
-        return { projectId: routeProjectId, storyboard };
-      }
-
-      const { project } = await v1Api.getStudioProject();
-      if (!project) return { projectId: null, storyboard: null };
-
-      const { storyboard } = await v1Api.getProjectStoryboard(project.id);
-      return { projectId: project.id, storyboard };
-    },
-  });
-}
-
 export function useSaveProjectStoryboardMutation(projectId: string) {
   const client = useQueryClient();
 
@@ -272,18 +252,11 @@ export function useSaveProjectStoryboardMutation(projectId: string) {
       client.setQueryData(queryKeys.projectStoryboard(projectId), {
         storyboard: data.storyboard,
       });
-      void client.invalidateQueries({ queryKey: queryKeys.storyboardPage(projectId) });
+      void client.invalidateQueries({
+        queryKey: projectQueryKeys.storyboardPage(projectId),
+      });
       void client.invalidateQueries({ queryKey: ["projects"] });
     },
-  });
-}
-
-export function useProjectWatchQuery(projectId: string, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.projectWatch(projectId),
-    queryFn: ({ signal }: { signal: QuerySignal }) =>
-      v1Api.getProjectWatch(projectId, signal),
-    enabled: enabled && Boolean(projectId),
   });
 }
 
