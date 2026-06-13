@@ -1498,6 +1498,41 @@ export async function createProject(input: {
   return { project: await mapProjectWithProjection(db, projectRow), briefVersion };
 }
 
+// Attach a brief to an EXISTING project: persists a brief data-asset and points
+// the project's active 'brief' selection at it, wrapped in a create_brief action
+// for provenance. This is the same persistence the createProject brief-block
+// runs; it is factored out so the orchestrator create_or_load_brief tool can
+// write a brief into a project it did not create.
+export async function addProjectBrief(input: {
+  workspaceId: string;
+  projectId: string;
+  brief: VideoBrief;
+}): Promise<V1BriefVersion> {
+  const db = getServiceSupabase();
+  const action = await createAction({
+    projectId: input.projectId,
+    tool: "create_brief",
+    status: "running",
+    params: { source: "create_or_load_brief" },
+    rationale: "Create the project brief asset via the orchestrator tool.",
+  });
+  const briefAsset = await insertDataAsset({
+    db,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    kind: "brief",
+    role: "current_brief",
+    content: input.brief,
+    createdByActionId: action.id,
+  });
+  await setActiveAssetSelection(db, input.projectId, "brief", briefAsset.id, action.id);
+  await updateAction(action.id, {
+    status: "applied",
+    outputAssetIds: [briefAsset.id],
+  });
+  return mapBriefVersion(briefAsset);
+}
+
 export async function getProject(
   workspaceId: string,
   projectId: string

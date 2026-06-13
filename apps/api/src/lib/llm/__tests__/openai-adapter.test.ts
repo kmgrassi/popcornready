@@ -19,12 +19,16 @@ const planShots: ToolSpec = {
   },
 };
 
-test("toOpenAITool wraps the spec as an OpenAI function tool", () => {
+test("toOpenAITool wraps the spec as an OpenAI function tool and sanitizes parameters", () => {
   const tool = toOpenAITool(planShots) as any;
   assert.equal(tool.type, "function");
   assert.equal(tool.function.name, "plan_shots");
   assert.equal(tool.function.description, "Plan scenes and beats.");
-  assert.deepEqual(tool.function.parameters, planShots.parameters);
+  // Tool-call parameters must be sanitized like the structured path, or OpenAI
+  // rejects the request before the model can call the tool.
+  assert.equal(tool.function.parameters.properties.goal.minLength, undefined);
+  assert.equal(tool.function.parameters.properties.goal.type, "string");
+  assert.deepEqual(tool.function.parameters.required, ["goal"]);
 });
 
 test("sanitizeForOpenAI strips keywords OpenAI tool parameters reject", () => {

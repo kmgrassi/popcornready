@@ -45,7 +45,11 @@ export function toOpenAITool(spec: ToolSpec): Record<string, unknown> {
     function: {
       name: spec.name,
       description: spec.description,
-      parameters: spec.parameters,
+      // Strip JSON Schema keywords OpenAI rejects (minLength, minimum, ...).
+      // The structured path already sanitizes; tool-call parameters must too,
+      // or a tool whose schema uses those keywords (e.g. plan_shots) fails the
+      // provider request before the model can call it.
+      parameters: sanitizeForOpenAI(spec.parameters as JsonSchema),
     },
   };
 }

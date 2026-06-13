@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "storage:smoke": "tsx scripts/storage-smoke.ts",
     "smoke:tool-calls": "tsx scripts/orchestrator-tool-call-smoke.ts",
+    "test:tools": "tsx scripts/tool-tests.ts",
     "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
