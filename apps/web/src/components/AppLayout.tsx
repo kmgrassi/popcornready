@@ -1,10 +1,9 @@
 import {
-  useEffect,
   useLayoutEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   Link,
   Navigate,
@@ -20,7 +19,7 @@ import { LogoMark } from "./LogoMark";
 import { CommandPalette } from "./palette/Palette";
 import ThemeToggle from "./ThemeToggle";
 import { Button, ButtonLink } from "./ui/Button";
-import { v1Api, type MeResponse } from "../lib/api-client";
+import { queryClient, useMeQuery } from "../lib/queryClient";
 import styles from "./AppLayout.module.css";
 
 const STORAGE_KEY = "popcorn-ready-theme";
@@ -98,34 +97,19 @@ export function AuthenticatedAppLayout() {
   const auth = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [meError, setMeError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (auth.status === "loading") return;
-    // Unauthenticated: skip in production (we redirect to /login below), but in
-    // dev autopilot still load /me so the local workspace identity populates.
-    if (auth.status === "unauthenticated" && !DEV_AUTOPILOT) return;
-
-    let cancelled = false;
-
-    v1Api
-      .me()
-      .then((payload) => {
-        if (cancelled) return;
-        setMe(payload);
-        setMeError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setMe(null);
-        setMeError(err instanceof Error ? err.message : String(err));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [auth.status]);
+  const authScope = auth.user?.id ?? (DEV_AUTOPILOT ? "dev-autopilot" : auth.status);
+  const meQuery = useMeQuery(authScope, {
+    enabled:
+      auth.status !== "loading" &&
+      (auth.status !== "unauthenticated" || DEV_AUTOPILOT),
+  });
+  const me = meQuery.data ?? null;
+  const meError =
+    meQuery.error instanceof Error
+      ? meQuery.error.message
+      : meQuery.error
+        ? String(meQuery.error)
+        : null;
 
   const accountLabel = useMemo(() => {
     if (auth.user?.email) return auth.user.email;
@@ -272,5 +256,9 @@ export function RootProviders({ children }: { children: ReactNode }) {
     applyStoredTheme();
   }, []);
 
-  return <AuthProvider>{children}</AuthProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>{children}</AuthProvider>
+    </QueryClientProvider>
+  );
 }

@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import type { GenerationRun } from "@popcorn/shared/v1/types";
 import { ProgressView } from "../components/progress/ProgressView";
-import { v1Api } from "../lib/api-client";
 import type { GenerationRunDetail } from "../lib/v1/generation-runs/status";
 import {
   clearLastRunHint,
   readLastRunHint,
   writeLastRunHint,
 } from "../lib/v1/generation-runs/recovery";
-
-const POLL_INTERVAL_MS = 2000;
-const REVIEW_POLL_INTERVAL_MS = 15000;
+import {
+  useGenerationRunQuery,
+  useUpdateGenerationRunMutation,
+} from "../lib/queryClient";
 
 function isTerminal(status: GenerationRun["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "canceled";
@@ -59,22 +59,26 @@ function RunProgress({
   runId: string;
   studioDraftId?: string | null;
 }) {
-  const [payload, setPayload] = useState<GenerationRunDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<
-    "approve" | "reject" | "cancel" | undefined
-  >();
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewFeedbackNote, setReviewFeedbackNote] = useState("");
-  const pollNowRef = useRef<(() => void) | null>(null);
   const hint = readLastRunHint(projectId);
   const studioReturnPath = studioDraftId ? studioReviewPath(studioDraftId) : null;
+  const runQuery = useGenerationRunQuery(projectId, runId);
+  const updateRun = useUpdateGenerationRunMutation(projectId, runId);
+  const payload = runQuery.data ?? null;
+  const error =
+    runQuery.error instanceof Error
+      ? runQuery.error.message
+      : runQuery.error
+        ? String(runQuery.error)
+        : null;
+  const actionPending = updateRun.isPending
+    ? updateRun.variables?.action
+    : undefined;
   const reviewGateKey = payload?.run.reviewGate?.stageId ?? null;
 
   const applyPayload = useCallback(
     (next: GenerationRunDetail) => {
-      setPayload(next);
-      setError(null);
       if (isTerminal(next.run.status)) {
         if (next.run.runId === runId) {
           writeLastRunHint(projectId, next.run);
@@ -87,50 +91,8 @@ function RunProgress({
   );
 
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const controller = new AbortController();
-
-    async function poll() {
-      try {
-        const data = await v1Api.getGenerationRun(projectId, runId, controller.signal);
-        if (cancelled) return;
-        applyPayload(data);
-
-        if (isTerminal(data.run.status)) return;
-        if (document.visibilityState === "hidden") return;
-        timer = setTimeout(
-          poll,
-          data.run.reviewGate ? REVIEW_POLL_INTERVAL_MS : POLL_INTERVAL_MS,
-        );
-      } catch (err) {
-        if (cancelled || controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-        timer = setTimeout(poll, POLL_INTERVAL_MS * 2);
-      }
-    }
-
-    void poll();
-    pollNowRef.current = () => {
-      if (timer) clearTimeout(timer);
-      void poll();
-    };
-
-    function onVisibilityChange() {
-      if (document.visibilityState !== "visible") return;
-      if (timer) clearTimeout(timer);
-      void poll();
-    }
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (timer) clearTimeout(timer);
-      pollNowRef.current = null;
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [applyPayload, projectId, runId]);
+    if (payload) applyPayload(payload);
+  }, [applyPayload, payload]);
 
   useEffect(() => {
     setReviewFeedbackNote("");
@@ -138,7 +100,6 @@ function RunProgress({
 
   async function runAction(action: "approve" | "reject" | "cancel", note?: string) {
     if (actionPending) return;
-    setActionPending(action);
     setActionError(null);
     try {
       const trimmedNote = note?.trim();
@@ -151,7 +112,7 @@ function RunProgress({
           : action === "approve" && trimmedNote
             ? { note: trimmedNote }
             : undefined;
-      const data = await v1Api.updateGenerationRun(projectId, runId, action, body);
+      const data = await updateRun.mutateAsync({ action, body });
       applyPayload(data);
       if (action === "approve" || action === "reject") {
         setReviewFeedbackNote("");
@@ -159,11 +120,9 @@ function RunProgress({
       if (action === "cancel") {
         clearLastRunHint(projectId);
       }
-      pollNowRef.current?.();
+      void runQuery.refetch();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setActionPending(undefined);
     }
   }
 
