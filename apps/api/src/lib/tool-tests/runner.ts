@@ -209,23 +209,36 @@ export interface RunSuiteOptions extends RunCaseOptions {
 export async function runToolTestSuite(
   options: RunSuiteOptions
 ): Promise<ToolTestReport> {
+  // Resolve the cases to run up front. A caseName that matches nothing is an
+  // error, not an empty (and falsely green) run — otherwise a misspelled filter
+  // looks like a passing verification when zero cases executed.
+  const planned: { battery: ToolBattery; testCase: ToolTestCase }[] = [];
+  for (const battery of options.batteries) {
+    for (const testCase of battery.cases) {
+      if (options.caseName && testCase.name !== options.caseName) continue;
+      planned.push({ battery, testCase });
+    }
+  }
+  if (options.caseName && planned.length === 0) {
+    const scope =
+      options.batteries.length === 1 ? ` for tool "${options.batteries[0].tool}"` : "";
+    throw new Error(`No tool-test case named "${options.caseName}"${scope}.`);
+  }
+
   // Reclaim sandboxes from any crashed prior runs before starting.
   await sweepOrphanSandboxes().catch(() => 0);
 
   const startedAt = nowIso();
   const results: ToolTestCaseResult[] = [];
 
-  for (const battery of options.batteries) {
-    for (const testCase of battery.cases) {
-      if (options.caseName && testCase.name !== options.caseName) continue;
-      results.push(
-        await runToolTestCase(battery, testCase, {
-          provider: options.provider,
-          keepArtifacts: options.keepArtifacts,
-          realRegistry: options.realRegistry,
-        })
-      );
-    }
+  for (const { battery, testCase } of planned) {
+    results.push(
+      await runToolTestCase(battery, testCase, {
+        provider: options.provider,
+        keepArtifacts: options.keepArtifacts,
+        realRegistry: options.realRegistry,
+      })
+    );
   }
 
   const tally = (status: ToolTestCaseResult["status"]) =>

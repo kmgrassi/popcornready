@@ -83,6 +83,15 @@ devToolTestsRouter.post(
       batteries = listBatteries();
     }
 
+    // A case filter that matches nothing is a client mistake, not a no-op pass.
+    if (body.case) {
+      const names = new Set(batteries.flatMap((battery) => battery.cases.map((c) => c.name)));
+      if (!names.has(body.case)) {
+        const scope = body.tool ? ` for tool "${body.tool}"` : "";
+        throw new ApiError("not_found", `No tool-test case named "${body.case}"${scope}.`);
+      }
+    }
+
     const report = await runToolTestSuite({
       batteries,
       caseName: body.case,
