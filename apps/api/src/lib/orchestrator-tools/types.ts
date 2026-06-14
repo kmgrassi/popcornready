@@ -87,6 +87,9 @@ export interface ToolExecutionContext {
   auth: AuthContext;
   projectId?: string;
   generationRunId?: string;
+  /** The orchestrator run driving this call — async tools' workers use it to
+   * resume the run when their job completes. */
+  orchestratorRunId?: string;
 }
 
 export interface ToolCostEstimate {

@@ -87,6 +87,15 @@ class FakeStore implements OrchestratorEngineStore {
       createdAt: `t${this.actions.length + 1}`,
     });
   }
+  async markInvocation(
+    actionId: string,
+    patch: { status: "applied" | "failed"; outputAssetIds?: string[] }
+  ) {
+    const action = this.actions.find((a) => a.id === actionId);
+    if (!action) return;
+    action.status = patch.status;
+    if (patch.outputAssetIds) action.outputAssetIds = patch.outputAssetIds;
+  }
 }
 
 function fakeRegistry(
@@ -198,9 +207,14 @@ test("parks on an accepted async job, then resumes to completion when the job su
 
   const resumed = await resumeOrchestratorRun(
     "run1",
-    deps(store, model, registry, { jobs: { getJob: async () => ({ status: "succeeded" }) } })
+    deps(store, model, registry, {
+      jobs: { getJob: async () => ({ status: "succeeded", result: { assetIds: ["tile_1", "tile_2"] } }) },
+    })
   );
   assert.equal(resumed.status, "succeeded");
+  // the parking action is finalized with the assets its job produced
+  assert.equal(store.actions[0].status, "applied");
+  assert.deepEqual(store.actions[0].outputAssetIds, ["tile_1", "tile_2"]);
 });
 
 test("stays parked when the resume job is not yet terminal", async () => {

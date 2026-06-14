@@ -63,6 +63,7 @@ import {
   type StudioDraftSummary,
 } from "@popcorn/shared/v1/studio-drafts";
 import type { EditPlan } from "@popcorn/shared/types";
+import type { Asset } from "@popcorn/shared/assets/types";
 import {
   getGenerationRunStore,
   type GenerationRunsStore,
@@ -1589,6 +1590,91 @@ export async function addProjectPlan(input: {
     outputAssetIds: [planAsset.id],
   });
   return { planAssetId: planAsset.id };
+}
+
+export interface ActiveProjectPlan {
+  plan: EditPlan;
+  /** The plan asset id — recorded as the input of anything derived from it. */
+  assetId: string;
+  /** The plan asset's content hash — the stale-detection fingerprint. */
+  contentHash: string;
+}
+
+// The project's active shot plan (mirrors getActiveProjectBrief). The storyboard
+// stage reads this; the model only decides *when* to generate.
+export async function getActiveProjectPlan(
+  projectId: string
+): Promise<ActiveProjectPlan | null> {
+  const db = getServiceSupabase();
+  const planAsset = await selectedDataAsset(db, projectId, "plan", "plan");
+  if (!planAsset) return null;
+  return {
+    plan: unmarkedContent<EditPlan>(planAsset.content),
+    assetId: planAsset.id,
+    contentHash: planAsset.content_hash ?? "",
+  };
+}
+
+export interface PersistedStoryboardTile {
+  beatId: string;
+  assetId: string;
+}
+
+// Persist generated storyboard tiles (one per beat) as image asset rows, each
+// recording the plan as its input so a plan/brief change marks the tiles stale.
+// The relational storyboard (storyboards/scenes/panels) links to these via
+// panel.image_asset_id — see buildStoryboardForPlan.
+export async function addStoryboardTiles(input: {
+  workspaceId: string;
+  projectId: string;
+  planAssetId: string;
+  planContentHash: string;
+  tiles: Asset[];
+  createdByActionId?: string;
+}): Promise<PersistedStoryboardTile[]> {
+  const now = new Date().toISOString();
+  const persisted: PersistedStoryboardTile[] = [];
+  for (let i = 0; i < input.tiles.length; i += 1) {
+    const tile = input.tiles[i];
+    const beatId = tile.depicts?.beatId ?? "";
+    const asset: V1Asset = {
+      id: "",
+      schemaVersion: SCHEMA_VERSIONS.asset,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      kind: "image",
+      filename: tile.media.filename,
+      status: "ready",
+      source: { type: "generated", generatedAssetId: "" },
+      remoteUrl: tile.media.url,
+      durationSec: tile.media.durationSec,
+      context: tile.description ? { summary: tile.description } : undefined,
+      provenance: {
+        provider: tile.provenance?.provider ?? "mock",
+        ...(tile.provenance?.model ? { model: tile.provenance.model } : {}),
+        prompt: tile.provenance?.prompt ?? "",
+        ...(beatId ? { beatId } : {}),
+      },
+      graphInputs: [
+        {
+          assetId: input.planAssetId,
+          relation: "input",
+          role: "plan",
+          position: i,
+          ...(input.planContentHash ? { contentHash: input.planContentHash } : {}),
+        },
+      ],
+      contentHash: canonicalContentHash({ url: tile.media.url, beatId }),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const created = await addAsset(
+      asset,
+      input.createdByActionId ? { createdByActionId: input.createdByActionId } : {}
+    );
+    persisted.push({ beatId, assetId: created.id });
+  }
+  return persisted;
 }
 
 export async function getProject(

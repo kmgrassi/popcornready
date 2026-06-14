@@ -1,10 +1,15 @@
 import { createBriefTool, type CreateBriefDeps } from "./create-or-load-brief";
+import {
+  createGenerateStoryboardTool,
+  type GenerateStoryboardDeps,
+} from "./generate-storyboard";
 import { createPlanShotsTool, type PlanShotsDeps } from "./plan-shots";
 import { ToolRegistry } from "./registry";
 
 export interface DefaultToolRegistryDeps {
   planShots?: Partial<PlanShotsDeps>;
   createBrief?: Partial<CreateBriefDeps>;
+  generateStoryboard?: Partial<GenerateStoryboardDeps>;
 }
 
 export function createDefaultToolRegistry(
@@ -13,5 +18,6 @@ export function createDefaultToolRegistry(
   const registry = new ToolRegistry();
   registry.register(createBriefTool(deps.createBrief));
   registry.register(createPlanShotsTool(deps.planShots));
+  registry.register(createGenerateStoryboardTool(deps.generateStoryboard));
   return registry;
 }
