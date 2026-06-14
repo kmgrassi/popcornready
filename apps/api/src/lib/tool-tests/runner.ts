@@ -76,7 +76,7 @@ export async function runToolTestCase(
     sandbox = await createSandbox();
     const registry = toOrchestratorRegistry(
       real,
-      testCase.availableTools === "all" ? {} : { only: battery.tool }
+      testCase.availableTools === "all" ? { includeStubs: true } : { only: battery.tool }
     );
 
     const run: OrchestratorRun = {
