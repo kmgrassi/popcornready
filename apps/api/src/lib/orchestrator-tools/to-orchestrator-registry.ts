@@ -22,6 +22,7 @@ import type { ToolRegistry as RealToolRegistry } from "./registry";
 function bridgeContext(context: OrchestratorContext): {
   auth: AuthContext;
   projectId?: string;
+  orchestratorRunId?: string;
 } {
   const auth: AuthContext = {
     mode: "local",
@@ -29,7 +30,11 @@ function bridgeContext(context: OrchestratorContext): {
     workspaceId: context.workspaceId,
     isLocal: true,
   };
-  return { auth, projectId: context.projectId };
+  return {
+    auth,
+    projectId: context.projectId,
+    orchestratorRunId: context.orchestratorRunId,
+  };
 }
 
 function bridgeTool(real: RealToolRegistry, name: ToolName): OrchestratorToolDefinition {

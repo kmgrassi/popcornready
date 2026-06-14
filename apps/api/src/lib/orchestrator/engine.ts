@@ -9,7 +9,7 @@
 // All side effects are injectable (store, jobs, model, registry) so the loop is
 // unit-testable with fakes — no DB, no network.
 
-import { createAction } from "@/lib/api/v1/store";
+import { createAction, updateAction } from "@/lib/api/v1/store";
 import {
   getOrchestratorRun,
   listRunActions,
@@ -54,10 +54,21 @@ export interface OrchestratorEngineStore {
   markGateReached(runId: string, stage: string): Promise<OrchestratorRunGate | null>;
   listRunActions(runId: string): Promise<RunActionSummary[]>;
   recordInvocation(input: InvocationRecord): Promise<void>;
+  // Finalize a previously-recorded (running) invocation once its job is terminal.
+  markInvocation(
+    actionId: string,
+    patch: {
+      status: "applied" | "failed";
+      outputAssetIds?: string[];
+      error?: Record<string, unknown>;
+    }
+  ): Promise<void>;
 }
 
 export interface JobStatusReader {
-  getJob(jobId: string): Promise<{ status: string } | null | undefined>;
+  getJob(
+    jobId: string
+  ): Promise<{ status: string; result?: unknown } | null | undefined>;
 }
 
 export interface EngineDeps {
@@ -89,6 +100,15 @@ export function defaultEngineStore(): OrchestratorEngineStore {
         jobIds: input.jobIds,
         estimatedCostUsd: input.costUsd,
         error: input.error,
+      });
+    },
+    async markInvocation(actionId, patch) {
+      await updateAction(actionId, {
+        status: patch.status,
+        ...(patch.outputAssetIds !== undefined
+          ? { outputAssetIds: patch.outputAssetIds }
+          : {}),
+        ...(patch.error !== undefined ? { error: patch.error } : {}),
       });
     },
   };
@@ -146,27 +166,45 @@ export async function resumeOrchestratorRun(
   if (run.status === "running") return driveGuarded(run, r);
   if (run.status !== "waiting") return run;
 
-  // Determine the parking job (latest in-flight action carrying a job id).
+  // Determine the parking action (latest in-flight action carrying a job id).
   const actions = await r.store.listRunActions(runId);
-  const parkingJobId = [...actions]
+  const parkingAction = [...actions]
     .reverse()
-    .find((action) => action.status === "running" && action.jobIds.length > 0)
-    ?.jobIds.at(-1);
+    .find((action) => action.status === "running" && action.jobIds.length > 0);
+  const parkingJobId = parkingAction?.jobIds.at(-1);
 
-  if (parkingJobId) {
+  if (parkingAction && parkingJobId) {
     const job = await r.jobs.getJob(parkingJobId);
     if (!job) return run; // unknown job — leave parked for the sweeper
     if (job.status === "failed" || job.status === "canceled") {
+      await r.store.markInvocation(parkingAction.id, {
+        status: "failed",
+        error: { kind: "provider_failed", message: `job ${parkingJobId} ended ${job.status}` },
+      });
       return finish(run, "failed", r, {
         kind: "provider_failed",
         message: `parking job ${parkingJobId} ended ${job.status}`,
       });
     }
     if (job.status !== "succeeded") return run; // still running — stay parked
+    // Job done → finalize the parking action with the assets it produced.
+    await r.store.markInvocation(parkingAction.id, {
+      status: "applied",
+      outputAssetIds: jobAssetIds(job.result),
+    });
   }
-  // Not job-parked (or job done) → it's a gate the caller has resolved. Continue.
+  // Job done (or gate the caller resolved) → continue the loop.
   run = await r.store.updateOrchestratorRun(runId, { status: "running" });
   return driveGuarded(run, r);
+}
+
+// Async tool jobs report their produced assets as { assetIds: string[] }.
+function jobAssetIds(result: unknown): string[] {
+  if (result && typeof result === "object" && "assetIds" in result) {
+    const ids = (result as { assetIds?: unknown }).assetIds;
+    if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string");
+  }
+  return [];
 }
 
 type Resolved = ReturnType<typeof resolved>;

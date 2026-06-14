@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { EditPlan } from "@popcorn/shared/types";
 import type { AuthContext } from "./auth";
 import { ApiError, notFound } from "./errors";
 import { getProject } from "./store";
@@ -1135,4 +1136,71 @@ export async function deletePanel(input: {
     .eq("beat_id", input.beatId)
     .eq("id", input.panelId);
   throwOnError(error, "deletePanel");
+}
+
+// Build the relational storyboard for a plan: one scene per plan scene, one beat
+// per plan beat, and a selected panel per beat linking to its generated tile
+// asset. The storyboard links to the plan via plan_asset_id (provenance), and the
+// per-beat tile assets independently record the plan as their input (stale graph).
+export async function buildStoryboardForPlan(input: {
+  auth: AuthContext;
+  projectId: string;
+  planAssetId: string;
+  plan: EditPlan;
+  /** beatId -> persisted tile image asset id. */
+  tileAssetByBeatId: Map<string, string>;
+}): Promise<{ storyboardId: string; panelCount: number }> {
+  const storyboard = await createStoryboard({
+    auth: input.auth,
+    projectId: input.projectId,
+    data: { planAssetId: input.planAssetId, status: "ready" },
+  });
+
+  let panelCount = 0;
+  for (let s = 0; s < input.plan.scenes.length; s += 1) {
+    const scene = input.plan.scenes[s];
+    const sbScene = await createScene({
+      auth: input.auth,
+      projectId: input.projectId,
+      storyboardId: storyboard.id,
+      data: {
+        sceneIndex: s,
+        title: scene.name ?? null,
+        setting: scene.setting ?? null,
+        mood: scene.mood ?? null,
+        status: "ready",
+      },
+    });
+
+    for (let b = 0; b < scene.beats.length; b += 1) {
+      const beat = scene.beats[b];
+      const sbBeat = await createBeat({
+        auth: input.auth,
+        projectId: input.projectId,
+        storyboardId: storyboard.id,
+        sceneId: sbScene.id,
+        data: {
+          beatIndex: b,
+          intent: beat.intent ?? "",
+          durationSec: beat.durationSec ?? null,
+          status: "ready",
+        },
+      });
+
+      const tileAssetId = beat.id ? input.tileAssetByBeatId.get(beat.id) : undefined;
+      if (tileAssetId) {
+        await createPanel({
+          auth: input.auth,
+          projectId: input.projectId,
+          storyboardId: storyboard.id,
+          sceneId: sbScene.id,
+          beatId: sbBeat.id,
+          data: { panelIndex: 0, imageAssetId: tileAssetId, isSelected: true, status: "ready" },
+        });
+        panelCount += 1;
+      }
+    }
+  }
+
+  return { storyboardId: storyboard.id, panelCount };
 }
