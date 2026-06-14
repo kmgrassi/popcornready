@@ -1646,7 +1646,11 @@ export async function addStoryboardTiles(input: {
       filename: tile.media.filename,
       status: "ready",
       source: { type: "generated", generatedAssetId: "" },
-      remoteUrl: tile.media.url,
+      // The primitive already wrote the bytes to the local generated dir; persist
+      // its storage-relative locator as storageKey (NOT remoteUrl) so
+      // resolveAssetUrl converts it to the API-served /generated/... URL. (remoteUrl
+      // is returned verbatim and would 404 the panel images in local/dev.)
+      storageKey: tile.media.url,
       durationSec: tile.media.durationSec,
       context: tile.description ? { summary: tile.description } : undefined,
       provenance: {
