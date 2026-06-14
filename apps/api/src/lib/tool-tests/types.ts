@@ -42,6 +42,12 @@ export interface ToolTestCase {
   priorResults?: unknown[];
   /** "pending" cases are skipped (the tool is not wired yet). Defaults to "active". */
   status?: "active" | "pending";
+  /**
+   * Seed prerequisite graph state in the sandbox before the model turn runs
+   * (e.g. a brief before plan_shots, a plan before generate_storyboard). Lets a
+   * tool with a precondition be tested in isolation.
+   */
+  setup?: (ctx: { sandbox: Sandbox }) => Promise<void> | void;
   expect?: ToolTestExpectation;
   /** Custom assertion hook; return a list of failure strings ([] = pass). */
   verify?: (ctx: VerifyContext) => Promise<string[]> | string[];

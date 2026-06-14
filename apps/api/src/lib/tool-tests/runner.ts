@@ -74,6 +74,7 @@ export async function runToolTestCase(
 
   try {
     sandbox = await createSandbox();
+    if (testCase.setup) await testCase.setup({ sandbox });
     const registry = toOrchestratorRegistry(
       real,
       testCase.availableTools === "all" ? { includeStubs: true } : { only: battery.tool }
