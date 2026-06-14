@@ -25,7 +25,8 @@ import { AsyncLocalStorage } from "async_hooks";
 import { randomUUID } from "crypto";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { isMissingRow, throwDatabaseError } from "../../supabase/db-errors";
+import { isMissingRow } from "../../supabase/db-errors";
+import { iso, markedJson, throwOnError, unmarkedJson } from "./store-internal";
 import {
   canonicalContentHash,
   graphInputsFromProvenance,
@@ -260,6 +261,7 @@ export interface V1Action {
 export interface CreateActionInput {
   projectId: string;
   runId?: string;
+  orchestratorRunId?: string;
   tool: string;
   status?: ActionStatus;
   params?: Record<string, unknown>;
@@ -374,17 +376,11 @@ function getRequestSupabaseOrService(): SupabaseClient {
 
 // Normalize a DB timestamptz (or any date-ish value) to canonical ISO so cursor
 // pagination ordering is stable across the JSON-string and Postgres backends.
-function iso(value: string | null | undefined): string {
-  if (!value) return new Date(0).toISOString();
-  return new Date(value).toISOString();
-}
-
 // supabase-js returns `PGRST116` when a `.single()` lookup matches no rows.
 // Callers translate that into notFound/null; other DB failures use the typed
 // database_error envelope instead of leaking as generic internal errors.
+// iso/throwOnError/markedJson/unmarkedJson now live in ./store-internal.
 const isNoRows = isMissingRow;
-const throwOnError = (error: Parameters<typeof throwDatabaseError>[1], context: string) =>
-  throwDatabaseError(`store.${context}`, error);
 
 export async function defaultVisibilityForWorkspace(
   db: SupabaseClient,
@@ -578,24 +574,6 @@ interface AssetFingerprintRow {
   id: string;
   content_hash: string | null;
   inputs_fingerprint: string | null;
-}
-
-function markedJson(
-  marker: string,
-  value: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (value === undefined) return undefined;
-  return { schema_version: marker, ...value };
-}
-
-function unmarkedJson(
-  value: Record<string, unknown> | null
-): Record<string, unknown> | undefined {
-  if (!value) return undefined;
-  const { schema_version: _schemaVersion, schema: _schema, ...rest } = value;
-  void _schemaVersion;
-  void _schema;
-  return rest;
 }
 
 function mapAction(row: ActionRow): V1Action {
@@ -861,6 +839,7 @@ export async function createAction(input: CreateActionInput): Promise<V1Action> 
       schema_version: "action.v1",
       project_id: input.projectId,
       run_id: input.runId ?? null,
+      orchestrator_run_id: input.orchestratorRunId ?? null,
       tool: input.tool,
       status: input.status ?? "proposed",
       params: markedJson("action_params.v1", input.params ?? {}) ?? {},

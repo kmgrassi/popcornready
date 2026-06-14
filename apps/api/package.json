@@ -11,6 +11,7 @@
     "storage:smoke": "tsx scripts/storage-smoke.ts",
     "smoke:tool-calls": "tsx scripts/orchestrator-tool-call-smoke.ts",
     "test:tools": "tsx scripts/tool-tests.ts",
+    "orchestrator:run": "tsx scripts/orchestrator-run.ts",
     "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {

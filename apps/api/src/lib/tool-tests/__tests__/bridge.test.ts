@@ -68,10 +68,20 @@ test("bridged execute delegates to the real registry and synthesizes auth", asyn
   assert.equal(seen?.projectId, "proj_test");
 });
 
-test("all-mode exposes the full vocabulary with stubs for unimplemented tools", async () => {
+test("default mode exposes only the wired tools (no stubs)", () => {
   const real = new ToolRegistry();
   real.register(fakeTool());
   const registry = toOrchestratorRegistry(real);
+
+  assert.equal(registry.size, 1);
+  assert.ok(registry.has("plan_shots"));
+  assert.equal(registry.has("export_video"), false);
+});
+
+test("includeStubs exposes the full vocabulary with stubs for unimplemented tools", async () => {
+  const real = new ToolRegistry();
+  real.register(fakeTool());
+  const registry = toOrchestratorRegistry(real, { includeStubs: true });
 
   assert.equal(registry.size, TOOL_NAMES.length);
 
