@@ -42,11 +42,17 @@ const sampleBrief: VideoBrief = {
   style: "deadpan",
 };
 
+const activeBrief = {
+  brief: sampleBrief,
+  assetId: "brief_asset_1",
+  contentHash: "brief_hash_1",
+};
+
 // Deps that satisfy plan_shots without touching the DB.
 function planShotsDeps(over: Partial<Parameters<typeof createPlanShotsTool>[0]> = {}) {
   return {
     planEdit: async () => samplePlan,
-    getActiveProjectBrief: async () => sampleBrief,
+    getActiveProjectBrief: async () => activeBrief,
     addProjectPlan: async () => ({ planAssetId: "plan_asset_1" }),
     ...over,
   };
@@ -97,7 +103,7 @@ test("plan_shots validates input before reading the brief or calling the agent",
       },
       getActiveProjectBrief: async () => {
         briefCalls += 1;
-        return sampleBrief;
+        return activeBrief;
       },
     }),
   });
@@ -143,18 +149,20 @@ test("plan_shots returns precondition_unmet (suggesting the brief) when none exi
   assert.equal(planCalls, 0, "must not plan without a brief");
 });
 
-test("plan_shots derives the plan from the brief and persists it", async () => {
+test("plan_shots derives the plan from the brief and persists it with brief provenance", async () => {
   let planEditInput: { goal: string; aspectRatio: string } | undefined;
-  let persisted: EditPlan | undefined;
+  let planInput:
+    | { plan: EditPlan; briefAssetId?: string; briefContentHash?: string }
+    | undefined;
   const registry = createDefaultToolRegistry({
     planShots: planShotsDeps({
-      getActiveProjectBrief: async () => sampleBrief,
+      getActiveProjectBrief: async () => activeBrief,
       planEdit: async (input) => {
         planEditInput = input;
         return samplePlan;
       },
-      addProjectPlan: async ({ plan }) => {
-        persisted = plan;
+      addProjectPlan: async (i) => {
+        planInput = i;
         return { planAssetId: "plan_asset_1" };
       },
     }),
@@ -170,7 +178,10 @@ test("plan_shots derives the plan from the brief and persists it", async () => {
   assert.equal(planEditInput?.goal, sampleBrief.goal);
   assert.equal(planEditInput?.aspectRatio, sampleBrief.aspectRatio);
   // the planned EditPlan is what gets persisted
-  assert.equal(persisted, samplePlan);
+  assert.equal(planInput?.plan, samplePlan);
+  // the active brief is recorded as the plan's input (provenance / stale graph)
+  assert.equal(planInput?.briefAssetId, "brief_asset_1");
+  assert.equal(planInput?.briefContentHash, "brief_hash_1");
 
   assert.equal(result.status, "succeeded");
   if (result.status === "succeeded") {

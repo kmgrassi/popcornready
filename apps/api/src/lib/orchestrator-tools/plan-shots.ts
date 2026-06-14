@@ -175,10 +175,11 @@ export function createPlanShotsTool(
         };
       }
 
-      const brief = await resolved.getActiveProjectBrief(context.projectId);
-      if (!brief) {
+      const active = await resolved.getActiveProjectBrief(context.projectId);
+      if (!active) {
         return briefRequired();
       }
+      const { brief } = active;
 
       const plan = await resolved.planEdit({
         goal: brief.goal,
@@ -189,10 +190,14 @@ export function createPlanShotsTool(
         feedback: input.feedback ?? null,
       });
 
+      // Record the brief as the plan's input so a brief replacement marks the
+      // plan (and its downstream) stale.
       const { planAssetId } = await resolved.addProjectPlan({
         workspaceId: context.auth.workspaceId,
         projectId: context.projectId,
         plan,
+        briefAssetId: active.assetId,
+        briefContentHash: active.contentHash,
       });
 
       return {

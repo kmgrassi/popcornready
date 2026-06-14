@@ -957,6 +957,9 @@ async function insertDataAsset(input: {
   kind: "brief" | "beat" | "plan";
   role: string;
   content: unknown;
+  // Upstream asset snapshot. The DB trigger mirrors this into asset_edges, so the
+  // dependency/stale graph sees this asset as a consumer of its inputs.
+  inputs?: GraphAssetInput[];
   lineageId?: string;
   version?: number;
   createdByActionId?: string;
@@ -964,6 +967,7 @@ async function insertDataAsset(input: {
   const now = new Date().toISOString();
   const visibility = await defaultVisibilityForWorkspace(input.db, input.workspaceId);
   const content = markedContent(input.kind, input.content);
+  const inputs = input.inputs ?? [];
   const row: Record<string, unknown> = {
     schema_version: "asset.v2",
     workspace_id: input.workspaceId,
@@ -974,7 +978,8 @@ async function insertDataAsset(input: {
     role: input.role,
     content,
     content_hash: canonicalContentHash(content),
-    inputs_fingerprint: inputsFingerprint([], null),
+    inputs,
+    inputs_fingerprint: inputsFingerprint(inputs, null),
     visibility,
     created_at: now,
     updated_at: now,
@@ -1516,28 +1521,56 @@ export async function addProjectBrief(input: {
 // Read the project's active brief (the 'brief' selection slot, falling back to
 // the latest brief asset). Returns the unwrapped VideoBrief or null. Used by the
 // plan_shots tool's precondition check.
+export interface ActiveProjectBrief {
+  brief: VideoBrief;
+  /** The brief asset's id — recorded as the input of anything derived from it. */
+  assetId: string;
+  /** The brief asset's content hash — the stale-detection fingerprint. */
+  contentHash: string;
+}
+
 export async function getActiveProjectBrief(
   projectId: string
-): Promise<VideoBrief | null> {
+): Promise<ActiveProjectBrief | null> {
   const db = getServiceSupabase();
   const briefAsset = await selectedDataAsset(db, projectId, "brief", "brief");
-  return briefAsset ? unmarkedContent<VideoBrief>(briefAsset.content) : null;
+  if (!briefAsset) return null;
+  return {
+    brief: unmarkedContent<VideoBrief>(briefAsset.content),
+    assetId: briefAsset.id,
+    contentHash: briefAsset.content_hash ?? "",
+  };
 }
 
 // Persist a plan (scenes + beats) as the project's active 'plan' data asset,
-// wrapped in a plan_shots action for provenance. Mirrors addProjectBrief; the
-// plan is the immutable upstream that storyboard/keyframe/etc. read.
+// wrapped in a plan_shots action for provenance. The plan records the active brief
+// as its input (asset `inputs` + the action's `inputAssetIds`) so that replacing
+// the brief marks this plan — and everything downstream of it — stale.
 export async function addProjectPlan(input: {
   workspaceId: string;
   projectId: string;
   plan: EditPlan;
+  briefAssetId?: string;
+  briefContentHash?: string;
 }): Promise<{ planAssetId: string }> {
   const db = getServiceSupabase();
+  const planInputs: GraphAssetInput[] = input.briefAssetId
+    ? [
+        {
+          assetId: input.briefAssetId,
+          relation: "input",
+          role: "brief",
+          position: 0,
+          ...(input.briefContentHash ? { contentHash: input.briefContentHash } : {}),
+        },
+      ]
+    : [];
   const action = await createAction({
     projectId: input.projectId,
     tool: "plan_shots",
     status: "running",
     params: { source: "plan_shots" },
+    inputAssetIds: input.briefAssetId ? [input.briefAssetId] : [],
     rationale: "Persist the shot plan as the project's active plan asset.",
   });
   const planAsset = await insertDataAsset({
@@ -1547,6 +1580,7 @@ export async function addProjectPlan(input: {
     kind: "plan",
     role: "current_plan",
     content: input.plan,
+    inputs: planInputs,
     createdByActionId: action.id,
   });
   await setActiveAssetSelection(db, input.projectId, "plan", planAsset.id, action.id);
